@@ -30,19 +30,21 @@ class Electrode(BaseModel):
     v_upper_bound: float | None
 
     @model_validator(mode="after")
-    def validate_readout_requires_measure_channel(self):
+    def validate_readout_requires_measure_channel(self) -> "Electrode":
         if self.readout and self.measure_channel is None:
             raise ValueError("`measure_channel` must be specified when readout=True")
         return self
 
     @model_validator(mode="after")
-    def validate_control_channel_requires_measure_channel(self):
+    def validate_control_channel_requires_measure_channel(self) -> "Electrode":
         if not self.readout and self.control_channel is None:
             raise ValueError("`control_channel` must be specified when readout=False")
         return self
 
     @model_validator(mode="after")
-    def validate_control_channel_requires_v_lower_bound_and_v_upper_bound(self):
+    def validate_control_channel_requires_v_lower_bound_and_v_upper_bound(
+        self,
+    ) -> "Electrode":
         if (
             not self.readout
             and self.control_channel is not None
@@ -103,10 +105,10 @@ class BaseInstrumentConfig(BaseModelWithConfig):
     type: InstrumentType
 
     @model_validator(mode="after")
-    def check_comm_type(cls, properties):
-        if not (properties.ip_addr or properties.serial_addr):
+    def check_comm_type(self) -> "BaseInstrumentConfig":
+        if not (self.ip_addr or self.serial_addr):
             raise ValueError("Either 'ip_addr' or 'serial_addr' must be provided")
-        return properties
+        return self
 
 
 class MeasurementInstrumentConfig(BaseInstrumentConfig):
@@ -122,7 +124,7 @@ class MeasurementInstrumentConfig(BaseInstrumentConfig):
     )
 
     @model_validator(mode="after")
-    def validate_timing_constraints(self):
+    def validate_timing_constraints(self) -> "MeasurementInstrumentConfig":
         """Validate logical constraints between timing parameters."""
         if self.sample_time > self.measurement_duration:
             raise ValueError(
@@ -154,10 +156,10 @@ class DeviceConfig(BaseModel):
     instruments: list[InstrumentConfig]
 
     @model_validator(mode="after")
-    def validate_unique_channels(self):
+    def validate_unique_channels(self) -> "DeviceConfig":
         """Ensure that all channels are unique across gates and contacts"""
-        control_channel_users = {}
-        measure_channel_users = {}
+        control_channel_users: dict[int, list[str]] = {}
+        measure_channel_users: dict[int, list[str]] = {}
         duplicates = []
 
         all_electrodes = {
@@ -185,11 +187,15 @@ class DeviceConfig(BaseModel):
         # Find duplicates
         for channel, users in control_channel_users.items():
             if len(users) > 1:
-                duplicates.extend([f"{user} control_channel {channel}" for user in users])
+                duplicates.extend(
+                    [f"{user} control_channel {channel}" for user in users]
+                )
 
         for channel, users in measure_channel_users.items():
             if len(users) > 1:
-                duplicates.extend([f"{user} measure_channel {channel}" for user in users])
+                duplicates.extend(
+                    [f"{user} measure_channel {channel}" for user in users]
+                )
 
         if duplicates:
             raise ValueError(f"Duplicate channels found: {', '.join(duplicates)}")
@@ -197,7 +203,7 @@ class DeviceConfig(BaseModel):
         return self
 
     @model_validator(mode="after")
-    def validate_required_instruments(self):
+    def validate_required_instruments(self) -> "DeviceConfig":
         """Ensure at least one control and one measurement instrument"""
         control_instruments = [
             i for i in self.instruments if i.type == InstrumentType.CONTROL
