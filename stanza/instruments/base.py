@@ -2,7 +2,11 @@ from functools import cached_property
 from typing import Any
 
 from stanza.instruments.mixins import ControlInstrumentMixin, MeasurementInstrumentMixin
-from stanza.models import ControlInstrumentConfig, MeasurementInstrumentConfig
+from stanza.models import (
+    BaseInstrumentConfig,
+    ControlInstrumentConfig,
+    MeasurementInstrumentConfig,
+)
 
 
 class BaseMeasurementInstrument(MeasurementInstrumentMixin):
@@ -57,6 +61,27 @@ class BaseControlInstrument(ControlInstrumentMixin):
         return {
             "name": self.name,
             "slew_rate": self.instrument_config.slew_rate,
+            "channels": {
+                channel_name: channel.channel_id
+                for channel_name, channel in self.channels.items()
+            },
+            "instrument_config": self.instrument_config.model_dump(),
+        }
+
+
+class BaseInstrument(MeasurementInstrumentMixin, ControlInstrumentMixin):
+    """Base class for instruments."""
+
+    def __init__(self, instrument_config: BaseInstrumentConfig) -> None:
+        super().__init__()
+        self.instrument_config = instrument_config
+        self.name = instrument_config.name
+
+    @cached_property
+    def instrument_info(self) -> dict[str, Any]:
+        """Get the instrument information."""
+        return {
+            "name": self.name,
             "channels": {
                 channel_name: channel.channel_id
                 for channel_name, channel in self.channels.items()

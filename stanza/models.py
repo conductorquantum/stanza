@@ -79,6 +79,7 @@ class ContactType(str, Enum):
 class InstrumentType(str, Enum):
     CONTROL = "CONTROL"
     MEASUREMENT = "MEASUREMENT"
+    GENERAL = "GENERAL"
 
 
 class Gate(Electrode):
