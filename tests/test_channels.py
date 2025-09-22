@@ -197,3 +197,28 @@ class TestInstrumentChannelBase:
 
         with pytest.raises(KeyError):
             channel.get_parameter_value("nonexistent")
+
+    def test_str_representation(self):
+        config = ChannelConfig(
+            name="test_channel", voltage_range=(-1.0, 1.0), control_channel=5
+        )
+        channel = ControlChannel(config=config)
+
+        str_repr = str(channel)
+        assert "Channel(name=test_channel" in str_repr
+        assert "channel_id=5" in str_repr
+        assert "config=" in str_repr
+        assert "parameters=" in str_repr
+
+    def test_channel_info(self):
+        config = ChannelConfig(
+            name="info_channel", voltage_range=(-2.0, 2.0), control_channel=3
+        )
+        channel = ControlChannel(config=config)
+
+        info = channel.channel_info
+        assert info["name"] == "info_channel"
+        assert info["channel_id"] == 3
+        assert info["config"] == config
+        assert "voltage" in info["parameters"]
+        assert "slew_rate" in info["parameters"]

@@ -135,6 +135,20 @@ class InstrumentChannel(ABC):
         self.parameters: dict[str, Parameter] = {}
         self._setup_parameters()
 
+    def __str__(self) -> str:
+        """Return a string representation of the channel."""
+        return f"Channel(name={self.name}, channel_id={self.channel_id}, config={self.config}, parameters={self.parameters})"
+
+    @property
+    def channel_info(self) -> dict[str, Any]:
+        """Return a dictionary of channel information."""
+        return {
+            "name": self.name,
+            "channel_id": self.channel_id,
+            "config": self.config,
+            "parameters": self.parameters,
+        }
+
     @abstractmethod
     def _setup_parameters(self) -> None:
         """Setup channel-specific parameters.
