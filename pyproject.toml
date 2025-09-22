@@ -54,6 +54,9 @@ test = [
     "pytest-cov>=4.0.0",
     "pytest-asyncio>=0.21.0"
 ]
+visa = [
+    "pyvisa>=1.11.0"
+]
 
 [project.urls]
 Homepage = "https://github.com/conductorquantum/stanza"

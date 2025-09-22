@@ -96,6 +96,20 @@ class TestBaseMeasurementInstrument:
         # Should be the same object reference (cached)
         assert info1 is info2
 
+    def test_teardown_measurement(self):
+        config = MeasurementInstrumentConfig(
+            name="test_measurement",
+            type=InstrumentType.MEASUREMENT,
+            ip_addr="192.168.1.1",
+            measurement_duration=1.0,
+            sample_time=0.5,
+        )
+
+        instrument = BaseMeasurementInstrument(config)
+
+        # teardown_measurement should not raise any exception (it's a pass through method)
+        instrument.teardown_measurement()
+
 
 class TestBaseControlInstrument:
     def test_initialization(self):

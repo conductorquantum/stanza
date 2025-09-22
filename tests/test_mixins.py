@@ -29,6 +29,29 @@ class TestInstrumentChannelMixin:
         assert retrieved_channel == channel
         assert "test_channel" in mixin.channels
 
+    def test_add_channel_with_custom_name(self):
+        mixin = InstrumentChannelMixin()
+
+        config = ChannelConfig(
+            name="test_channel", voltage_range=(-1.0, 1.0), control_channel=1
+        )
+        channel = ControlChannel(config=config)
+
+        mixin.add_channel("custom_name", channel)
+        retrieved_channel = mixin.get_channel("custom_name")
+
+        assert retrieved_channel == channel
+        assert "custom_name" in mixin.channels
+        assert "test_channel" not in mixin.channels
+
+    def test_add_channel_invalid_args(self):
+        mixin = InstrumentChannelMixin()
+
+        with pytest.raises(
+            ValueError, match="Must provide either channel or channel_name and channel"
+        ):
+            mixin.add_channel(None)
+
     def test_remove_channel(self):
         mixin = InstrumentChannelMixin()
 

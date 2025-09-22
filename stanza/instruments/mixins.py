@@ -10,9 +10,31 @@ class InstrumentChannelMixin:
     def __init__(self) -> None:
         self.channels: dict[str, InstrumentChannel] = {}
 
-    def add_channel(self, channel: InstrumentChannel) -> None:
-        """Add a channel to the instrument."""
-        self.channels[channel.name] = channel
+    def add_channel(
+        self,
+        channel_name_or_channel: str | InstrumentChannel | None,
+        channel: InstrumentChannel | None = None,
+    ) -> None:
+        """Add a channel to the instrument.
+
+        Can be called as:
+        - add_channel(channel) - uses channel.name as key
+        - add_channel(channel_name, channel) - uses provided name as key
+        """
+        if isinstance(channel_name_or_channel, InstrumentChannel):
+            actual_channel = channel_name_or_channel
+            actual_name = actual_channel.name
+        elif channel is not None:
+            actual_channel = channel
+            actual_name = (
+                channel_name_or_channel
+                if channel_name_or_channel is not None
+                else channel.name
+            )
+        else:
+            raise ValueError("Must provide either channel or channel_name and channel")
+
+        self.channels[actual_name] = actual_channel
 
     def get_channel(self, channel_name: str) -> InstrumentChannel:
         """Get a channel by name."""
