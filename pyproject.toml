@@ -52,9 +52,10 @@ docs = [
 test = [
     "pytest>=7.0.0",
     "pytest-cov>=4.0.0",
-    "pytest-asyncio>=0.21.0"
+    "pytest-asyncio>=0.21.0",
+    "pyvisa-sim>=0.7.0",
 ]
-visa = [
+pyvisa = [
     "pyvisa>=1.11.0"
 ]
 

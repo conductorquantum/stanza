@@ -41,10 +41,10 @@ class QDAC2ControlChannel(ControlChannel):
 
         voltage_param = self.get_parameter("voltage")
         voltage_param.setter = lambda v: self.driver.write(
-            f"sour:volt {v},@{self.channel_id}"
+            f"sour{self.channel_id}:volt {v}"
         )
         voltage_param.getter = lambda: float(
-            self.driver.query(f"sour:volt? @{self.channel_id}")
+            self.driver.query(f"sour{self.channel_id}:volt?")
         )
 
         slew_rate_param = self.get_parameter("slew_rate")
@@ -91,6 +91,7 @@ class QDAC2(BaseInstrument):
         current_range: QDAC2CurrentRange,
         channel_configs: dict[str, ChannelConfig],
         is_simulation: bool = False,
+        sim_file: str | None = None,
     ):
         self.name = instrument_config.name
         self.address = instrument_config.serial_addr
@@ -115,10 +116,11 @@ class QDAC2(BaseInstrument):
 
         if is_simulation:
             visa_addr = "ASRL2::INSTR"
+            logger.info("Using simulation mode for QDAC2")
         else:
             visa_addr = f"TCPIP::{self.address}::{self.port}::SOCKET"
 
-        self.driver = PyVisaDriver(visa_addr)
+        self.driver = PyVisaDriver(visa_addr, sim_file=sim_file)
         super().__init__(instrument_config)
         self._initialize_channels(channel_configs)
 

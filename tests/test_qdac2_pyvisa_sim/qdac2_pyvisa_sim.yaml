@@ -1,0 +1,281 @@
+spec: "1.0"
+devices:
+  qdac2_scpi:
+    eom:
+      ASRL INSTR:
+        q: "\n"
+        r: "\n"
+      USB INSTR:
+        q: "\n"
+        r: "\n"
+      TCPIP INSTR:
+        q: "\n"
+        r: "\n"
+      TCPIP SOCKET:
+        q: "\n"
+        r: "\n"  
+      GPIB INSTR:
+        q: "\n"
+        r: "\n"
+    dialogues:
+      - q: "*IDN?"
+        r: "QDevil,QDAC-II,QD2SIM1234,v0.20.2-42069-g53da8fc7"
+      - q: ":CHANnel:COUNt?"
+        r: "24"
+      - q: ":SYSTem:VERSion?"
+        r: "1.0"
+      - q: ":SYSTem:INFOrmation:MODEL?"
+        r: "QDAC-II"
+      - q: ":SYSTem:INFOrmation:SERial?"
+        r: "QD2SIM1234"
+      - q: ":SYSTem:ERRor?"
+        r: '0,"No error"'
+      - q: "*RST"
+        r: "OK"
+      - q: "*CLS"
+        r: "OK"
+    properties:
+      voltage_1:
+        default: 0.0
+        getter:
+          q: "sour1:volt?"
+          r: "{:.6f}"
+        setter:
+          q: "sour1:volt {:.6f}"
+        specs:
+          min: -10.0
+          max: 10.0
+          type: float
+      voltage_2:
+        default: 0.0
+        getter:
+          q: "sour2:volt?"
+          r: "{:.6f}"
+        setter:
+          q: "sour2:volt {:.6f}"
+        specs:
+          min: -10.0
+          max: 10.0
+          type: float
+      voltage_3:
+        default: 0.0
+        getter:
+          q: "sour3:volt?"
+          r: "{:.6f}"
+        setter:
+          q: "sour3:volt {:.6f}"
+        specs:
+          min: -10.0
+          max: 10.0
+          type: float
+      voltage_4:
+        default: 0.0
+        getter:
+          q: "sour4:volt?"
+          r: "{:.6f}"
+        setter:
+          q: "sour4:volt {:.6f}"
+        specs:
+          min: -10.0
+          max: 10.0
+          type: float
+      voltage_5:
+        default: 0.0
+        getter:
+          q: "sour5:volt?"
+          r: "{:.6f}"
+        setter:
+          q: "sour5:volt {:.6f}"
+        specs:
+          min: -10.0
+          max: 10.0
+          type: float
+      voltage_6:
+        default: 0.0
+        getter:
+          q: "sour6:volt?"
+          r: "{:.6f}"
+        setter:
+          q: "sour6:volt {:.6f}"
+        specs:
+          min: -10.0
+          max: 10.0
+          type: float
+      voltage_7:
+        default: 0.0
+        getter:
+          q: "sour7:volt?"
+          r: "{:.6f}"
+        setter:
+          q: "sour7:volt {:.6f}"
+        specs:
+          min: -10.0
+          max: 10.0
+          type: float
+      voltage_8:
+        default: 0.0
+        getter:
+          q: "sour8:volt?"
+          r: "{:.6f}"
+        setter:
+          q: "sour8:volt {:.6f}"
+        specs:
+          min: -10.0
+          max: 10.0
+          type: float
+      voltage_9:
+        default: 0.0
+        getter:
+          q: "sour9:volt?"
+          r: "{:.6f}"
+        setter:
+          q: "sour9:volt {:.6f}"
+        specs:
+          min: -10.0
+          max: 10.0
+          type: float
+      voltage_10:
+        default: 0.0
+        getter:
+          q: "sour10:volt?"
+          r: "{:.6f}"
+        setter:
+          q: "sour10:volt {:.6f}"
+        specs:
+          min: -10.0
+          max: 10.0
+          type: float
+      voltage_11:
+        default: 0.0
+        getter:
+          q: "sour11:volt?"
+          r: "{:.6f}"
+        setter:
+          q: "sour11:volt {:.6f}"
+        specs:
+          min: -10.0
+          max: 10.0
+          type: float
+      voltage_12:
+        default: 0.0
+        getter:
+          q: "sour12:volt?"
+          r: "{:.6f}"
+        setter:
+          q: "sour12:volt {:.6f}"
+        specs:
+          min: -10.0
+          max: 10.0
+          type: float
+      voltage_13:
+        default: 0.0
+        getter:
+          q: "sour13:volt?"
+          r: "{:.6f}"
+        setter:
+          q: "sour13:volt {:.6f}"
+        specs:
+          min: -10.0
+          max: 10.0
+          type: float
+      voltage_14:
+        default: 0.0
+        getter:
+          q: "sour14:volt?"
+          r: "{:.6f}"
+        setter:
+          q: "sour14:volt {:.6f}"
+        specs:
+          min: -10.0
+          max: 10.0
+          type: float
+      voltage_15:
+        default: 0.0
+        getter:
+          q: "sour15:volt?"
+          r: "{:.6f}"
+        setter:
+          q: "sour15:volt {:.6f}"
+        specs:
+          min: -10.0
+          max: 10.0
+          type: float
+      voltage_16:
+        default: 0.0
+        getter:
+          q: "sour16:volt?"
+          r: "{:.6f}"
+        setter:
+          q: "sour16:volt {:.6f}"
+        specs:
+          min: -10.0
+          max: 10.0
+          type: float
+      slew_rate_1:
+        default: 1000.0
+        getter:
+          q: "sour1:volt:slew?"
+          r: "{:.3f}"
+        setter:
+          q: "sour1:volt:slew {:.3f}"
+        specs:
+          min: 0.001
+          max: 1000.0
+          type: float
+      filter_1:
+        default: 1000.0
+        getter:
+          q: "sour1:filt?"
+          r: "{:.1f}"
+        setter:
+          q: "sour1:filt {:.1f}"
+        specs:
+          min: 1.0
+          max: 100000.0
+          type: float
+      current_1:
+        default: 0.000001
+        getter:
+          q: "READ1?"
+          r: "{:.9f}"
+        specs:
+          min: -0.001
+          max: 0.001
+          type: float
+      current_2:
+        default: 0.000001
+        getter:
+          q: "READ2?"
+          r: "{:.9f}"
+        specs:
+          min: -0.001
+          max: 0.001
+          type: float
+      current_3:
+        default: 0.000001
+        getter:
+          q: "READ3?"
+          r: "{:.9f}"
+        specs:
+          min: -0.001
+          max: 0.001
+          type: float
+      current_4:
+        default: 0.000001
+        getter:
+          q: "READ4?"
+          r: "{:.9f}"
+        specs:
+          min: -0.001
+          max: 0.001
+          type: float
+    dialogues_append:
+      - q: "sens:rang high,(@1,2,3,4)"
+        r: "OK"
+      - q: "sens:rang low,(@1,2,3,4)"
+        r: "OK"
+      - q: "sens:aper 0.001,(@1,2,3,4)"
+        r: "OK"
+resources:
+  ASRL2::INSTR:
+    device: qdac2_scpi

@@ -1,18 +1,28 @@
+from __future__ import annotations
+
+from typing import cast
+
 try:
-    import pyvisa as visa  # type: ignore[import-not-found]
+    import pyvisa as visa
+    from pyvisa.resources import MessageBasedResource
 except ImportError:
-    visa = None
+    visa = None  # type: ignore[assignment]
 
 
 class PyVisaDriver:
-    def __init__(self, visa_addr: str, lib: str = "@py"):
-        rm = visa.ResourceManager(lib)
-        self._visa = rm.open_resource(visa_addr)
+    def __init__(self, visa_addr: str, lib: str = "@py", sim_file: str | None = None):
+        if sim_file:
+            lib = f"{sim_file}@sim"
+        if visa is None:
+            raise ImportError("pyvisa is not installed")
+        rm: visa.ResourceManager = visa.ResourceManager(lib)
+        resource = rm.open_resource(visa_addr)
+        self._visa: MessageBasedResource = cast(MessageBasedResource, resource)
         self._visa.write_termination = "\n"
         self._visa.read_termination = "\n"
 
         if visa_addr.find("ASRL") != -1:
-            self._visa.baud_rate = 921600
+            self._visa.baud_rate = 921600  # type: ignore[attr-defined]
             self._visa.send_end = False
 
     def query(self, cmd: str) -> str:

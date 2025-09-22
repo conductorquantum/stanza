@@ -46,7 +46,7 @@ class TestQDAC2:
         assert qdac.address == "192.168.1.1"
         assert qdac.port == 5025
         assert qdac.current_range == QDAC2CurrentRange.HIGH
-        mock_driver_class.assert_called_once_with("ASRL2::INSTR")
+        mock_driver_class.assert_called_once_with("ASRL2::INSTR", sim_file=None)
 
     def test_initialization_with_tcp(self, mock_driver_class):
         mock_driver = Mock()
@@ -77,7 +77,9 @@ class TestQDAC2:
         assert qdac.current_range == QDAC2CurrentRange.LOW
         assert qdac.control_channels == [1]
         assert qdac.measurement_channels == [2]
-        mock_driver_class.assert_called_once_with("TCPIP::192.168.1.1::5025::SOCKET")
+        mock_driver_class.assert_called_once_with(
+            "TCPIP::192.168.1.1::5025::SOCKET", sim_file=None
+        )
 
     def test_set_current_range(self, mock_driver_class):
         mock_driver = Mock()
@@ -222,7 +224,7 @@ class TestQDAC2:
 
         # Test set_voltage
         qdac.set_voltage("gate1", 1.5)
-        mock_driver.write.assert_called_with("sour:volt 1.5,@1")
+        mock_driver.write.assert_called_with("sour1:volt 1.5")
 
         # Test get_voltage
         voltage = qdac.get_voltage("gate1")
@@ -293,7 +295,7 @@ class TestQDAC2ControlChannel:
         # Test voltage parameter
         voltage_param = channel.get_parameter("voltage")
         voltage_param.setter(1.5)
-        mock_driver.write.assert_called_with("sour:volt 1.5,@1")
+        mock_driver.write.assert_called_with("sour1:volt 1.5")
 
         voltage = voltage_param.getter()
         assert voltage == 1.5

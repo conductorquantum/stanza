@@ -73,7 +73,46 @@ class TestPyVisaDriver:
 
         mock_resource.close.assert_called_once()
 
+    @patch("stanza.pyvisa.visa")
+    def test_write_binary_values(self, mock_visa):
+        mock_rm = Mock()
+        mock_resource = Mock()
+        mock_visa.ResourceManager.return_value = mock_rm
+        mock_rm.open_resource.return_value = mock_resource
+
+        driver = PyVisaDriver("TCPIP::192.168.1.1::5025::SOCKET")
+        values = [1, 2, 3, 4]
+        driver.write_binary_values("DATA:BINARY", values)
+
+        mock_resource.write_binary_values.assert_called_once_with("DATA:BINARY", values)
+
+    @patch("stanza.pyvisa.visa")
+    def test_context_manager_exit(self, mock_visa):
+        mock_rm = Mock()
+        mock_resource = Mock()
+        mock_visa.ResourceManager.return_value = mock_rm
+        mock_rm.open_resource.return_value = mock_resource
+
+        driver = PyVisaDriver("TCPIP::192.168.1.1::5025::SOCKET")
+        driver.__exit__(None, None, None)
+
+        mock_resource.close.assert_called_once()
+
+    @patch("stanza.pyvisa.visa")
+    def test_initialization_with_sim_file(self, mock_visa):
+        mock_rm = Mock()
+        mock_resource = Mock()
+        mock_visa.ResourceManager.return_value = mock_rm
+        mock_rm.open_resource.return_value = mock_resource
+
+        PyVisaDriver("TCPIP::192.168.1.1::5025::SOCKET", sim_file="/path/to/sim")
+
+        mock_visa.ResourceManager.assert_called_once_with("/path/to/sim@sim")
+        mock_rm.open_resource.assert_called_once_with(
+            "TCPIP::192.168.1.1::5025::SOCKET"
+        )
+
     def test_visa_not_available(self):
         with patch("stanza.pyvisa.visa", None):
-            with pytest.raises(AttributeError):
+            with pytest.raises(ImportError):
                 PyVisaDriver("TCPIP::192.168.1.1::5025::SOCKET")
