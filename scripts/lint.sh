@@ -3,6 +3,6 @@
 set -e
 set -x 
 
-mypy operator_
-ruff check operator_ tests scripts
-ruff format operator_ tests --check
+mypy stanza
+ruff check stanza tests scripts
+ruff format stanza tests --check

@@ -1,11 +1,11 @@
-# Operator
+# stanza
 
-Operator, build tune up sequences for quantum computers fast. Easy to code. Easy to run.
+stanza, build tune up sequences for quantum computers fast. Easy to code. Easy to run.
 
 ## Installation
 
 ```bash
-pip install operator
+pip install stanza
 ```
 
 ## Usage

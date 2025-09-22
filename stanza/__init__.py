@@ -1,0 +1,3 @@
+"""stanza, build tune up sequences for quantum computers fast. Easy to code. Easy to run."""
+
+__version__ = "0.0.1a"

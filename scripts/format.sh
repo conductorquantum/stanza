@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
 set -x
 
-ruff check operator_ tests scripts --fix
-ruff format operator_ tests scripts
+ruff check stanza tests scripts --fix
+ruff format stanza tests scripts

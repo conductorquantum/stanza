@@ -1,6 +1,6 @@
 import pytest
 
-from operator_.models import (
+from stanza.models import (
     Contact,
     ContactType,
     ControlInstrumentConfig,
