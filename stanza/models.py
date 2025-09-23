@@ -124,6 +124,14 @@ class MeasurementInstrumentConfig(BaseInstrumentConfig):
         gt=0, default=1, description="The conversion factor from ADC counts to amperes"
     )
 
+    # OPX-specific fields
+    machine_type: str | None = Field(None, description="OPX machine type")
+    cluster_name: str | None = Field(None, description="OPX cluster name")
+    measurement_channels: list[int] | None = Field(
+        None, description="OPX measurement channels"
+    )
+    octave: str | None = Field(None, description="OPX octave configuration")
+
     @model_validator(mode="after")
     def validate_timing_constraints(self) -> "MeasurementInstrumentConfig":
         """Validate logical constraints between timing parameters."""

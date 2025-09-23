@@ -4,9 +4,9 @@ from warnings import warn
 import numpy as np
 
 try:
-    from qm.jobs.running_qm_job import RunningQmJob  # type: ignore[import-not-found]
+    from qm.jobs.running_qm_job import RunningQmJob
 except ImportError:
-    RunningQmJob = None
+    RunningQmJob = None  # type: ignore[misc,assignment]
 
 
 def wait_until_job_is_paused(
@@ -17,7 +17,7 @@ def wait_until_job_is_paused(
     Used when the OPX sequence needs to be synchronized with an external parameter sweep and to ensure that the OPX
     sequence is done before proceeding to the next iteration of the external loop, or when using IO variables:
 
-    Attributes:
+    Args:
         running_job: the QM running job object.
         timeout: Duration in seconds after which the console will be freed even if the pause statement has not been
                  reached to prevent from being stuck here forever.
@@ -51,7 +51,7 @@ def demod2volts(
 ) -> float | np.ndarray:
     """Converts the demodulated data to volts.
 
-    Attributes:
+    Args:
         data: demodulated data. Must be a python variable or array.
         duration: demodulation duration in ns. **WARNING**: this must be the duration of one slice in
                   the case of ```demod.sliced``` and ```demod.accumulated```.

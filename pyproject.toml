@@ -33,7 +33,7 @@ keywords = ["stanza"]
 dependencies = [
     "pydantic>=2.11.7",
     "pyyaml>=6.0.2",
-    "numpy>=1.24.0"
+    "numpy>=1.24.0",
 ]
 
 [project.optional-dependencies]
@@ -60,7 +60,7 @@ pyvisa = [
     "pyvisa>=1.11.0"
 ]
 qm = [
-    "qm-saas>=1.1.5"
+    "qm-qua>=1.2.0"
 ]
 
 [project.urls]
@@ -153,6 +153,9 @@ exclude_lines = [
     "class .*\\bProtocol\\):",
     "@(abc\\.)?abstractmethod",
 ]
+
+[tool.uv]
+prerelease = "allow"
 
 [tool.hatch.version]
 path = "stanza/__init__.py"

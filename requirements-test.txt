@@ -1,2 +1,2 @@
--e .[dev,test,pyvisa]
+-e .[dev,test,pyvisa,qm]
 coverage[toml] >= 6.5.0,< 8.0

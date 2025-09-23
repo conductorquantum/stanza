@@ -1,0 +1,62 @@
+{
+    "version": "1",
+    "controllers": {
+        "con1": {
+            "type": "<MACHINE_TYPE>",
+            "fems": {
+                "2": {
+                    "type": "LF",
+                    "analog_outputs": {
+                        "1": {
+                            "offset": 0.0,
+                            "sampling_rate": 1e9
+                        },
+                        "2": {
+                            "offset": 0.0,
+                            "sampling_rate": 1e9
+                        }
+                    },
+                    "analog_inputs": {
+                        "1": {
+                            "offset": -0.0078,
+                            "sampling_rate": 1e9
+                        },
+                        "2": {
+                            "offset": -0.007,
+                            "sampling_rate": 1e9
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "elements": {},
+    "pulses": {
+        "readout_pulse": {
+            "operation": "measurement",
+            "length": "<READ_LEN>",
+            "waveforms": {
+                "single": "zero_wf"
+            },
+            "integration_weights": {
+                "const": "const_weights"
+            }
+        }
+    },
+    "waveforms": {
+        "zero_wf": {
+            "type": "constant",
+            "sample": 0.0
+        }
+    },
+    "integration_weights": {
+        "const_weights": {
+            "cosine": [
+                [1.0, "<READ_LEN>"]
+            ],
+            "sine": [
+                [0, "<READ_LEN>"]
+            ]
+        }
+    }
+}

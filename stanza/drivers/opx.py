@@ -1,44 +1,56 @@
 from __future__ import annotations
 
+import json
 import logging
-from typing import Protocol
+
+# mypy: disable-error-code="union-attr,attr-defined"
+from functools import cached_property
+from typing import Any
 
 from stanza.drivers.utils import demod2volts, wait_until_job_is_paused
 from stanza.exceptions import InstrumentError
+from stanza.instruments.base import BaseMeasurementInstrument
 from stanza.instruments.channels import ChannelConfig, MeasurementChannel
+from stanza.models import MeasurementInstrumentConfig
+from stanza.timing import seconds_to_ns
+from stanza.utils import get_config_resource, substitute_parameters
+
+try:
+    from qm import Program, QuantumMachinesManager
+    from qm.api.models.config import FullQuaConfig  # type: ignore[import-not-found]
+    from qm.jobs.running_qm_job import RunningQmJob
+    from qm.qua import (
+        FUNCTIONS,
+        declare,
+        declare_stream,
+        fixed,
+        for_,
+        infinite_loop_,
+        integration,
+        measure,
+        pause,
+        program,
+        save,
+        stream_processing,
+    )
+    from qm.quantum_machines_manager import QuantumMachine
+
+    HAS_QM = True
+except ImportError:
+    QuantumMachinesManager = None  # type: ignore[misc,assignment]
+    Program = None  # type: ignore[misc,assignment]
+    RunningQmJob = None  # type: ignore[misc,assignment]
+    QuantumMachine = None  # type: ignore[misc,assignment]
+    FullQuaConfig = None
+    HAS_QM = False
 
 logger = logging.getLogger(__name__)
-
-
-class OPXResultHandle(Protocol):
-    """Protocol for OPX result handle interface."""
-
-    def wait_for_values(self, count: int, timeout: int = 10) -> None: ...
-
-    def fetch(self, count: int) -> float: ...
-
-
-class OPXJob(Protocol):
-    """Protocol for OPX job interface."""
-
-    def resume(self) -> None: ...
-
-    @property
-    def result_handles(self) -> dict[str, OPXResultHandle]: ...
-
-
-class OPXDriver(Protocol):
-    """Protocol for OPX driver interface."""
-
-    def get_job(self, job_id: int) -> OPXJob: ...
 
 
 class OPXMeasurementChannel(MeasurementChannel):
     """OPX-specific measurement channel with hardware integration."""
 
-    def __init__(
-        self, name: str, channel_id: int, config: ChannelConfig, driver: OPXDriver
-    ):
+    def __init__(self, name: str, channel_id: int, config: ChannelConfig, driver: Any):
         self.name = name
         self.channel_id = channel_id
         self.driver = driver
@@ -65,24 +77,149 @@ class OPXMeasurementChannel(MeasurementChannel):
             raise InstrumentError("read_len not set")
 
         job = self.driver.get_job(self.job_id)
-        prev = self.count
+        handle_name = f"measure_{self.name}"
+        h = job.result_handles.get(handle_name)
+
+        if h is None:
+            raise InstrumentError(f"No output handle {handle_name}")
+
+        prev = getattr(self, "count", 0)
         index = prev + 1
 
         job.resume()
-
         wait_until_job_is_paused(job)
-        out_handle = job.result_handles.get("out")
-        if out_handle is None:
-            raise InstrumentError("No output handle found")
 
         try:
-            out_handle.wait_for_values(index, timeout=10)
+            h.wait_for_values(index, timeout=10)
         except Exception:
             pass
 
-        raw_data = out_handle.fetch(index)
-        data = demod2volts(raw_data, self.read_len, single_demod=True)
+        raw = h.fetch(index)
+        val = demod2volts(raw, self.read_len, single_demod=True)
 
         self.count = index
+        return float(-val)
 
-        return float(-data)
+
+class OPXInstrument(BaseMeasurementInstrument):
+    """OPX-specific instrument with hardware integration."""
+
+    def __init__(
+        self,
+        instrument_config: MeasurementInstrumentConfig,
+        channel_configs: dict[str, ChannelConfig],
+    ):
+        super().__init__(instrument_config)
+
+        self.host = instrument_config.ip_addr
+        self.port = instrument_config.port
+        self.machine_type = instrument_config.machine_type
+        self.cluster_name = instrument_config.cluster_name
+        self.measurement_channels = instrument_config.measurement_channels
+
+        self.read_len = seconds_to_ns(instrument_config.sample_time)
+        self.measurement_duration = seconds_to_ns(
+            instrument_config.measurement_duration
+        )
+        self.measure_number = max(1, int(self.measurement_duration / self.read_len))
+        self.octave = getattr(instrument_config, "octave", None)
+
+        self.qmm = QuantumMachinesManager(
+            host=self.host,
+            port=self.port,
+            cluster_name=self.cluster_name,
+            octave=self.octave,
+        )
+        self.driver = self.qmm.open_qm(self.qua_config)
+
+        self._initialize_channels(channel_configs)
+
+    def _initialize_channels(self, channel_configs: dict[str, ChannelConfig]) -> None:
+        for channel_config in channel_configs.values():
+            if (
+                channel_config.measure_channel is not None
+                and self.measurement_channels is not None
+                and channel_config.measure_channel in self.measurement_channels
+            ):
+                self.add_channel(
+                    f"measure_{channel_config.name}",
+                    OPXMeasurementChannel(
+                        channel_config.name,
+                        channel_config.measure_channel,
+                        channel_config,
+                        self.driver,
+                    ),
+                )
+
+    @cached_property
+    def qua_config(self) -> FullQuaConfig:
+        qua_config_template = get_config_resource("templates/qua_config.json")
+        qua_config_str = substitute_parameters(
+            qua_config_template,
+            {
+                "MACHINE_TYPE": self.machine_type,
+                "READ_LEN": self.read_len,
+            },
+        )
+        qua_config = json.loads(qua_config_str)
+
+        for channel_name, channel in self.channels.items():
+            port = ("con1", 2, channel.channel_id)
+            qua_config["elements"][channel_name] = {
+                "singleInput": {"port": port},
+                "outputs": {"out1": port},
+                "intermediate_frequency": 0,
+                "operations": {"readout": "readout_pulse"},
+                "time_of_flight": 28,
+                "smearing": 0,
+            }
+
+        return FullQuaConfig(**qua_config)
+
+    @property
+    def qua_program(self) -> Program:
+        chans = list(self.channels.keys())
+        n_ch = len(chans)
+        with program() as prog:
+            seg = declare(int)
+            acc = declare(fixed, size=n_ch)
+            outs = [declare_stream() for _ in range(n_ch)]
+
+            with infinite_loop_():
+                pause()
+                with for_(seg, 0, seg < self.measure_number, seg + 1):
+                    for idx, ch in enumerate(chans):
+                        measure(
+                            "readout", ch, None, integration.full("const", acc[idx])
+                        )
+                        save(acc[idx], outs[idx])
+
+            with stream_processing():
+                for idx, ch in enumerate(chans):
+                    outs[idx].buffer(self.measure_number).map(FUNCTIONS.average()).save(
+                        f"measure_{ch}"
+                    )
+
+        return prog
+
+    def prepare_measurement(self) -> None:
+        """Prepare the measurement."""
+        self.driver.compile(self.qua_program)
+        job = self.driver.execute(self.qua_program)
+        for channel in self.channels.values():
+            channel.set_job_id(job.job_id)
+            channel.set_read_len(self.read_len)
+
+    def teardown_measurement(self) -> None:
+        try:
+            for job in self.driver.get_jobs():
+                try:
+                    job.halt()
+                except Exception:
+                    logger.warning(f"Failed to halt job {job.job_id}")
+
+        finally:
+            self.driver.close()
+
+    def measure(self, channel_name: str) -> float:
+        return super().measure(f"measure_{channel_name}")
