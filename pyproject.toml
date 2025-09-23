@@ -57,7 +57,8 @@ test = [
     "pyvisa-sim>=0.7.0",
 ]
 pyvisa = [
-    "pyvisa>=1.11.0"
+    "pyvisa>=1.11.0",
+    "pyvisa-py>=0.7.1"
 ]
 qm = [
     "qm-qua>=1.2.0"

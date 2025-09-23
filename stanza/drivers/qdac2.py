@@ -94,7 +94,7 @@ class QDAC2(BaseInstrument):
         sim_file: str | None = None,
     ):
         self.name = instrument_config.name
-        self.address = instrument_config.serial_addr
+        self.address = instrument_config.ip_addr
         self.port = instrument_config.port
         # Extract QDAC2-specific configuration from instrument config or defaults
         self.sample_time = getattr(
@@ -173,6 +173,10 @@ class QDAC2(BaseInstrument):
     def get_voltage(self, channel_name: str) -> float:
         """Get the voltage on a specific channel."""
         return super().get_voltage(f"control_{channel_name}")
+
+    def set_slew_rate(self, channel_name: str, slew_rate: float) -> None:
+        """Set the slew rate on a specific channel."""
+        return super().set_slew_rate(f"control_{channel_name}", slew_rate)
 
     def get_slew_rate(self, channel_name: str) -> float:
         """Get the slew rate on a specific channel."""

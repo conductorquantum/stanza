@@ -63,6 +63,11 @@ class ControlInstrumentMixin(InstrumentChannelMixin):
         channel_obj = self.get_channel(channel_name)
         return float(channel_obj.get_parameter_value("slew_rate"))
 
+    def set_slew_rate(self, channel_name: str, slew_rate: float) -> None:
+        """Set slew rate on a specific channel using parameter system."""
+        channel_obj = self.get_channel(channel_name)
+        channel_obj.set_parameter("slew_rate", slew_rate)
+
 
 class MeasurementInstrumentMixin(InstrumentChannelMixin):
     """Mixin class that provides default MeasurementInstrument implementations."""
