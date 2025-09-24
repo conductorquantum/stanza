@@ -14,7 +14,9 @@ class PyVisaDriver:
         if sim_file:
             lib = f"{sim_file}@sim"
         if visa is None:
-            raise ImportError("pyvisa is not installed")
+            raise ImportError(
+                "pyvisa is not installed. Install with: pip install stanza[pyvisa]"
+            )
         rm: visa.ResourceManager = visa.ResourceManager(lib)
         resource = rm.open_resource(visa_addr)
         self._visa: MessageBasedResource = cast(MessageBasedResource, resource)

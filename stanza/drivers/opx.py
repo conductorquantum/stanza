@@ -109,6 +109,11 @@ class OPXInstrument(BaseMeasurementInstrument):
         instrument_config: MeasurementInstrumentConfig,
         channel_configs: dict[str, ChannelConfig],
     ):
+        if not HAS_QM:
+            raise ImportError(
+                "qm is not installed. Install with: pip install stanza[qm]"
+            )
+
         super().__init__(instrument_config)
 
         self.host = instrument_config.ip_addr
