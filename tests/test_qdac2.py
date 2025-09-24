@@ -360,7 +360,7 @@ class TestQDAC2MeasurementChannel:
         current_param = channel.get_parameter("current")
         current = current_param.getter()
         assert current == 0.001
-        mock_driver.query.assert_called_with("READ2?")
+        mock_driver.query.assert_called_with("read? (@2)")
 
         # Verify setter is None (read-only parameter)
         assert current_param.setter is None

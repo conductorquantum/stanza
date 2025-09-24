@@ -236,7 +236,7 @@ devices:
       current_1:
         default: 0.000001
         getter:
-          q: "READ1?"
+          q: "read? (@1)"
           r: "{:.9f}"
         specs:
           min: -0.001
@@ -245,7 +245,7 @@ devices:
       current_2:
         default: 0.000001
         getter:
-          q: "READ2?"
+          q: "read? (@2)"
           r: "{:.9f}"
         specs:
           min: -0.001
@@ -254,7 +254,7 @@ devices:
       current_3:
         default: 0.000001
         getter:
-          q: "READ3?"
+          q: "read? (@3)"
           r: "{:.9f}"
         specs:
           min: -0.001
@@ -263,7 +263,7 @@ devices:
       current_4:
         default: 0.000001
         getter:
-          q: "READ4?"
+          q: "read? (@4)"
           r: "{:.9f}"
         specs:
           min: -0.001

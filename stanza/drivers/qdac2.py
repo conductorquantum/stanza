@@ -79,7 +79,7 @@ class QDAC2MeasurementChannel(MeasurementChannel):
 
         current_param = self.get_parameter("current")
         current_param.getter = lambda: float(
-            self.driver.query(f"READ{self.channel_id}?")
+            self.driver.query(f"read? (@{self.channel_id})")
         )
         current_param.setter = None
 
@@ -94,7 +94,7 @@ class QDAC2(BaseInstrument):
         sim_file: str | None = None,
     ):
         self.name = instrument_config.name
-        self.address = instrument_config.ip_addr
+        self.address = instrument_config.ip_addr or instrument_config.serial_addr
         self.port = instrument_config.port
         # Extract QDAC2-specific configuration from instrument config or defaults
         self.sample_time = getattr(
@@ -185,6 +185,10 @@ class QDAC2(BaseInstrument):
     def measure(self, channel_name: str) -> float:
         """Measure the current on a specific channel."""
         return super().measure(f"measure_{channel_name}")
+
+    def close(self) -> None:
+        """Close the QDAC2 driver."""
+        self.driver.close()
 
     @cached_property
     def idn(self) -> str:
