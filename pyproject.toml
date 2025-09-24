@@ -153,6 +153,15 @@ exclude_lines = [
     "if __name__ == .__main__.:",
     "class .*\\bProtocol\\):",
     "@(abc\\.)?abstractmethod",
+    # Exclude conditional import blocks
+    "try:",
+    "except ImportError:",
+    ".*= None  # type: ignore",
+    "HAS_.*= False",
+    "HAS_.*= True",
+    "from qm.*import",
+    "from pyvisa.*import",
+    "import pyvisa as visa",
 ]
 
 [tool.uv]
