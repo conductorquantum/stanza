@@ -12,9 +12,12 @@ from stanza.instruments.channels import (
 )
 from stanza.models import (
     BaseInstrumentConfig,
+    ContactType,
     ControlInstrumentConfig,
+    GateType,
     InstrumentType,
     MeasurementInstrumentConfig,
+    PadType,
 )
 
 
@@ -65,7 +68,11 @@ class TestBaseMeasurementInstrument:
 
         # Add a measurement channel
         channel_config = ChannelConfig(
-            name="sense1", voltage_range=(-1.0, 1.0), measure_channel=1
+            name="sense1",
+            voltage_range=(-1.0, 1.0),
+            pad_type=PadType.CONTACT,
+            electrode_type=ContactType.SOURCE,
+            measure_channel=1,
         )
         channel = MeasurementChannel(channel_config)
         instrument.add_channel(channel)
@@ -137,7 +144,11 @@ class TestBaseControlInstrument:
 
         # Add a control channel
         channel_config = ChannelConfig(
-            name="gate1", voltage_range=(-2.0, 2.0), control_channel=1
+            name="gate1",
+            voltage_range=(-2.0, 2.0),
+            pad_type=PadType.GATE,
+            electrode_type=GateType.PLUNGER,
+            control_channel=1,
         )
         channel = ControlChannel(channel_config)
         instrument.add_channel(channel)
@@ -191,10 +202,18 @@ class TestBaseInstrument:
 
         # Add both measurement and control channels
         measure_channel_config = ChannelConfig(
-            name="sense1", voltage_range=(-1.0, 1.0), measure_channel=1
+            name="sense1",
+            voltage_range=(-1.0, 1.0),
+            pad_type=PadType.CONTACT,
+            electrode_type=ContactType.SOURCE,
+            measure_channel=1,
         )
         control_channel_config = ChannelConfig(
-            name="gate1", voltage_range=(-2.0, 2.0), control_channel=2
+            name="gate1",
+            voltage_range=(-2.0, 2.0),
+            pad_type=PadType.GATE,
+            electrode_type=GateType.PLUNGER,
+            control_channel=2,
         )
 
         measure_channel = MeasurementChannel(measure_channel_config)

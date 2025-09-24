@@ -2,7 +2,7 @@ from typing import Protocol, runtime_checkable
 
 
 @runtime_checkable
-class Controlinstrument(Protocol):
+class ControlInstrument(Protocol):
     """Protocol for control instruments."""
 
     def set_voltage(self, channel_name: str, voltage: float) -> None:

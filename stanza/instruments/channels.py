@@ -3,6 +3,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
+from stanza.models import ContactType, GateType, PadType
+
 
 @dataclass
 class ChannelConfig:
@@ -22,7 +24,9 @@ class ChannelConfig:
     """
 
     name: str
-    voltage_range: tuple[float, float]
+    voltage_range: tuple[float | None, float | None]
+    pad_type: PadType
+    electrode_type: GateType | ContactType
     control_channel: int | None = None
     measure_channel: int | None = None
     output_mode: str = "dc"
@@ -202,7 +206,10 @@ class ControlChannel(InstrumentChannel):
             unit="V",
             validator=Validators.range_validator(
                 self.config.voltage_range[0], self.config.voltage_range[1]
-            ),
+            )
+            if self.config.voltage_range[0] is not None
+            and self.config.voltage_range[1] is not None
+            else None,
         )
         self.add_parameter(voltage_param)
 

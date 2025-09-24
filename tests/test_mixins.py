@@ -12,12 +12,19 @@ from stanza.instruments.mixins import (
     InstrumentChannelMixin,
     MeasurementInstrumentMixin,
 )
+from stanza.models import ContactType, GateType, PadType
 
 
 class TestInstrumentChannelMixin:
     def test_add_and_get_channel(self):
         mixin = InstrumentChannelMixin()
-        config = ChannelConfig("test_channel", (-1.0, 1.0), control_channel=1)
+        config = ChannelConfig(
+            "test_channel",
+            (-1.0, 1.0),
+            PadType.GATE,
+            GateType.PLUNGER,
+            control_channel=1,
+        )
         channel = ControlChannel(config=config)
 
         mixin.add_channel(channel)
@@ -28,7 +35,13 @@ class TestInstrumentChannelMixin:
 
     def test_add_channel_with_custom_name(self):
         mixin = InstrumentChannelMixin()
-        config = ChannelConfig("test_channel", (-1.0, 1.0), control_channel=1)
+        config = ChannelConfig(
+            "test_channel",
+            (-1.0, 1.0),
+            PadType.GATE,
+            GateType.PLUNGER,
+            control_channel=1,
+        )
         channel = ControlChannel(config=config)
 
         mixin.add_channel("custom_name", channel)
@@ -47,7 +60,13 @@ class TestInstrumentChannelMixin:
 
     def test_remove_channel(self):
         mixin = InstrumentChannelMixin()
-        config = ChannelConfig("test_channel", (-1.0, 1.0), control_channel=1)
+        config = ChannelConfig(
+            "test_channel",
+            (-1.0, 1.0),
+            PadType.GATE,
+            GateType.PLUNGER,
+            control_channel=1,
+        )
         channel = ControlChannel(config=config)
 
         mixin.add_channel(channel)
@@ -58,7 +77,9 @@ class TestInstrumentChannelMixin:
 class TestControlInstrumentMixin:
     def test_set_and_get_voltage(self):
         mixin = ControlInstrumentMixin()
-        config = ChannelConfig("gate1", (-2.0, 2.0), control_channel=1)
+        config = ChannelConfig(
+            "gate1", (-2.0, 2.0), PadType.GATE, GateType.PLUNGER, control_channel=1
+        )
         channel = ControlChannel(config=config)
         mixin.add_channel(channel)
 
@@ -67,7 +88,9 @@ class TestControlInstrumentMixin:
 
     def test_get_slew_rate(self):
         mixin = ControlInstrumentMixin()
-        config = ChannelConfig("gate1", (-2.0, 2.0), control_channel=1)
+        config = ChannelConfig(
+            "gate1", (-2.0, 2.0), PadType.GATE, GateType.PLUNGER, control_channel=1
+        )
         channel = ControlChannel(config=config)
         mixin.add_channel(channel)
 
@@ -76,7 +99,9 @@ class TestControlInstrumentMixin:
 
     def test_set_slew_rate(self):
         mixin = ControlInstrumentMixin()
-        config = ChannelConfig("gate1", (-2.0, 2.0), control_channel=1)
+        config = ChannelConfig(
+            "gate1", (-2.0, 2.0), PadType.GATE, GateType.PLUNGER, control_channel=1
+        )
         channel = ControlChannel(config=config)
         mixin.add_channel(channel)
 
@@ -100,7 +125,13 @@ class TestMeasurementInstrumentMixin:
                 yield
 
         mixin = TestMeasurementInstrument()
-        config = ChannelConfig("sense1", (-1.0, 1.0), measure_channel=1)
+        config = ChannelConfig(
+            "sense1",
+            (-1.0, 1.0),
+            PadType.CONTACT,
+            ContactType.SOURCE,
+            measure_channel=1,
+        )
         channel = MeasurementChannel(config=config)
         channel.set_parameter("current", 1e-6)
         mixin.add_channel(channel)

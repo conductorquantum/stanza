@@ -6,12 +6,14 @@ import pytest
 from stanza.drivers.opx import OPXInstrument, OPXMeasurementChannel
 from stanza.exceptions import InstrumentError
 from stanza.instruments.channels import ChannelConfig
-from stanza.models import InstrumentType, MeasurementInstrumentConfig
+from stanza.models import GateType, InstrumentType, MeasurementInstrumentConfig, PadType
 
 
 @pytest.fixture
 def channel_config():
-    return ChannelConfig("test_channel", (-1.0, 1.0), measure_channel=1)
+    return ChannelConfig(
+        "test_channel", (-1.0, 1.0), PadType.GATE, GateType.PLUNGER, measure_channel=1
+    )
 
 
 @pytest.fixture
@@ -122,7 +124,11 @@ class TestOPXInstrument:
     def test_initialization(self, instrument_config, opx_mocks):
         channel_configs = {
             "ch1": ChannelConfig(
-                name="ch1", voltage_range=(-1.0, 1.0), measure_channel=1
+                name="ch1",
+                voltage_range=(-1.0, 1.0),
+                pad_type=PadType.GATE,
+                electrode_type=GateType.PLUNGER,
+                measure_channel=1,
             )
         }
         instrument = OPXInstrument(instrument_config, channel_configs)
@@ -262,10 +268,14 @@ class TestOPXInstrumentAdvanced:
     @patch("stanza.drivers.opx.HAS_QM", True)
     def test_initialize_channels_with_measurement_channels(self, instrument_config):
         channel_configs = {
-            "ch1": ChannelConfig("ch1", (-1.0, 1.0), measure_channel=1),
-            "ch2": ChannelConfig("ch2", (-1.0, 1.0), measure_channel=2),
+            "ch1": ChannelConfig(
+                "ch1", (-1.0, 1.0), PadType.GATE, GateType.PLUNGER, measure_channel=1
+            ),
+            "ch2": ChannelConfig(
+                "ch2", (-1.0, 1.0), PadType.GATE, GateType.PLUNGER, measure_channel=2
+            ),
             "ch3": ChannelConfig(
-                "ch3", (-1.0, 1.0), measure_channel=3
+                "ch3", (-1.0, 1.0), PadType.GATE, GateType.PLUNGER, measure_channel=3
             ),  # Not in measurement_channels
         }
 
@@ -290,7 +300,11 @@ class TestOPXInstrumentAdvanced:
             measurement_duration=0.1,
             measurement_channels=None,
         )
-        channel_configs = {"ch1": ChannelConfig("ch1", (-1.0, 1.0), measure_channel=1)}
+        channel_configs = {
+            "ch1": ChannelConfig(
+                "ch1", (-1.0, 1.0), PadType.GATE, GateType.PLUNGER, measure_channel=1
+            )
+        }
 
         with self._mock_opx_dependencies():
             instrument = OPXInstrument(config, channel_configs)
@@ -301,7 +315,13 @@ class TestOPXInstrumentAdvanced:
     @patch("stanza.drivers.opx.HAS_QM", True)
     def test_qua_config_property(self, instrument_config, opx_mocks):
         channel_configs = {
-            "test_ch": ChannelConfig("test_ch", (-1.0, 1.0), measure_channel=1)
+            "test_ch": ChannelConfig(
+                "test_ch",
+                (-1.0, 1.0),
+                PadType.GATE,
+                GateType.PLUNGER,
+                measure_channel=1,
+            )
         }
 
         with (

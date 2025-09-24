@@ -1,0 +1,290 @@
+import time
+from typing import Any, overload
+
+from stanza.exceptions import DeviceError
+from stanza.instruments.channels import ChannelConfig
+from stanza.instruments.protocols import ControlInstrument, MeasurementInstrument
+from stanza.models import ContactType, DeviceConfig, GateType, PadType
+from stanza.utils import generate_channel_configs
+
+
+class Device:
+    """
+    Class that defines the interface by which voltage sweeps are applied to the device and
+    current is measured.
+    """
+
+    def __init__(
+        self,
+        name: str,
+        device_config: DeviceConfig,
+        channel_configs: dict[str, ChannelConfig] | None,
+        control_instrument: Any | None,
+        measurement_instrument: Any | None,
+    ):
+        self.name = name
+        self.device_config = device_config
+
+        if control_instrument and not isinstance(control_instrument, ControlInstrument):
+            raise DeviceError(
+                "Control instrument must implement the `ControlInstrument` protocol"
+            )
+
+        if measurement_instrument and not isinstance(
+            measurement_instrument, MeasurementInstrument
+        ):
+            raise DeviceError(
+                "Measurement instrument must implement the `MeasurementInstrument` protocol"
+            )
+
+        self.control_instrument = control_instrument
+        self.measurement_instrument = measurement_instrument
+
+        self.channel_configs = channel_configs or generate_channel_configs(
+            self.device_config
+        )
+
+    @property
+    def gates(self) -> list[str]:
+        return [
+            channel.name
+            for channel in self.channel_configs.values()
+            if channel.pad_type == PadType.GATE
+        ]
+
+    @property
+    def contacts(self) -> list[str]:
+        return [
+            channel.name
+            for channel in self.channel_configs.values()
+            if channel.pad_type == PadType.CONTACT
+        ]
+
+    @property
+    def control_gates(self) -> list[str]:
+        return [
+            channel.name
+            for channel in self.channel_configs.values()
+            if channel.pad_type == PadType.GATE and channel.control_channel is not None
+        ]
+
+    @property
+    def control_contacts(self) -> list[str]:
+        return [
+            channel.name
+            for channel in self.channel_configs.values()
+            if channel.pad_type == PadType.CONTACT
+            and channel.control_channel is not None
+        ]
+
+    @property
+    def measure_gates(self) -> list[str]:
+        return [
+            channel.name
+            for channel in self.channel_configs.values()
+            if channel.pad_type == PadType.GATE and channel.measure_channel is not None
+        ]
+
+    @property
+    def measure_contacts(self) -> list[str]:
+        return [
+            channel.name
+            for channel in self.channel_configs.values()
+            if channel.pad_type == PadType.CONTACT
+            and channel.measure_channel is not None
+        ]
+
+    def get_gates_by_type(self, gate_type: str | GateType) -> list[str]:
+        """Get the gate electrodes of a given type."""
+        return [
+            channel.name
+            for channel in self.channel_configs.values()
+            if channel.pad_type == PadType.GATE
+            and channel.electrode_type == str(gate_type).upper()
+        ]
+
+    def get_contacts_by_type(self, contact_type: str | ContactType) -> list[str]:
+        """Get the contact electrodes of a given type."""
+        return [
+            channel.name
+            for channel in self.channel_configs.values()
+            if channel.pad_type == PadType.CONTACT
+            and channel.electrode_type == str(contact_type).upper()
+        ]
+
+    def is_configured(self) -> bool:
+        """Check if both instruments are configured."""
+        return (
+            self.control_instrument is not None
+            and self.measurement_instrument is not None
+        )
+
+    def _jump(self, voltage: float, pad: str, wait_for_settling: bool = False) -> None:
+        """Set the voltage of a single gate"""
+        if not self.control_instrument:
+            raise DeviceError("Control instrument not configured")
+
+        settling_time = 0.0
+        if wait_for_settling:
+            current_voltage = self.control_instrument.get_voltage(pad)
+            slew_rate = self.control_instrument.get_slew_rate(pad)
+            voltage_diff = abs(voltage - current_voltage)
+            settling_time = 1.2 * (voltage_diff / slew_rate)
+
+        try:
+            self.control_instrument.set_voltage(pad, voltage)
+        except Exception as e:
+            raise DeviceError(f"Failed to set voltage {voltage}V on {pad}: {e}") from e
+
+        if settling_time > 0:
+            time.sleep(settling_time)
+
+    def jump(
+        self, pad_voltages: dict[str, float], wait_for_settling: bool = False
+    ) -> None:
+        """Set the voltages of the device.
+
+        Args:
+            pad_voltages: A dictionary of pads and their voltages.
+            wait_for_settling: Whether to wait for the device to settle after setting the voltages.
+
+        Raises:
+            DeviceError: If the control instrument is not configured.
+        """
+        for pad, voltage in pad_voltages.items():
+            self._jump(voltage, pad, wait_for_settling)
+
+    def _measure(self, pad: str) -> float:
+        """Measure the current of a single gate"""
+        if not self.measurement_instrument:
+            raise DeviceError("Measurement instrument not configured")
+
+        if pad not in self.channel_configs:
+            raise DeviceError(f"Pad {pad} not found in channel configs")
+
+        if self.channel_configs[pad].measure_channel is None:
+            raise DeviceError(f"Pad {pad} has no measure channel")
+
+        return self.measurement_instrument.measure(pad)
+
+    @overload
+    def measure(self, pad: str) -> float: ...
+
+    @overload
+    def measure(self, pad: list[str]) -> list[float]: ...
+
+    def measure(self, pad: str | list[str]) -> float | list[float]:
+        """Measure the current of the device."""
+        if isinstance(pad, str):
+            return self._measure(pad)
+        else:
+            return [self._measure(p) for p in pad]
+
+    def _check(self, pad: str) -> float:
+        """Check the current voltage of a single gate electrode."""
+        if not self.control_instrument:
+            raise DeviceError("Control instrument not configured")
+
+        if pad not in self.channel_configs:
+            raise DeviceError(f"Pad {pad} not found in channel configs")
+
+        if self.channel_configs[pad].control_channel is None:
+            raise DeviceError(f"Pad {pad} has no control channel")
+
+        return self.control_instrument.get_voltage(pad)
+
+    @overload
+    def check(self, pad: str) -> float: ...
+
+    @overload
+    def check(self, pad: list[str]) -> list[float]: ...
+
+    def check(self, pad: str | list[str]) -> float | list[float]:
+        """Check the current voltage of the device."""
+        if isinstance(pad, str):
+            return self._check(pad)
+        else:
+            return [self._check(p) for p in pad]
+
+    def sweep_1d(
+        self, gate_electrode: str, voltages: list[float], measure_electrode: str
+    ) -> tuple[list[float], list[float]]:
+        """Sweep a single gate electrode and measure the current of a single contact electrode."""
+        voltage_measurements = []
+        current_measurements = []
+
+        for i, voltage in enumerate(voltages):
+            should_settle = i == 0
+            self.jump({gate_electrode: voltage}, wait_for_settling=should_settle)
+            voltage_measurements.append(self.check(gate_electrode))
+            current_measurements.append(self.measure(measure_electrode))
+
+        return voltage_measurements, current_measurements
+
+    def sweep_2d(
+        self,
+        gate_1: str,
+        voltages_1: list[float],
+        gate_2: str,
+        voltages_2: list[float],
+        measure_electrode: str,
+    ) -> tuple[list[float], list[float]]:
+        """Sweep two gate electrodes and measure the current of a single contact electrode."""
+        voltage_measurements = []
+        current_measurements = []
+
+        for i, voltage_1 in enumerate(voltages_1):
+            for j, voltage_2 in enumerate(voltages_2):
+                should_settle = i == 0 and j == 0
+                self.jump(
+                    {gate_1: voltage_1, gate_2: voltage_2},
+                    wait_for_settling=should_settle,
+                )
+                voltage_measurements.extend([self.check(gate_1), self.check(gate_2)])
+                current_measurements.append(self.measure(measure_electrode))
+        return voltage_measurements, current_measurements
+
+    def sweep_all(
+        self, voltages: list[float], measure_electrode: str
+    ) -> tuple[list[float], list[float]]:
+        """Sweep all gate electrodes and measure the current of a single contact electrode."""
+        voltage_measurements = []
+        current_measurements = []
+
+        for i, voltage in enumerate(voltages):
+            should_settle = i == 0
+            self.jump(
+                dict.fromkeys(self.control_gates, voltage),
+                wait_for_settling=should_settle,
+            )
+            voltage_measurements.extend(
+                [self.check(gate) or voltage for gate in self.control_gates]
+            )
+            current_measurements.append(self.measure(measure_electrode))
+        return voltage_measurements, current_measurements
+
+    def sweep_nd(
+        self,
+        gate_electrodes: list[str],
+        voltages: list[list[float]],
+        measure_electrode: str,
+    ) -> tuple[list[float], list[float]]:
+        """Sweep multiple gate electrodes and measure the current of a single contact electrode."""
+        voltage_measurements = []
+        current_measurements = []
+
+        for i, voltage in enumerate(voltages):
+            should_settle = i == 0
+            self.jump(
+                dict(zip(gate_electrodes, voltage, strict=True)),
+                wait_for_settling=should_settle,
+            )
+
+            voltage_measurements.extend(
+                [
+                    self.check(gate) or v
+                    for gate, v in zip(gate_electrodes, voltage, strict=True)
+                ]
+            )
+            current_measurements.append(self.measure(measure_electrode))
+        return voltage_measurements, current_measurements

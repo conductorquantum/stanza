@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 from qm_saas import QmSaas, QOPVersion
 
 from stanza.instruments.channels import ChannelConfig
-from stanza.models import InstrumentType, MeasurementInstrumentConfig
+from stanza.models import GateType, InstrumentType, MeasurementInstrumentConfig, PadType
 from tests.test_opx_cloud_sim.conftest import OPXInstrumentNoPause
 
 
@@ -36,10 +36,18 @@ def opx_sim():
         )
         channel_configs = {
             "ch1": ChannelConfig(
-                name="ch1", voltage_range=(-1.0, 1.0), measure_channel=1
+                name="ch1",
+                voltage_range=(-1.0, 1.0),
+                pad_type=PadType.GATE,
+                electrode_type=GateType.PLUNGER,
+                measure_channel=1,
             ),
             "ch2": ChannelConfig(
-                name="ch2", voltage_range=(-1.0, 1.0), measure_channel=2
+                name="ch2",
+                voltage_range=(-1.0, 1.0),
+                pad_type=PadType.GATE,
+                electrode_type=GateType.BARRIER,
+                measure_channel=2,
             ),
         }
         yield OPXInstrumentNoPause(instrument_config, channel_configs)

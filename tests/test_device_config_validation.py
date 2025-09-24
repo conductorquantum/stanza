@@ -216,3 +216,40 @@ def test_valid_device_config():
     assert len(device.gates) == 1
     assert len(device.contacts) == 1
     assert len(device.instruments) == 2
+
+
+def test_gate_type_str():
+    """Test GateType __str__ method."""
+    gate_type = GateType.PLUNGER
+    assert str(gate_type) == "GateType.PLUNGER"
+
+
+def test_device_config_duplicate_measure_channels():
+    """Test DeviceConfig validation with duplicate measure channels."""
+    with pytest.raises(ValueError, match="Duplicate channels found"):
+        DeviceConfig(
+            name="test",
+            gates={
+                "gate1": Gate(
+                    name="gate1",
+                    type=GateType.PLUNGER,
+                    readout=False,
+                    v_lower_bound=-2.0,
+                    v_upper_bound=2.0,
+                    control_channel=1,
+                    measure_channel=1,
+                ),
+                "gate2": Gate(
+                    name="gate2",
+                    type=GateType.PLUNGER,
+                    readout=False,
+                    v_lower_bound=-2.0,
+                    v_upper_bound=2.0,
+                    control_channel=2,
+                    measure_channel=1,  # Duplicate measure channel
+                ),
+            },
+            contacts={},
+            experiments=[],
+            instruments=[],
+        )

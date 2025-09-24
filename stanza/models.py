@@ -64,6 +64,17 @@ class Electrode(BaseModel):
         return self
 
 
+class PadType(str, Enum):
+    """Pad type"""
+
+    GATE = "GATE"
+    CONTACT = "CONTACT"
+    ALL = "ALL"
+
+    def __str__(self) -> str:
+        return self.value
+
+
 class GateType(str, Enum):
     PLUNGER = "PLUNGER"
     BARRIER = "BARRIER"

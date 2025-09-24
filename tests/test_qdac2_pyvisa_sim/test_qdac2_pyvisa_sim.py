@@ -6,7 +6,13 @@ import pyvisa
 
 from stanza.drivers.qdac2 import QDAC2, QDAC2CurrentRange
 from stanza.instruments.channels import ChannelConfig
-from stanza.models import BaseInstrumentConfig, InstrumentType
+from stanza.models import (
+    BaseInstrumentConfig,
+    ContactType,
+    GateType,
+    InstrumentType,
+    PadType,
+)
 
 
 @pytest.fixture
@@ -32,13 +38,25 @@ def qdac2_sim():
 
     channel_configs = {
         "gate1": ChannelConfig(
-            name="gate1", voltage_range=(-10.0, 10.0), control_channel=1
+            name="gate1",
+            voltage_range=(-10.0, 10.0),
+            pad_type=PadType.GATE,
+            electrode_type=GateType.PLUNGER,
+            control_channel=1,
         ),
         "gate2": ChannelConfig(
-            name="gate2", voltage_range=(-10.0, 10.0), control_channel=2
+            name="gate2",
+            voltage_range=(-10.0, 10.0),
+            pad_type=PadType.GATE,
+            electrode_type=GateType.BARRIER,
+            control_channel=2,
         ),
         "sense1": ChannelConfig(
-            name="sense1", voltage_range=(-1.0, 1.0), measure_channel=1
+            name="sense1",
+            voltage_range=(-1.0, 1.0),
+            pad_type=PadType.CONTACT,
+            electrode_type=ContactType.SOURCE,
+            measure_channel=1,
         ),
     }
 

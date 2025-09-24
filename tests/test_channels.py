@@ -7,11 +7,17 @@ from stanza.instruments.channels import (
     Parameter,
     Validators,
 )
+from stanza.models import ContactType, GateType, PadType
 
 
 class TestChannelConfig:
     def test_basic_initialization(self):
-        config = ChannelConfig(name="gate1", voltage_range=(-1.0, 1.0))
+        config = ChannelConfig(
+            name="gate1",
+            voltage_range=(-1.0, 1.0),
+            pad_type=PadType.GATE,
+            electrode_type=GateType.PLUNGER,
+        )
         assert config.name == "gate1"
         assert config.voltage_range == (-1.0, 1.0)
         assert config.output_mode == "dc"
@@ -22,6 +28,8 @@ class TestChannelConfig:
         config = ChannelConfig(
             name="gate2",
             voltage_range=(-5.0, 5.0),
+            pad_type=PadType.GATE,
+            electrode_type=GateType.BARRIER,
             control_channel=1,
             measure_channel=2,
             output_mode="ac",
@@ -108,7 +116,11 @@ class TestValidators:
 class TestControlChannel:
     def test_initialization(self):
         config = ChannelConfig(
-            name="gate1", voltage_range=(-2.0, 2.0), control_channel=1
+            name="gate1",
+            voltage_range=(-2.0, 2.0),
+            pad_type=PadType.GATE,
+            electrode_type=GateType.PLUNGER,
+            control_channel=1,
         )
         channel = ControlChannel(config=config)
 
@@ -119,7 +131,11 @@ class TestControlChannel:
 
     def test_voltage_parameter_validation(self):
         config = ChannelConfig(
-            name="gate1", voltage_range=(-1.0, 1.0), control_channel=1
+            name="gate1",
+            voltage_range=(-1.0, 1.0),
+            pad_type=PadType.GATE,
+            electrode_type=GateType.PLUNGER,
+            control_channel=1,
         )
         channel = ControlChannel(config=config)
 
@@ -131,7 +147,11 @@ class TestControlChannel:
 
     def test_slew_rate_parameter(self):
         config = ChannelConfig(
-            name="gate1", voltage_range=(-1.0, 1.0), control_channel=1
+            name="gate1",
+            voltage_range=(-1.0, 1.0),
+            pad_type=PadType.GATE,
+            electrode_type=GateType.PLUNGER,
+            control_channel=1,
         )
         channel = ControlChannel(config=config)
 
@@ -145,7 +165,11 @@ class TestControlChannel:
 class TestMeasurementChannel:
     def test_initialization(self):
         config = ChannelConfig(
-            name="sense1", voltage_range=(-1.0, 1.0), measure_channel=1
+            name="sense1",
+            voltage_range=(-1.0, 1.0),
+            pad_type=PadType.CONTACT,
+            electrode_type=ContactType.SOURCE,
+            measure_channel=1,
         )
         channel = MeasurementChannel(config=config)
 
@@ -155,7 +179,11 @@ class TestMeasurementChannel:
 
     def test_conversion_factor_validation(self):
         config = ChannelConfig(
-            name="sense1", voltage_range=(-1.0, 1.0), measure_channel=1
+            name="sense1",
+            voltage_range=(-1.0, 1.0),
+            pad_type=PadType.CONTACT,
+            electrode_type=ContactType.SOURCE,
+            measure_channel=1,
         )
         channel = MeasurementChannel(config=config)
 
@@ -169,7 +197,11 @@ class TestMeasurementChannel:
 class TestInstrumentChannelBase:
     def test_parameter_management(self):
         config = ChannelConfig(
-            name="test", voltage_range=(-1.0, 1.0), control_channel=1
+            name="test",
+            voltage_range=(-1.0, 1.0),
+            pad_type=PadType.GATE,
+            electrode_type=GateType.PLUNGER,
+            control_channel=1,
         )
         channel = ControlChannel(config=config)
 
@@ -188,7 +220,11 @@ class TestInstrumentChannelBase:
 
     def test_parameter_value_access(self):
         config = ChannelConfig(
-            name="test", voltage_range=(-1.0, 1.0), control_channel=1
+            name="test",
+            voltage_range=(-1.0, 1.0),
+            pad_type=PadType.GATE,
+            electrode_type=GateType.PLUNGER,
+            control_channel=1,
         )
         channel = ControlChannel(config=config)
 
@@ -200,7 +236,11 @@ class TestInstrumentChannelBase:
 
     def test_str_representation(self):
         config = ChannelConfig(
-            name="test_channel", voltage_range=(-1.0, 1.0), control_channel=5
+            name="test_channel",
+            voltage_range=(-1.0, 1.0),
+            pad_type=PadType.GATE,
+            electrode_type=GateType.PLUNGER,
+            control_channel=5,
         )
         channel = ControlChannel(config=config)
 
@@ -212,7 +252,11 @@ class TestInstrumentChannelBase:
 
     def test_channel_info(self):
         config = ChannelConfig(
-            name="info_channel", voltage_range=(-2.0, 2.0), control_channel=3
+            name="info_channel",
+            voltage_range=(-2.0, 2.0),
+            pad_type=PadType.GATE,
+            electrode_type=GateType.PLUNGER,
+            control_channel=3,
         )
         channel = ControlChannel(config=config)
 

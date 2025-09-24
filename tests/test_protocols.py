@@ -1,4 +1,4 @@
-from stanza.instruments.protocols import Controlinstrument, MeasurementInstrument
+from stanza.instruments.protocols import ControlInstrument, MeasurementInstrument
 
 
 class MockControlInstrument:
@@ -32,7 +32,7 @@ class TestControlInstrumentProtocol:
     def test_protocol_implementation(self):
         mock_instrument = MockControlInstrument()
 
-        assert isinstance(mock_instrument, Controlinstrument)
+        assert isinstance(mock_instrument, ControlInstrument)
 
         mock_instrument.set_voltage("gate1", 1.5)
         voltage = mock_instrument.get_voltage("gate1")
