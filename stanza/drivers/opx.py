@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import json
 import logging
+from functools import cached_property
 
 # mypy: disable-error-code="union-attr,attr-defined"
-from functools import cached_property
 from typing import Any
 
 from stanza.drivers.utils import demod2volts, wait_until_job_is_paused
@@ -16,9 +16,7 @@ from stanza.timing import seconds_to_ns
 from stanza.utils import get_config_resource, substitute_parameters
 
 try:
-    from qm import Program, QuantumMachinesManager
-    from qm.api.models.config import FullQuaConfig  # type: ignore[import-not-found]
-    from qm.jobs.running_qm_job import RunningQmJob
+    from qm import FullQuaConfig, Program, QuantumMachinesManager
     from qm.qua import (
         FUNCTIONS,
         declare,
@@ -33,15 +31,13 @@ try:
         save,
         stream_processing,
     )
-    from qm.quantum_machines_manager import QuantumMachine
 
     HAS_QM = True
 except ImportError:
     QuantumMachinesManager = None  # type: ignore[misc,assignment]
     Program = None  # type: ignore[misc,assignment]
-    RunningQmJob = None  # type: ignore[misc,assignment]
-    QuantumMachine = None  # type: ignore[misc,assignment]
-    FullQuaConfig = None
+    FullQuaConfig = None  # type: ignore[misc,assignment]
+    RunningQmJob = None
     HAS_QM = False
 
 logger = logging.getLogger(__name__)
@@ -50,15 +46,18 @@ logger = logging.getLogger(__name__)
 class OPXMeasurementChannel(MeasurementChannel):
     """OPX-specific measurement channel with hardware integration."""
 
-    def __init__(self, name: str, channel_id: int, config: ChannelConfig, driver: Any):
+    def __init__(self, name: str, channel_id: int, config: ChannelConfig):
         self.name = name
         self.channel_id = channel_id
-        self.driver = driver
+        self.driver = None
         self.count = 0
 
         self.job_id: int | None = None
         self.read_len: int | None = None
         super().__init__(config)
+
+    def set_driver(self, driver: Any) -> None:
+        self.driver = driver
 
     def set_job_id(self, job_id: int) -> None:
         self.job_id = job_id
@@ -120,7 +119,10 @@ class OPXInstrument(BaseMeasurementInstrument):
         self.port = instrument_config.port
         self.machine_type = instrument_config.machine_type
         self.cluster_name = instrument_config.cluster_name
+        self.connection_headers = instrument_config.connection_headers
         self.measurement_channels = instrument_config.measurement_channels
+
+        self.channel_configs = channel_configs
 
         self.read_len = seconds_to_ns(instrument_config.sample_time)
         self.measurement_duration = seconds_to_ns(
@@ -128,16 +130,15 @@ class OPXInstrument(BaseMeasurementInstrument):
         )
         self.measure_number = max(1, int(self.measurement_duration / self.read_len))
         self.octave = getattr(instrument_config, "octave", None)
-
         self.qmm = QuantumMachinesManager(
             host=self.host,
             port=self.port,
+            connection_headers=self.connection_headers,
             cluster_name=self.cluster_name,
             octave=self.octave,
         )
-        self.driver = self.qmm.open_qm(self.qua_config)
-
         self._initialize_channels(channel_configs)
+        self.driver = self.qmm.open_qm(self.qua_config)
 
     def _initialize_channels(self, channel_configs: dict[str, ChannelConfig]) -> None:
         for channel_config in channel_configs.values():
@@ -152,7 +153,6 @@ class OPXInstrument(BaseMeasurementInstrument):
                         channel_config.name,
                         channel_config.measure_channel,
                         channel_config,
-                        self.driver,
                     ),
                 )
 
@@ -202,7 +202,7 @@ class OPXInstrument(BaseMeasurementInstrument):
             with stream_processing():
                 for idx, ch in enumerate(chans):
                     outs[idx].buffer(self.measure_number).map(FUNCTIONS.average()).save(
-                        f"measure_{ch}"
+                        ch
                     )
 
         return prog
@@ -211,20 +211,28 @@ class OPXInstrument(BaseMeasurementInstrument):
         """Prepare the measurement."""
         self.driver.compile(self.qua_program)
         job = self.driver.execute(self.qua_program)
+
         for channel in self.channels.values():
-            channel.set_job_id(job.job_id)
+            channel.set_job_id(job.id)
             channel.set_read_len(self.read_len)
+            channel.set_driver(self.driver)
 
     def teardown_measurement(self) -> None:
         try:
-            for job in self.driver.get_jobs():
-                try:
-                    job.halt()
-                except Exception:
-                    logger.warning(f"Failed to halt job {job.job_id}")
-
+            jobs = self.driver.get_jobs()
+            if hasattr(jobs, "__iter__"):
+                for job in jobs:
+                    try:
+                        job.halt()
+                    except Exception:
+                        logger.warning(f"Failed to halt job {job.id}")
+        except Exception:
+            pass
         finally:
-            self.driver.close()
+            try:
+                self.driver.close()
+            except Exception:
+                pass
 
     def measure(self, channel_name: str) -> float:
         return super().measure(f"measure_{channel_name}")

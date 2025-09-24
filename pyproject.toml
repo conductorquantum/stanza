@@ -43,7 +43,8 @@ dev = [
     "black>=23.0.0",
     "ruff>=0.1.0",
     "mypy>=1.0.0",
-    "pre-commit>=3.0.0"
+    "pre-commit>=3.0.0",
+    "python-dotenv>=1.0.0"
 ]
 docs = [
     "mkdocs>=1.5.0",
@@ -55,6 +56,7 @@ test = [
     "pytest-cov>=4.0.0",
     "pytest-asyncio>=0.21.0",
     "pyvisa-sim>=0.7.0",
+    "qm-saas>=1.1.5",
 ]
 pyvisa = [
     "pyvisa>=1.11.0",

@@ -50,7 +50,8 @@ def opx_mocks():
 class TestOPXMeasurementChannel:
     def test_initialization(self, channel_config):
         driver = Mock()
-        channel = OPXMeasurementChannel("test_channel", 1, channel_config, driver)
+        channel = OPXMeasurementChannel("test_channel", 1, channel_config)
+        channel.set_driver(driver)
 
         assert (channel.name, channel.channel_id, channel.driver) == (
             "test_channel",
@@ -60,7 +61,8 @@ class TestOPXMeasurementChannel:
         assert (channel.count, channel.job_id, channel.read_len) == (0, None, None)
 
     def test_setters(self, channel_config):
-        channel = OPXMeasurementChannel("test_channel", 1, channel_config, Mock())
+        channel = OPXMeasurementChannel("test_channel", 1, channel_config)
+        channel.set_driver(Mock())
 
         channel.set_job_id(123)
         channel.set_read_len(1000)
@@ -78,7 +80,9 @@ class TestOPXMeasurementChannel:
     def test_get_current_validation(
         self, channel_config, driver, job_id, read_len, error_msg
     ):
-        channel = OPXMeasurementChannel("test_channel", 1, channel_config, driver)
+        channel = OPXMeasurementChannel("test_channel", 1, channel_config)
+        if driver is not None:
+            channel.set_driver(driver)
         if job_id:
             channel.set_job_id(job_id)
         if read_len:
@@ -95,7 +99,8 @@ class TestOPXMeasurementChannel:
         job.result_handles.get.return_value = handle
         handle.fetch.return_value = "raw_data"
 
-        channel = OPXMeasurementChannel("test_channel", 1, channel_config, driver)
+        channel = OPXMeasurementChannel("test_channel", 1, channel_config)
+        channel.set_driver(driver)
         channel.set_job_id(123)
         channel.set_read_len(1000)
 
@@ -132,7 +137,8 @@ class TestOPXInstrument:
 
     def test_prepare_measurement(self, instrument_config, opx_mocks):
         instrument = OPXInstrument(instrument_config, {})
-        mock_job = Mock(job_id=456)
+        mock_job = Mock()
+        mock_job.id = 456
         opx_mocks.execute.return_value = mock_job
 
         mock_channel = Mock()
@@ -181,7 +187,8 @@ class TestOPXMeasurementChannelAdvanced:
         driver.get_job.return_value = job
         job.result_handles.get.return_value = None  # No handle found
 
-        channel = OPXMeasurementChannel("test_channel", 1, channel_config, driver)
+        channel = OPXMeasurementChannel("test_channel", 1, channel_config)
+        channel.set_driver(driver)
         channel.set_job_id(123)
         channel.set_read_len(1000)
 
@@ -203,7 +210,8 @@ class TestOPXMeasurementChannelAdvanced:
             "Timeout"
         )  # Exception handled
 
-        channel = OPXMeasurementChannel("test_channel", 1, channel_config, driver)
+        channel = OPXMeasurementChannel("test_channel", 1, channel_config)
+        channel.set_driver(driver)
         channel.set_job_id(123)
         channel.set_read_len(1000)
 
@@ -225,8 +233,14 @@ class TestOPXInstrumentAdvanced:
 
         patches = [
             patch("stanza.drivers.opx.QuantumMachinesManager", return_value=mock_qmm),
-            patch("stanza.drivers.opx.get_config_resource", return_value="{}"),
-            patch("stanza.drivers.opx.substitute_parameters", return_value="{}"),
+            patch(
+                "stanza.drivers.opx.get_config_resource",
+                return_value='{"elements": {}}',
+            ),
+            patch(
+                "stanza.drivers.opx.substitute_parameters",
+                return_value='{"elements": {}}',
+            ),
             patch("stanza.drivers.opx.FullQuaConfig", return_value=Mock()),
         ]
 
@@ -326,8 +340,8 @@ class TestOPXInstrumentAdvanced:
         job1 = Mock()
         job2 = Mock()
         job1.halt.side_effect = RuntimeError("Halt failed")
-        job1.job_id = "job1"
-        job2.job_id = "job2"
+        job1.id = "job1"
+        job2.id = "job2"
         opx_mocks.get_jobs.return_value = [job1, job2]
 
         instrument = OPXInstrument(instrument_config, {})

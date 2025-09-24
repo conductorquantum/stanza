@@ -130,6 +130,9 @@ class MeasurementInstrumentConfig(BaseInstrumentConfig):
     measurement_channels: list[int] | None = Field(
         None, description="OPX measurement channels"
     )
+    connection_headers: dict[str, str] | None = Field(
+        None, description="OPX connection headers"
+    )
     octave: str | None = Field(None, description="OPX octave configuration")
 
     @model_validator(mode="after")

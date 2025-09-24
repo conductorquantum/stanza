@@ -81,6 +81,8 @@ jobs:
         env:
           COVERAGE_FILE: coverage/.coverage.${{ runner.os }}-py${{ matrix.python-version }}
           CONTEXT: ${{ runner.os }}-py${{ matrix.python-version }}
+          QM_SAAS_EMAIL: ${{ secrets.QM_SAAS_EMAIL }}
+          QM_SAAS_PASSWORD: ${{ secrets.QM_SAAS_PASSWORD }}
 
       - name: Store coverage files
         uses: actions/upload-artifact@v4
