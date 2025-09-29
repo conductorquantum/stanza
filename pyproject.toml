@@ -65,6 +65,9 @@ pyvisa = [
 qm = [
     "qm-qua>=1.2.0"
 ]
+hdf5 = [
+    "h5py>=3.0.0"
+]
 
 [project.urls]
 Homepage = "https://github.com/conductorquantum/stanza"

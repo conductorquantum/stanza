@@ -266,3 +266,16 @@ class TestInstrumentChannelBase:
         assert info["config"] == config
         assert "voltage" in info["parameters"]
         assert "slew_rate" in info["parameters"]
+
+    def test_set_parameter_non_validation_error(self):
+        config = ChannelConfig(
+            name="test",
+            voltage_range=(-1.0, 1.0),
+            pad_type=PadType.GATE,
+            electrode_type=GateType.PLUNGER,
+            control_channel=1,
+        )
+        channel = ControlChannel(config=config)
+
+        with pytest.raises(Exception, match="Set parameter.*failed"):
+            channel.set_parameter("nonexistent_param", 1.0)
