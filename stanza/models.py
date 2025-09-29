@@ -101,10 +101,10 @@ class Contact(Electrode):
     type: ContactType
 
 
-class ExperimentConfig(BaseModelWithConfig):
+class RoutineConfig(BaseModelWithConfig):
     name: str
     parameters: dict[str, Any | str] | None = None
-    experiments: list["ExperimentConfig"] | None = None
+    routines: list["RoutineConfig"] | None = None
 
 
 class BaseInstrumentConfig(BaseModelWithConfig):
@@ -175,7 +175,7 @@ class DeviceConfig(BaseModel):
     name: str
     gates: dict[str, Gate]
     contacts: dict[str, Contact]
-    experiments: list[ExperimentConfig]
+    routines: list[RoutineConfig]
     instruments: list[InstrumentConfig]
 
     @model_validator(mode="after")

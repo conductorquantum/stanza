@@ -10,6 +10,7 @@ from stanza.models import (
     GateType,
     InstrumentType,
     MeasurementInstrumentConfig,
+    RoutineConfig,
 )
 from stanza.utils import generate_channel_configs
 
@@ -82,7 +83,7 @@ def device_config():
                 measure_channel=2,
             )
         },
-        experiments=[],
+        routines=[],
         instruments=[
             ControlInstrumentConfig(
                 name="mock_control",
@@ -118,7 +119,7 @@ def device_config_no_instruments():
             )
         },
         contacts={},
-        experiments=[],
+        routines=[],
         instruments=[
             ControlInstrumentConfig(
                 name="mock_control",
@@ -161,3 +162,18 @@ def device_no_instruments(device_config_no_instruments):
         None,
         None,
     )
+
+
+@pytest.fixture
+def routine_configs():
+    """Fixture providing sample routine configurations."""
+    return [
+        RoutineConfig(
+            name="test_routine", parameters={"param1": "value1", "param2": 42}
+        ),
+        RoutineConfig(
+            name="configured_routine",
+            parameters={"threshold": 1e-12, "multiplier": 2.5},
+        ),
+        RoutineConfig(name="no_params_routine"),  # No parameters
+    ]

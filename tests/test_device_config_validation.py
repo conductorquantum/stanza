@@ -6,11 +6,11 @@ from stanza.models import (
     ControlInstrumentConfig,
     DeviceConfig,
     Electrode,
-    ExperimentConfig,
     Gate,
     GateType,
     InstrumentType,
     MeasurementInstrumentConfig,
+    RoutineConfig,
 )
 
 
@@ -120,7 +120,7 @@ def test_device_config_unique_channels():
             name="test_device",
             gates={"gate1": gate1, "gate2": gate2},
             contacts={},
-            experiments=[ExperimentConfig(name="test_exp")],
+            routines=[RoutineConfig(name="test_exp")],
             instruments=[control_instrument, measurement_instrument],
         )
 
@@ -143,7 +143,7 @@ def test_device_config_required_instruments():
             name="test_device",
             gates={"gate1": gate},
             contacts={},
-            experiments=[ExperimentConfig(name="test_exp")],
+            routines=[RoutineConfig(name="test_exp")],
             instruments=[
                 ControlInstrumentConfig(
                     name="control",
@@ -160,7 +160,7 @@ def test_device_config_required_instruments():
             name="test_device",
             gates={"gate1": gate},
             contacts={},
-            experiments=[ExperimentConfig(name="test_exp")],
+            routines=[RoutineConfig(name="test_exp")],
             instruments=[
                 MeasurementInstrumentConfig(
                     name="measurement",
@@ -208,7 +208,7 @@ def test_valid_device_config():
         name="test_device",
         gates={"gate1": gate},
         contacts={"contact1": contact},
-        experiments=[ExperimentConfig(name="test_exp")],
+        routines=[RoutineConfig(name="test_exp")],
         instruments=[control_instrument, measurement_instrument],
     )
 
@@ -250,6 +250,6 @@ def test_device_config_duplicate_measure_channels():
                 ),
             },
             contacts={},
-            experiments=[],
+            routines=[],
             instruments=[],
         )
