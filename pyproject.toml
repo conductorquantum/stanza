@@ -65,7 +65,7 @@ pyvisa = [
 qm = [
     "qm-qua>=1.2.0"
 ]
-hdf5 = [
+logging = [
     "h5py>=3.0.0"
 ]
 
