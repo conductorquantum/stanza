@@ -65,7 +65,6 @@ class TestOPXMeasurementChannel:
     def test_setters(self, channel_config):
         channel = OPXMeasurementChannel("test_channel", 1, channel_config)
         channel.set_driver(Mock())
-
         channel.set_job_id(123)
         channel.set_read_len(1000)
 
@@ -112,6 +111,44 @@ class TestOPXMeasurementChannel:
         assert channel.count == 1
         job.resume.assert_called_once()
         mock_wait.assert_called_once_with(job)
+        handle.wait_for_values.assert_called_once_with(1, timeout=10)
+
+    def test_get_current_missing_handle(self, channel_config):
+        driver = Mock()
+        job = Mock()
+        driver.get_job.return_value = job
+        job.result_handles.get.return_value = None
+
+        channel = OPXMeasurementChannel("test_channel", 1, channel_config)
+        channel.set_driver(driver)
+        channel.set_job_id(123)
+        channel.set_read_len(1000)
+
+        with pytest.raises(
+            InstrumentError, match="No output handle measure_test_channel"
+        ):
+            channel.get_current()
+
+    @patch("stanza.drivers.opx.wait_until_job_is_paused")
+    @patch("stanza.drivers.opx.demod2volts", return_value=2.5)
+    def test_get_current_handles_wait_exception(
+        self, mock_demod2volts, mock_wait, channel_config
+    ):
+        driver, job, handle = Mock(), Mock(), Mock()
+        driver.get_job.return_value = job
+        job.result_handles.get.return_value = handle
+        handle.fetch.return_value = "raw_data"
+        handle.wait_for_values.side_effect = RuntimeError("Timeout")
+
+        channel = OPXMeasurementChannel("test_channel", 1, channel_config)
+        channel.set_driver(driver)
+        channel.set_job_id(123)
+        channel.set_read_len(1000)
+
+        result = channel.get_current()
+
+        assert result == -2.5
+        assert channel.count == 1
         handle.wait_for_values.assert_called_once_with(1, timeout=10)
 
 
@@ -183,60 +220,23 @@ class TestOPXInstrument:
         assert result == 2.5
         mock_channel.get_parameter_value.assert_called_once_with("current")
 
+    @patch("stanza.drivers.opx.HAS_QM", True)
+    def test_initialize_channels_with_measurement_channels(self, instrument_config):
+        channel_configs = {
+            "ch1": ChannelConfig(
+                "ch1", (-1.0, 1.0), PadType.GATE, GateType.PLUNGER, measure_channel=1
+            ),
+            "ch2": ChannelConfig(
+                "ch2", (-1.0, 1.0), PadType.GATE, GateType.PLUNGER, measure_channel=2
+            ),
+            "ch3": ChannelConfig(
+                "ch3", (-1.0, 1.0), PadType.GATE, GateType.PLUNGER, measure_channel=3
+            ),
+        }
 
-class TestOPXMeasurementChannelAdvanced:
-    """Advanced tests for OPX measurement channel edge cases."""
-
-    def test_get_current_missing_handle(self, channel_config):
-        driver = Mock()
-        job = Mock()
-        driver.get_job.return_value = job
-        job.result_handles.get.return_value = None  # No handle found
-
-        channel = OPXMeasurementChannel("test_channel", 1, channel_config)
-        channel.set_driver(driver)
-        channel.set_job_id(123)
-        channel.set_read_len(1000)
-
-        with pytest.raises(
-            InstrumentError, match="No output handle measure_test_channel"
-        ):
-            channel.get_current()
-
-    @patch("stanza.drivers.opx.wait_until_job_is_paused")
-    @patch("stanza.drivers.opx.demod2volts", return_value=2.5)
-    def test_get_current_handles_wait_exception(
-        self, mock_demod2volts, mock_wait, channel_config
-    ):
-        driver, job, handle = Mock(), Mock(), Mock()
-        driver.get_job.return_value = job
-        job.result_handles.get.return_value = handle
-        handle.fetch.return_value = "raw_data"
-        handle.wait_for_values.side_effect = RuntimeError(
-            "Timeout"
-        )  # Exception handled
-
-        channel = OPXMeasurementChannel("test_channel", 1, channel_config)
-        channel.set_driver(driver)
-        channel.set_job_id(123)
-        channel.set_read_len(1000)
-
-        result = channel.get_current()
-
-        assert result == -2.5
-        assert channel.count == 1
-        handle.wait_for_values.assert_called_once_with(1, timeout=10)
-
-
-class TestOPXInstrumentAdvanced:
-    """Advanced tests for OPX instrument functionality."""
-
-    def _mock_opx_dependencies(self):
-        """Context manager to mock all OPX dependencies."""
         mock_qmm = Mock()
         mock_driver = Mock()
         mock_qmm.open_qm.return_value = mock_driver
-
         patches = [
             patch("stanza.drivers.opx.QuantumMachinesManager", return_value=mock_qmm),
             patch(
@@ -250,39 +250,11 @@ class TestOPXInstrumentAdvanced:
             patch("stanza.drivers.opx.FullQuaConfig", return_value=Mock()),
         ]
 
-        class MockContext:
-            def __init__(self, patches):
-                self.patches = patches
-                self.mocks = []
-
-            def __enter__(self):
-                self.mocks = [p.__enter__() for p in self.patches]
-                return mock_driver, mock_qmm, self.mocks
-
-            def __exit__(self, *args):
-                for p in reversed(self.patches):
-                    p.__exit__(*args)
-
-        return MockContext(patches)
-
-    @patch("stanza.drivers.opx.HAS_QM", True)
-    def test_initialize_channels_with_measurement_channels(self, instrument_config):
-        channel_configs = {
-            "ch1": ChannelConfig(
-                "ch1", (-1.0, 1.0), PadType.GATE, GateType.PLUNGER, measure_channel=1
-            ),
-            "ch2": ChannelConfig(
-                "ch2", (-1.0, 1.0), PadType.GATE, GateType.PLUNGER, measure_channel=2
-            ),
-            "ch3": ChannelConfig(
-                "ch3", (-1.0, 1.0), PadType.GATE, GateType.PLUNGER, measure_channel=3
-            ),  # Not in measurement_channels
-        }
-
-        with self._mock_opx_dependencies():
+        with ExitStack() as stack:
+            for p in patches:
+                stack.enter_context(p)
             instrument = OPXInstrument(instrument_config, channel_configs)
 
-            # Only channels 1 and 2 should be added (they're in measurement_channels=[1, 2])
             assert "measure_ch1" in instrument.channels
             assert "measure_ch2" in instrument.channels
             assert "measure_ch3" not in instrument.channels
@@ -306,10 +278,27 @@ class TestOPXInstrumentAdvanced:
             )
         }
 
-        with self._mock_opx_dependencies():
+        mock_qmm = Mock()
+        mock_driver = Mock()
+        mock_qmm.open_qm.return_value = mock_driver
+        patches = [
+            patch("stanza.drivers.opx.QuantumMachinesManager", return_value=mock_qmm),
+            patch(
+                "stanza.drivers.opx.get_config_resource",
+                return_value='{"elements": {}}',
+            ),
+            patch(
+                "stanza.drivers.opx.substitute_parameters",
+                return_value='{"elements": {}}',
+            ),
+            patch("stanza.drivers.opx.FullQuaConfig", return_value=Mock()),
+        ]
+
+        with ExitStack() as stack:
+            for p in patches:
+                stack.enter_context(p)
             instrument = OPXInstrument(config, channel_configs)
 
-            # No channels should be added when measurement_channels is None
             assert "measure_ch1" not in instrument.channels
 
     @patch("stanza.drivers.opx.HAS_QM", True)
@@ -343,11 +332,28 @@ class TestOPXInstrumentAdvanced:
 
     @patch("stanza.drivers.opx.HAS_QM", True)
     def test_qua_program_property(self, instrument_config, opx_mocks):
-        with self._mock_opx_dependencies():
+        mock_qmm = Mock()
+        mock_driver = Mock()
+        mock_qmm.open_qm.return_value = mock_driver
+        patches = [
+            patch("stanza.drivers.opx.QuantumMachinesManager", return_value=mock_qmm),
+            patch(
+                "stanza.drivers.opx.get_config_resource",
+                return_value='{"elements": {}}',
+            ),
+            patch(
+                "stanza.drivers.opx.substitute_parameters",
+                return_value='{"elements": {}}',
+            ),
+            patch("stanza.drivers.opx.FullQuaConfig", return_value=Mock()),
+        ]
+
+        with ExitStack() as stack:
+            for p in patches:
+                stack.enter_context(p)
             instrument = OPXInstrument(instrument_config, {})
             instrument.channels = {"test_ch1": Mock(), "test_ch2": Mock()}
 
-            # Mock the qua_program property directly since the QUA functions are complex
             mock_prog = Mock()
             with patch.object(type(instrument), "qua_program", mock_prog):
                 program = instrument.qua_program

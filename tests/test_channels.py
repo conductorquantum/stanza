@@ -10,6 +10,38 @@ from stanza.instruments.channels import (
 from stanza.models import ContactType, GateType, PadType
 
 
+@pytest.fixture
+def control_config():
+    return ChannelConfig(
+        name="gate1",
+        voltage_range=(-2.0, 2.0),
+        pad_type=PadType.GATE,
+        electrode_type=GateType.PLUNGER,
+        control_channel=1,
+    )
+
+
+@pytest.fixture
+def measurement_config():
+    return ChannelConfig(
+        name="sense1",
+        voltage_range=(-1.0, 1.0),
+        pad_type=PadType.CONTACT,
+        electrode_type=ContactType.SOURCE,
+        measure_channel=1,
+    )
+
+
+@pytest.fixture
+def control_channel(control_config):
+    return ControlChannel(config=control_config)
+
+
+@pytest.fixture
+def measurement_channel(measurement_config):
+    return MeasurementChannel(config=measurement_config)
+
+
 class TestChannelConfig:
     def test_basic_initialization(self):
         config = ChannelConfig(
@@ -114,125 +146,59 @@ class TestValidators:
 
 
 class TestControlChannel:
-    def test_initialization(self):
-        config = ChannelConfig(
-            name="gate1",
-            voltage_range=(-2.0, 2.0),
-            pad_type=PadType.GATE,
-            electrode_type=GateType.PLUNGER,
-            control_channel=1,
-        )
-        channel = ControlChannel(config=config)
+    def test_initialization(self, control_channel, control_config):
+        assert control_channel.channel_id == 1
+        assert control_channel.config == control_config
+        assert "voltage" in control_channel.parameters
+        assert "slew_rate" in control_channel.parameters
 
-        assert channel.channel_id == 1
-        assert channel.config == config
-        assert "voltage" in channel.parameters
-        assert "slew_rate" in channel.parameters
-
-    def test_voltage_parameter_validation(self):
-        config = ChannelConfig(
-            name="gate1",
-            voltage_range=(-1.0, 1.0),
-            pad_type=PadType.GATE,
-            electrode_type=GateType.PLUNGER,
-            control_channel=1,
-        )
-        channel = ControlChannel(config=config)
-
-        channel.set_parameter("voltage", 0.5)
-        assert channel.get_parameter_value("voltage") == 0.5
+    def test_voltage_parameter_validation(self, control_channel):
+        control_channel.set_parameter("voltage", 0.5)
+        assert control_channel.get_parameter_value("voltage") == 0.5
 
         with pytest.raises(ValueError):
-            channel.set_parameter("voltage", 2.0)
+            control_channel.set_parameter("voltage", 3.0)
 
-    def test_slew_rate_parameter(self):
-        config = ChannelConfig(
-            name="gate1",
-            voltage_range=(-1.0, 1.0),
-            pad_type=PadType.GATE,
-            electrode_type=GateType.PLUNGER,
-            control_channel=1,
-        )
-        channel = ControlChannel(config=config)
-
-        channel.set_parameter("slew_rate", 10.0)
-        assert channel.get_parameter_value("slew_rate") == 10.0
+    def test_slew_rate_parameter(self, control_channel):
+        control_channel.set_parameter("slew_rate", 10.0)
+        assert control_channel.get_parameter_value("slew_rate") == 10.0
 
         with pytest.raises(ValueError):
-            channel.set_parameter("slew_rate", 0.0)
+            control_channel.set_parameter("slew_rate", 0.0)
 
 
 class TestMeasurementChannel:
-    def test_initialization(self):
-        config = ChannelConfig(
-            name="sense1",
-            voltage_range=(-1.0, 1.0),
-            pad_type=PadType.CONTACT,
-            electrode_type=ContactType.SOURCE,
-            measure_channel=1,
-        )
-        channel = MeasurementChannel(config=config)
+    def test_initialization(self, measurement_channel):
+        assert measurement_channel.channel_id == 1
+        assert "current" in measurement_channel.parameters
+        assert "conversion_factor" in measurement_channel.parameters
 
-        assert channel.channel_id == 1
-        assert "current" in channel.parameters
-        assert "conversion_factor" in channel.parameters
-
-    def test_conversion_factor_validation(self):
-        config = ChannelConfig(
-            name="sense1",
-            voltage_range=(-1.0, 1.0),
-            pad_type=PadType.CONTACT,
-            electrode_type=ContactType.SOURCE,
-            measure_channel=1,
-        )
-        channel = MeasurementChannel(config=config)
-
-        channel.set_parameter("conversion_factor", 1e-6)
-        assert channel.get_parameter_value("conversion_factor") == 1e-6
+    def test_conversion_factor_validation(self, measurement_channel):
+        measurement_channel.set_parameter("conversion_factor", 1e-6)
+        assert measurement_channel.get_parameter_value("conversion_factor") == 1e-6
 
         with pytest.raises(ValueError):
-            channel.set_parameter("conversion_factor", 0.0)
+            measurement_channel.set_parameter("conversion_factor", 0.0)
 
 
 class TestInstrumentChannelBase:
-    def test_parameter_management(self):
-        config = ChannelConfig(
-            name="test",
-            voltage_range=(-1.0, 1.0),
-            pad_type=PadType.GATE,
-            electrode_type=GateType.PLUNGER,
-            control_channel=1,
-        )
-        channel = ControlChannel(config=config)
-
-        # Test getting existing parameter
-        voltage_param = channel.get_parameter("voltage")
+    def test_parameter_management(self, control_channel):
+        voltage_param = control_channel.get_parameter("voltage")
         assert voltage_param.name == "voltage"
 
-        # Test getting non-existent parameter
         with pytest.raises(KeyError, match="Parameter 'nonexistent' not found"):
-            channel.get_parameter("nonexistent")
+            control_channel.get_parameter("nonexistent")
 
-        # Test adding duplicate parameter
         duplicate_param = Parameter(name="voltage", value=0.0)
         with pytest.raises(ValueError, match="Parameter 'voltage' already exists"):
-            channel.add_parameter(duplicate_param)
+            control_channel.add_parameter(duplicate_param)
 
-    def test_parameter_value_access(self):
-        config = ChannelConfig(
-            name="test",
-            voltage_range=(-1.0, 1.0),
-            pad_type=PadType.GATE,
-            electrode_type=GateType.PLUNGER,
-            control_channel=1,
-        )
-        channel = ControlChannel(config=config)
-
-        channel.set_parameter("voltage", 0.8)
-        assert channel.get_parameter_value("voltage") == 0.8
+    def test_parameter_value_access(self, control_channel):
+        control_channel.set_parameter("voltage", 0.8)
+        assert control_channel.get_parameter_value("voltage") == 0.8
 
         with pytest.raises(KeyError):
-            channel.get_parameter_value("nonexistent")
+            control_channel.get_parameter_value("nonexistent")
 
     def test_str_representation(self):
         config = ChannelConfig(
@@ -267,15 +233,6 @@ class TestInstrumentChannelBase:
         assert "voltage" in info["parameters"]
         assert "slew_rate" in info["parameters"]
 
-    def test_set_parameter_non_validation_error(self):
-        config = ChannelConfig(
-            name="test",
-            voltage_range=(-1.0, 1.0),
-            pad_type=PadType.GATE,
-            electrode_type=GateType.PLUNGER,
-            control_channel=1,
-        )
-        channel = ControlChannel(config=config)
-
+    def test_set_parameter_non_validation_error(self, control_channel):
         with pytest.raises(Exception, match="Set parameter.*failed"):
-            channel.set_parameter("nonexistent_param", 1.0)
+            control_channel.set_parameter("nonexistent_param", 1.0)

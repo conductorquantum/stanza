@@ -2,6 +2,8 @@ import pytest
 
 from stanza.device import Device
 from stanza.exceptions import DeviceError
+from stanza.models import Contact, ContactType, Gate, GateType
+from stanza.utils import generate_channel_configs
 
 
 class TestDevice:
@@ -116,10 +118,6 @@ class TestDevice:
     def test_measure_pad_no_measure_channel(
         self, device_config, control_instrument, measurement_instrument
     ):
-        # Create a gate without measure channel
-        from stanza.models import Gate, GateType
-        from stanza.utils import generate_channel_configs
-
         device_config.gates["gate2"] = Gate(
             name="gate2",
             type=GateType.PLUNGER,
@@ -143,10 +141,6 @@ class TestDevice:
     def test_check_pad_no_control_channel(
         self, device_config, control_instrument, measurement_instrument
     ):
-        # Create a contact with only measure channel
-        from stanza.models import Contact, ContactType
-        from stanza.utils import generate_channel_configs
-
         device_config.contacts["contact2"] = Contact(
             name="contact2",
             type=ContactType.SOURCE,

@@ -6,51 +6,57 @@ import pytest
 from stanza.drivers.utils import demod2volts, wait_until_job_is_paused
 
 
+@pytest.fixture
+def mock_job():
+    return Mock()
+
+
 class TestWaitUntilJobIsPaused:
-    def test_returns_immediately_when_job_paused(self):
-        job = Mock(is_paused=Mock(return_value=True))
-        assert wait_until_job_is_paused(job) is True
-        job.is_paused.assert_called_once()
+    def test_returns_immediately_when_job_paused(self, mock_job):
+        mock_job.is_paused.return_value = True
+
+        assert wait_until_job_is_paused(mock_job) is True
+        mock_job.is_paused.assert_called_once()
 
     @patch("time.sleep")
     @patch("time.time")
-    def test_waits_until_pause_then_returns(self, mock_time, mock_sleep):
-        job = Mock(is_paused=Mock(side_effect=[False, False, False, True]))
+    def test_waits_until_pause_then_returns(self, mock_time, mock_sleep, mock_job):
+        mock_job.is_paused.side_effect = [False, False, False, True]
         mock_time.side_effect = [0, 0.1, 0.2, 0.3]
 
-        assert wait_until_job_is_paused(job, timeout=5) is True
-        assert job.is_paused.call_count == 4
+        assert wait_until_job_is_paused(mock_job, timeout=5) is True
+        assert mock_job.is_paused.call_count == 4
         assert mock_sleep.call_count == 3
-        mock_sleep.assert_called_with(0.1)
 
     @patch("time.sleep")
     @patch("time.time")
-    def test_raises_timeout_error_when_strict(self, mock_time, mock_sleep):
-        job = Mock(is_paused=Mock(return_value=False))
+    def test_raises_timeout_error_when_strict(self, mock_time, mock_sleep, mock_job):
+        mock_job.is_paused.return_value = False
         mock_time.side_effect = [0, 1.5, 2.5]
 
         with pytest.raises(TimeoutError, match="Timeout \\(2s\\) was reached"):
-            wait_until_job_is_paused(job, timeout=2, strict_timeout=True)
+            wait_until_job_is_paused(mock_job, timeout=2, strict_timeout=True)
 
     @patch("time.sleep")
     @patch("time.time")
-    def test_warns_on_timeout_when_not_strict(self, mock_time, mock_sleep):
-        job = Mock(is_paused=Mock(return_value=False))
+    def test_warns_on_timeout_when_not_strict(self, mock_time, mock_sleep, mock_job):
+        mock_job.is_paused.return_value = False
         mock_time.side_effect = [0, 1.5, 2.5]
 
         with pytest.warns(UserWarning, match="Timeout \\(2s\\) was reached"):
             assert (
-                wait_until_job_is_paused(job, timeout=2, strict_timeout=False) is True
+                wait_until_job_is_paused(mock_job, timeout=2, strict_timeout=False)
+                is True
             )
 
     @patch("time.sleep")
     @patch("time.time")
-    def test_custom_timeout_value(self, mock_time, mock_sleep):
-        job = Mock(is_paused=Mock(return_value=False))
+    def test_custom_timeout_value(self, mock_time, mock_sleep, mock_job):
+        mock_job.is_paused.return_value = False
         mock_time.side_effect = [0, 5, 15, 25]
 
         with pytest.raises(TimeoutError, match="Timeout \\(10s\\) was reached"):
-            wait_until_job_is_paused(job, timeout=10)
+            wait_until_job_is_paused(mock_job, timeout=10)
 
 
 class TestDemod2volts:

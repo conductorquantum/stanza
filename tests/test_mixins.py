@@ -15,97 +15,85 @@ from stanza.instruments.mixins import (
 from stanza.models import ContactType, GateType, PadType
 
 
+@pytest.fixture
+def channel_mixin():
+    return InstrumentChannelMixin()
+
+
+@pytest.fixture
+def control_config():
+    return ChannelConfig(
+        "test_channel",
+        (-2.0, 2.0),
+        PadType.GATE,
+        GateType.PLUNGER,
+        control_channel=1,
+    )
+
+
+@pytest.fixture
+def measurement_config():
+    return ChannelConfig(
+        "sense1",
+        (-1.0, 1.0),
+        PadType.CONTACT,
+        ContactType.SOURCE,
+        measure_channel=1,
+    )
+
+
 class TestInstrumentChannelMixin:
-    def test_add_and_get_channel(self):
-        mixin = InstrumentChannelMixin()
-        config = ChannelConfig(
-            "test_channel",
-            (-1.0, 1.0),
-            PadType.GATE,
-            GateType.PLUNGER,
-            control_channel=1,
-        )
-        channel = ControlChannel(config=config)
-
-        mixin.add_channel(channel)
-        retrieved_channel = mixin.get_channel("test_channel")
+    def test_add_and_get_channel(self, channel_mixin, control_config):
+        channel = ControlChannel(config=control_config)
+        channel_mixin.add_channel(channel)
+        retrieved_channel = channel_mixin.get_channel("test_channel")
 
         assert retrieved_channel == channel
-        assert "test_channel" in mixin.channels
+        assert "test_channel" in channel_mixin.channels
 
-    def test_add_channel_with_custom_name(self):
-        mixin = InstrumentChannelMixin()
-        config = ChannelConfig(
-            "test_channel",
-            (-1.0, 1.0),
-            PadType.GATE,
-            GateType.PLUNGER,
-            control_channel=1,
-        )
-        channel = ControlChannel(config=config)
-
-        mixin.add_channel("custom_name", channel)
-        retrieved_channel = mixin.get_channel("custom_name")
+    def test_add_channel_with_custom_name(self, channel_mixin, control_config):
+        channel = ControlChannel(config=control_config)
+        channel_mixin.add_channel("custom_name", channel)
+        retrieved_channel = channel_mixin.get_channel("custom_name")
 
         assert retrieved_channel == channel
-        assert "custom_name" in mixin.channels
-        assert "test_channel" not in mixin.channels
+        assert "custom_name" in channel_mixin.channels
+        assert "test_channel" not in channel_mixin.channels
 
-    def test_add_channel_invalid_args(self):
-        mixin = InstrumentChannelMixin()
+    def test_add_channel_invalid_args(self, channel_mixin):
         with pytest.raises(
             ValueError, match="Must provide either channel or channel_name and channel"
         ):
-            mixin.add_channel(None)
+            channel_mixin.add_channel(None)
 
-    def test_remove_channel(self):
-        mixin = InstrumentChannelMixin()
-        config = ChannelConfig(
-            "test_channel",
-            (-1.0, 1.0),
-            PadType.GATE,
-            GateType.PLUNGER,
-            control_channel=1,
-        )
-        channel = ControlChannel(config=config)
+    def test_remove_channel(self, channel_mixin, control_config):
+        channel = ControlChannel(config=control_config)
+        channel_mixin.add_channel(channel)
+        channel_mixin.remove_channel("test_channel")
 
-        mixin.add_channel(channel)
-        mixin.remove_channel("test_channel")
-        assert "test_channel" not in mixin.channels
+        assert "test_channel" not in channel_mixin.channels
 
 
 class TestControlInstrumentMixin:
-    def test_set_and_get_voltage(self):
+    @pytest.fixture
+    def control_mixin(self, control_config):
         mixin = ControlInstrumentMixin()
-        config = ChannelConfig(
-            "gate1", (-2.0, 2.0), PadType.GATE, GateType.PLUNGER, control_channel=1
-        )
-        channel = ControlChannel(config=config)
+        channel = ControlChannel(config=control_config)
         mixin.add_channel(channel)
+        return mixin
 
-        mixin.set_voltage("gate1", 1.5)
-        assert mixin.get_voltage("gate1") == 1.5
+    def test_set_and_get_voltage(self, control_mixin):
+        control_mixin.set_voltage("test_channel", 1.5)
+        assert control_mixin.get_voltage("test_channel") == 1.5
 
-    def test_get_slew_rate(self):
-        mixin = ControlInstrumentMixin()
-        config = ChannelConfig(
-            "gate1", (-2.0, 2.0), PadType.GATE, GateType.PLUNGER, control_channel=1
-        )
-        channel = ControlChannel(config=config)
-        mixin.add_channel(channel)
-
+    def test_get_slew_rate(self, control_mixin):
+        channel = control_mixin.get_channel("test_channel")
         channel.set_parameter("slew_rate", 5.0)
-        assert mixin.get_slew_rate("gate1") == 5.0
+        assert control_mixin.get_slew_rate("test_channel") == 5.0
 
-    def test_set_slew_rate(self):
-        mixin = ControlInstrumentMixin()
-        config = ChannelConfig(
-            "gate1", (-2.0, 2.0), PadType.GATE, GateType.PLUNGER, control_channel=1
-        )
-        channel = ControlChannel(config=config)
-        mixin.add_channel(channel)
-
-        mixin.set_slew_rate("gate1", 3.5)
+    def test_set_slew_rate(self, control_mixin):
+        control_mixin.set_slew_rate("test_channel", 3.5)
+        channel = control_mixin.get_channel("test_channel")
         assert channel.get_parameter_value("slew_rate") == 3.5
 
 
@@ -118,21 +106,14 @@ class TestMeasurementInstrumentMixin:
         ):
             mixin.prepare_measurement()
 
-    def test_measure_basic_functionality(self):
+    def test_measure_basic_functionality(self, measurement_config):
         class TestMeasurementInstrument(MeasurementInstrumentMixin):
             @contextmanager
             def prepare_measurement(self):
                 yield
 
         mixin = TestMeasurementInstrument()
-        config = ChannelConfig(
-            "sense1",
-            (-1.0, 1.0),
-            PadType.CONTACT,
-            ContactType.SOURCE,
-            measure_channel=1,
-        )
-        channel = MeasurementChannel(config=config)
+        channel = MeasurementChannel(config=measurement_config)
         channel.set_parameter("current", 1e-6)
         mixin.add_channel(channel)
 

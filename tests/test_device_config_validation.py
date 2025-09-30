@@ -15,7 +15,6 @@ from stanza.models import (
 
 
 def test_electrode_readout_requires_measure_channel():
-    """Test that readout=True requires measure_channel to be specified."""
     with pytest.raises(
         ValueError, match="`measure_channel` must be specified when readout=True"
     ):
@@ -25,7 +24,6 @@ def test_electrode_readout_requires_measure_channel():
 
 
 def test_electrode_control_requires_measure_channel():
-    """Test that readout=False requires control_channel to be specified."""
     with pytest.raises(
         ValueError, match="`control_channel` must be specified when readout=False"
     ):
@@ -35,7 +33,6 @@ def test_electrode_control_requires_measure_channel():
 
 
 def test_electrode_control_channel_requires_voltage_bounds():
-    """Test that control_channel requires v_lower_bound and v_upper_bound."""
     with pytest.raises(
         ValueError,
         match="`v_lower_bound` must be specified when control_channel is set",
@@ -54,7 +51,6 @@ def test_electrode_control_channel_requires_voltage_bounds():
 
 
 def test_base_instrument_config_communication_validation():
-    """Test that either ip_addr or serial_addr must be provided."""
     with pytest.raises(
         ValueError, match="Either 'ip_addr' or 'serial_addr' must be provided"
     ):
@@ -68,7 +64,6 @@ def test_base_instrument_config_communication_validation():
 
 
 def test_measurement_instrument_timing_validation():
-    """Test that sample_time cannot be larger than measurement_duration."""
     with pytest.raises(
         ValueError, match="sample_time .* cannot be larger than measurement_duration"
     ):
@@ -82,7 +77,6 @@ def test_measurement_instrument_timing_validation():
 
 
 def test_device_config_unique_channels():
-    """Test that duplicate channels raise ValueError."""
     gate1 = Gate(
         type=GateType.PLUNGER,
         readout=False,
@@ -126,7 +120,6 @@ def test_device_config_unique_channels():
 
 
 def test_device_config_required_instruments():
-    """Test that at least one control and one measurement instrument are required."""
     gate = Gate(
         type=GateType.PLUNGER,
         readout=True,
@@ -135,7 +128,6 @@ def test_device_config_required_instruments():
         v_upper_bound=1.0,
     )
 
-    # Missing measurement instrument
     with pytest.raises(
         ValueError, match="At least one measurement instrument is required"
     ):
@@ -154,7 +146,6 @@ def test_device_config_required_instruments():
             ],
         )
 
-    # Missing control instrument
     with pytest.raises(ValueError, match="At least one control instrument is required"):
         DeviceConfig(
             name="test_device",
@@ -174,7 +165,6 @@ def test_device_config_required_instruments():
 
 
 def test_valid_device_config():
-    """Test that valid configuration passes validation."""
     gate = Gate(
         type=GateType.PLUNGER,
         readout=True,
@@ -219,13 +209,11 @@ def test_valid_device_config():
 
 
 def test_gate_type_str():
-    """Test GateType __str__ method."""
     gate_type = GateType.PLUNGER
     assert str(gate_type) == "GateType.PLUNGER"
 
 
 def test_device_config_duplicate_measure_channels():
-    """Test DeviceConfig validation with duplicate measure channels."""
     with pytest.raises(ValueError, match="Duplicate channels found"):
         DeviceConfig(
             name="test",
@@ -246,7 +234,7 @@ def test_device_config_duplicate_measure_channels():
                     v_lower_bound=-2.0,
                     v_upper_bound=2.0,
                     control_channel=2,
-                    measure_channel=1,  # Duplicate measure channel
+                    measure_channel=1,
                 ),
             },
             contacts={},

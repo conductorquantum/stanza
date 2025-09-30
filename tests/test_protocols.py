@@ -2,8 +2,6 @@ from stanza.instruments.protocols import ControlInstrument, MeasurementInstrumen
 
 
 class MockControlInstrument:
-    """Mock implementation of Controlinstrument protocol."""
-
     def __init__(self):
         self.voltages = {}
         self.slew_rates = {}
@@ -19,8 +17,6 @@ class MockControlInstrument:
 
 
 class MockMeasurementInstrument:
-    """Mock implementation of MeasurementInstrument protocol."""
-
     def __init__(self):
         self.measurements = {}
 

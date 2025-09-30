@@ -692,7 +692,7 @@ class TestJSONLWriter:
             )
             writer.initialize_session(session)
 
-            writer._file_handles["bad"] = "not_a_path"  # type: ignore[assignment]
+            writer._file_handles["bad"] = "not_a_path"
 
             writer.finalize_session()
 
