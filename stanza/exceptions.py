@@ -22,6 +22,19 @@ class LoggingError(Exception):
         self.error_code = error_code
 
 
+class LoggerSessionError(LoggingError):
+    """Exception raised when a logging session operation fails."""
+
+    def __init__(
+        self,
+        message: str,
+        session_id: str | None = None,
+        error_code: str | None = None,
+    ):
+        super().__init__(message, error_code)
+        self.session_id = session_id
+
+
 class WriterError(LoggingError):
     """Raised when data writer operations fail."""
 

@@ -231,6 +231,67 @@ class TestHDF5Writer:
 
             writer.finalize_session()
 
+    def test_initialize_session_error_cleanup(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            writer = HDF5Writer(tmpdir)
+            session = SessionMetadata(
+                session_id="test",
+                start_time=100.0,
+                user="user",
+            )
+
+            mock_file = patch("h5py.File")
+            with mock_file as mock_h5:
+                mock_h5_instance = mock_h5.return_value
+                mock_h5_instance.create_group.side_effect = RuntimeError("Mock error")
+
+                with pytest.raises(WriterError, match="Failed to initialize"):
+                    writer.initialize_session(session)
+
+            assert writer._session_file is None
+            assert writer._h5_file is None
+
+    def test_finalize_session_error_handling(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            writer = HDF5Writer(tmpdir)
+            session = SessionMetadata(
+                session_id="test",
+                start_time=100.0,
+                user="user",
+            )
+            writer.initialize_session(session)
+
+            with patch.object(
+                writer._h5_file, "close", side_effect=RuntimeError("Mock")
+            ):
+                with pytest.raises(WriterError, match="Failed to finalize"):
+                    writer.finalize_session()
+
+    def test_finalize_session_updates_metadata(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            writer = HDF5Writer(tmpdir)
+            session = SessionMetadata(
+                session_id="test_session",
+                start_time=100.0,
+                user="test_user",
+                parameters={"temp": 4.2},
+                end_time=200.0,
+            )
+            writer.initialize_session(session)
+
+            updated_session = SessionMetadata(
+                session_id="test_session",
+                start_time=100.0,
+                user="test_user",
+                parameters={"temp": 4.2, "field": 1.5},
+                end_time=250.0,
+            )
+
+            writer.finalize_session(updated_session)
+
+            with h5py.File(Path(tmpdir) / "test_session.h5", "r") as f:
+                assert f["metadata"].attrs["end_time"] == 250.0
+
 
 class TestJSONLWriter:
     def test_creates_jsonl_file_and_writes_session(self):

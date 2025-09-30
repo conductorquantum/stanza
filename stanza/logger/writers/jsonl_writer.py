@@ -79,7 +79,8 @@ class JSONLWriter(AbstractDataWriter):
         if self._session_dir is not None:
             raise WriterError("Session already initialized")
 
-        self._session_dir = self.base_directory / session.session_id
+        self.session_id = session.session_id
+        self._session_dir = self.base_directory
         self._session_dir.mkdir(parents=True, exist_ok=True)
 
         try:
@@ -94,8 +95,11 @@ class JSONLWriter(AbstractDataWriter):
             self._session_dir = None
             raise WriterError(f"Error creating session directory: {str(e)}") from e
 
-    def finalize_session(self) -> None:
+    def finalize_session(self, session: SessionMetadata | None = None) -> None:
         """Finalize the writer for a session.
+
+        Args:
+            session: Optional updated session metadata to write
 
         Raises:
             WriterError: If no active session or finalization fails
@@ -104,6 +108,13 @@ class JSONLWriter(AbstractDataWriter):
             raise WriterError("No active session")
 
         try:
+            if session is not None:
+                metadata_file = self._session_dir / self._get_file_extension(
+                    "session_metadata.json"
+                )
+                with self._open_file(metadata_file, "w") as f:
+                    json.dump(session.to_dict(), f, indent=4, cls=JSONLEncoder)
+
             for handle in self._file_handles.values():
                 if hasattr(handle, "close"):
                     handle.close()

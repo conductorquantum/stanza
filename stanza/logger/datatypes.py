@@ -40,6 +40,7 @@ class SweepData:
     metadata: dict[str, Any]
     timestamp: float
     session_id: str
+    routine_name: str | None = None
 
     def __post_init__(self) -> None:
         """Initialize the sweep data."""
@@ -57,6 +58,7 @@ class SweepData:
             "metadata": self.metadata,
             "timestamp": self.timestamp,
             "session_id": self.session_id,
+            "routine_name": self.routine_name,
         }
 
 

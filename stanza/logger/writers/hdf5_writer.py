@@ -84,8 +84,11 @@ class HDF5Writer(AbstractDataWriter):
                 f"Failed to initialize HDF5 writer for session: {self.session_id}"
             ) from e
 
-    def finalize_session(self) -> None:
+    def finalize_session(self, session: SessionMetadata | None = None) -> None:
         """Finalize the writer for a session.
+
+        Args:
+            session: Optional updated session metadata to write
 
         Raises:
             WriterError: If no active session or finalization fails
@@ -94,6 +97,13 @@ class HDF5Writer(AbstractDataWriter):
             raise WriterError("No active session")
 
         try:
+            if session is not None and self._h5_file is not None:
+                metadata_group = self._h5_file["metadata"]
+                if session.end_time is not None:
+                    metadata_group.attrs["end_time"] = session.end_time
+                if session.parameters is not None:
+                    metadata_group.attrs["parameters"] = str(session.parameters)
+
             if hasattr(self, "_h5_file") and self._h5_file is not None:
                 self._h5_file.close()
                 self._h5_file = None
@@ -123,10 +133,10 @@ class HDF5Writer(AbstractDataWriter):
             measurement_name = measurement.name
             if measurement_name in self._measurement_counters:
                 counter = self._measurement_counters[measurement_name]
-                measurement_name = f"{measurement_name}_{counter}"
                 self._measurement_counters[measurement_name] += 1
+                measurement_name = f"{measurement_name}_{counter}"
             else:
-                self._measurement_counters[measurement_name] = 0
+                self._measurement_counters[measurement_name] = 1
 
             is_analysis = measurement.metadata.get("data_type") == "analysis"
             target_group = self._h5_file["analysis" if is_analysis else "measurements"]

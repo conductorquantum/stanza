@@ -45,8 +45,11 @@ class AbstractDataWriter(ABC):
         pass
 
     @abstractmethod
-    def finalize_session(self) -> None:
+    def finalize_session(self, session: SessionMetadata | None = None) -> None:
         """Finalize the writer for a session.
+
+        Args:
+            session: Optional updated session metadata to write before finalizing
 
         Raises:
             WriterError: If finalization fails
