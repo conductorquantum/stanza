@@ -9,6 +9,7 @@ from stanza.instruments.channels import (
     ChannelConfig,
     ControlChannel,
     MeasurementChannel,
+    Parameter,
 )
 from stanza.models import BaseInstrumentConfig
 from stanza.pyvisa import PyVisaDriver
@@ -83,6 +84,33 @@ class QDAC2MeasurementChannel(MeasurementChannel):
         )
         current_param.setter = None
 
+        current_range_param = Parameter(
+            name="current_range",
+            value=None,
+            unit="",
+            getter=lambda: str(self.driver.query(f"sens:{self.channel_id}:rang?")),
+            setter=lambda r: self.driver.write(f"sens:{self.channel_id}:rang {r}"),
+        )
+        self.add_parameter(current_range_param)
+
+        measurement_aperature_s = Parameter(
+            name="measurement_aperature_s",
+            value=None,
+            unit="s",
+            getter=lambda: float(self.driver.query(f"sens:{self.channel_id}:aper?")),
+            setter=lambda a: self.driver.write(f"sens:{self.channel_id}:aper {a}"),
+        )
+        self.add_parameter(measurement_aperature_s)
+
+        measurement_nplc = Parameter(
+            name="measurement_nplc",
+            value=None,
+            unit="cycles",
+            getter=lambda: float(self.driver.query(f"sens:{self.channel_id}:nplc?")),
+            setter=lambda n: self.driver.write(f"sens:{self.channel_id}:nplc {n}"),
+        )
+        self.add_parameter(measurement_nplc)
+
 
 class QDAC2(BaseInstrument):
     def __init__(
@@ -102,14 +130,13 @@ class QDAC2(BaseInstrument):
         )  # default 1ms
         self.current_range = QDAC2CurrentRange(current_range)
 
-        # Extract channel lists from channel_configs
         self.control_channels = [
-            cfg.control_channel
+            (cfg.name, cfg.control_channel)
             for cfg in channel_configs.values()
             if cfg.control_channel is not None
         ]
         self.measurement_channels = [
-            cfg.measure_channel
+            (cfg.name, cfg.measure_channel)
             for cfg in channel_configs.values()
             if cfg.measure_channel is not None
         ]
@@ -124,11 +151,15 @@ class QDAC2(BaseInstrument):
         super().__init__(instrument_config)
         self._initialize_channels(channel_configs)
 
+        self.set_current_ranges(self.current_range)
+        self.set_measurement_aperatures_s(self.sample_time)
+
     def _initialize_channels(self, channel_configs: dict[str, ChannelConfig]) -> None:
         for channel_config in channel_configs.values():
             if (
                 channel_config.control_channel is not None
-                and channel_config.control_channel in self.control_channels
+                and (channel_config.name, channel_config.control_channel)
+                in self.control_channels
             ):
                 self.add_channel(
                     f"control_{channel_config.name}",
@@ -141,7 +172,8 @@ class QDAC2(BaseInstrument):
                 )
             if (
                 channel_config.measure_channel is not None
-                and channel_config.measure_channel in self.measurement_channels
+                and (channel_config.name, channel_config.measure_channel)
+                in self.measurement_channels
             ):
                 self.add_channel(
                     f"measure_{channel_config.name}",
@@ -153,13 +185,10 @@ class QDAC2(BaseInstrument):
                     ),
                 )
 
-    def set_current_range(self, current_range: str | QDAC2CurrentRange) -> None:
-        self.current_range = QDAC2CurrentRange(current_range)
-
     def prepare_measurement(self) -> None:
         """Prepare the measurement."""
         # Set the current measurment range
-        channels_str = ",".join(str(ch) for ch in self.measurement_channels)
+        channels_str = ",".join(str(ch) for _, ch in self.measurement_channels)
         self.driver.write(
             f"sens:rang {str(self.current_range).lower()},(@{channels_str})"
         )
@@ -181,6 +210,71 @@ class QDAC2(BaseInstrument):
     def get_slew_rate(self, channel_name: str) -> float:
         """Get the slew rate on a specific channel."""
         return super().get_slew_rate(f"control_{channel_name}")
+
+    def get_current_range(self, channel_name: str) -> str:
+        """Get the current range on a specific channel."""
+        return str(
+            self.get_channel(f"measure_{channel_name}").get_parameter_value(
+                "current_range"
+            )
+        )
+
+    def set_current_range(
+        self, channel_name: str, current_range: str | QDAC2CurrentRange
+    ) -> None:
+        """Set the current range on a specific channel."""
+        self.get_channel(f"measure_{channel_name}").set_parameter(
+            "current_range", current_range
+        )
+
+    def set_current_ranges(self, current_range: str | QDAC2CurrentRange) -> None:
+        """Set the current range on all measurement channels."""
+        for ch_name, _ in self.measurement_channels:
+            self.get_channel(f"measure_{ch_name}").set_parameter(
+                "current_range", current_range
+            )
+
+    def get_measurement_aperature_s(self, channel_name: str) -> float:
+        """Get the measurement aperature on a specific channel."""
+        value = self.get_channel(f"measure_{channel_name}").get_parameter_value(
+            "measurement_aperature_s"
+        )
+        return float(value)
+
+    def set_measurement_aperature_s(
+        self, channel_name: str, measurement_aperature_s: float
+    ) -> None:
+        """Set the measurement aperature on a specific channel."""
+        self.get_channel(f"measure_{channel_name}").set_parameter(
+            "measurement_aperature_s", measurement_aperature_s
+        )
+
+    def set_measurement_aperatures_s(self, measurement_aperature_s: float) -> None:
+        """Set the measurement aperature on all measurement channels."""
+        for ch_name, _ in self.measurement_channels:
+            self.get_channel(f"measure_{ch_name}").set_parameter(
+                "measurement_aperature_s", measurement_aperature_s
+            )
+
+    def get_nplc_cycles(self, channel_name: str) -> float:
+        """Get the number of cycles on a specific channel."""
+        value = self.get_channel(f"measure_{channel_name}").get_parameter_value(
+            "measurement_nplc"
+        )
+        return float(value)
+
+    def set_nplc_cycles(self, channel_name: str, nplc_cycles: float) -> None:
+        """Set the number of cycles on a specific channel."""
+        self.get_channel(f"measure_{channel_name}").set_parameter(
+            "measurement_nplc", nplc_cycles
+        )
+
+    def set_all_nplc_cycles(self, nplc_cycles: float) -> None:
+        """Set the number of cycles on all measurement channels."""
+        for ch_name, _ in self.measurement_channels:
+            self.get_channel(f"measure_{ch_name}").set_parameter(
+                "measurement_nplc", nplc_cycles
+            )
 
     def measure(self, channel_name: str) -> float:
         """Measure the current on a specific channel."""

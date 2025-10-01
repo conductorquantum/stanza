@@ -145,13 +145,13 @@ class TestQDAC2PyVisaSim:
 
     def test_current_range_setting(self, qdac2_sim):
         """Test current range configuration."""
-        # Test setting string value
-        qdac2_sim.set_current_range("LOW")
-        assert qdac2_sim.current_range == QDAC2CurrentRange.LOW
+        qdac2_sim.set_current_range("sense1", "LOW")
+        current_range = qdac2_sim.get_current_range("sense1")
+        assert current_range == "LOW"
 
-        # Test setting enum value
-        qdac2_sim.set_current_range(QDAC2CurrentRange.HIGH)
-        assert qdac2_sim.current_range == QDAC2CurrentRange.HIGH
+        qdac2_sim.set_current_range("sense1", QDAC2CurrentRange.HIGH)
+        current_range = qdac2_sim.get_current_range("sense1")
+        assert current_range == "HIGH"
 
     def test_channel_initialization(self, qdac2_sim):
         """Test that channels are properly initialized."""

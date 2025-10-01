@@ -99,26 +99,68 @@ class TestQDAC2:
 
         assert qdac.name == "qdac2"
         assert qdac.current_range == QDAC2CurrentRange.LOW
-        assert qdac.control_channels == [1]
-        assert qdac.measurement_channels == [2]
+        assert qdac.control_channels == [("gate1", 1)]
+        assert qdac.measurement_channels == [("sense1", 2)]
         mock_driver_class.assert_called_once_with(
             "TCPIP::192.168.1.1::5025::SOCKET", sim_file=None
         )
 
-    def test_set_current_range(self, mock_driver_class, instrument_config):
-        mock_driver_class.return_value = Mock()
+    def test_set_and_get_current_range(
+        self, mock_driver_class, instrument_config, measurement_channel_config
+    ):
+        mock_driver = Mock()
+        mock_driver.query.return_value = "LOW"
+        mock_driver_class.return_value = mock_driver
 
         qdac = QDAC2(
             instrument_config=instrument_config,
             current_range=QDAC2CurrentRange.LOW,
-            channel_configs={},
+            channel_configs={"sense1": measurement_channel_config},
         )
 
-        qdac.set_current_range("HIGH")
-        assert qdac.current_range == QDAC2CurrentRange.HIGH
+        qdac.set_current_range("sense1", "HIGH")
+        mock_driver.write.assert_called_with("sens:2:rang HIGH")
 
-        qdac.set_current_range(QDAC2CurrentRange.LOW)
-        assert qdac.current_range == QDAC2CurrentRange.LOW
+        current_range = qdac.get_current_range("sense1")
+        assert current_range == "LOW"
+
+    def test_set_and_get_measurement_aperature_s(
+        self, mock_driver_class, instrument_config, measurement_channel_config
+    ):
+        mock_driver = Mock()
+        mock_driver.query.return_value = "0.002"
+        mock_driver_class.return_value = mock_driver
+
+        qdac = QDAC2(
+            instrument_config=instrument_config,
+            current_range=QDAC2CurrentRange.LOW,
+            channel_configs={"sense1": measurement_channel_config},
+        )
+
+        qdac.set_measurement_aperature_s("sense1", 0.005)
+        mock_driver.write.assert_called_with("sens:2:aper 0.005")
+
+        aperature = qdac.get_measurement_aperature_s("sense1")
+        assert aperature == 0.002
+
+    def test_set_and_get_nplc_cycles(
+        self, mock_driver_class, instrument_config, measurement_channel_config
+    ):
+        mock_driver = Mock()
+        mock_driver.query.return_value = "20"
+        mock_driver_class.return_value = mock_driver
+
+        qdac = QDAC2(
+            instrument_config=instrument_config,
+            current_range=QDAC2CurrentRange.LOW,
+            channel_configs={"sense1": measurement_channel_config},
+        )
+
+        qdac.set_nplc_cycles("sense1", 15)
+        mock_driver.write.assert_called_with("sens:2:nplc 15")
+
+        nplc = qdac.get_nplc_cycles("sense1")
+        assert nplc == 20.0
 
     def test_prepare_measurement(
         self, mock_driver_class, instrument_config, measurement_channel_config
@@ -144,7 +186,14 @@ class TestQDAC2:
 
         qdac.prepare_measurement()
 
-        expected_calls = [("sens:rang high,(@2,2)",), ("sens:aper 0.001,(@2,2)",)]
+        expected_calls = [
+            ("sens:2:rang HIGH",),
+            ("sens:2:rang HIGH",),
+            ("sens:2:aper 0.001",),
+            ("sens:2:aper 0.001",),
+            ("sens:rang high,(@2,2)",),
+            ("sens:aper 0.001,(@2,2)",),
+        ]
         actual_calls = [call.args for call in mock_driver.write.call_args_list]
         assert actual_calls == expected_calls
 
