@@ -66,7 +66,6 @@ def device_config():
             "gate1": Gate(
                 name="gate1",
                 type=GateType.PLUNGER,
-                readout=False,
                 v_lower_bound=-2.0,
                 v_upper_bound=2.0,
                 control_channel=1,
@@ -77,7 +76,6 @@ def device_config():
             "contact1": Contact(
                 name="contact1",
                 type=ContactType.SOURCE,
-                readout=True,
                 v_lower_bound=-1.0,
                 v_upper_bound=1.0,
                 measure_channel=2,
@@ -111,7 +109,6 @@ def device_config_no_instruments():
             "gate1": Gate(
                 name="gate1",
                 type=GateType.PLUNGER,
-                readout=False,
                 v_lower_bound=-2.0,
                 v_upper_bound=2.0,
                 control_channel=1,
@@ -189,7 +186,6 @@ gates:
     type: PLUNGER
     control_channel: 1
     measure_channel: null
-    readout: false
     v_lower_bound: -1.0
     v_upper_bound: 1.0
 contacts:
@@ -197,7 +193,6 @@ contacts:
     type: SOURCE
     control_channel: 2
     measure_channel: 3
-    readout: true
     v_lower_bound: 0.0
     v_upper_bound: 0.5
 routines: []

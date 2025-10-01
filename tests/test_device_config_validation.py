@@ -14,21 +14,16 @@ from stanza.models import (
 )
 
 
-def test_electrode_readout_requires_measure_channel():
+def test_electrode_requires_control_channel_when_no_measure_channel():
     with pytest.raises(
-        ValueError, match="`measure_channel` must be specified when readout=True"
+        ValueError,
+        match="Either `control_channel` or `measure_channel` must be specified",
     ):
         Electrode(
-            readout=True, measure_channel=None, v_lower_bound=0.0, v_upper_bound=1.0
-        )
-
-
-def test_electrode_control_requires_measure_channel():
-    with pytest.raises(
-        ValueError, match="`control_channel` must be specified when readout=False"
-    ):
-        Electrode(
-            readout=False, control_channel=None, v_lower_bound=0.0, v_upper_bound=1.0
+            control_channel=None,
+            measure_channel=None,
+            v_lower_bound=0.0,
+            v_upper_bound=1.0,
         )
 
 
@@ -37,17 +32,13 @@ def test_electrode_control_channel_requires_voltage_bounds():
         ValueError,
         match="`v_lower_bound` must be specified when control_channel is set",
     ):
-        Electrode(
-            readout=False, control_channel=1, v_lower_bound=None, v_upper_bound=1.0
-        )
+        Electrode(control_channel=1, v_lower_bound=None, v_upper_bound=1.0)
 
     with pytest.raises(
         ValueError,
         match="`v_upper_bound` must be specified when control_channel is set",
     ):
-        Electrode(
-            readout=False, control_channel=1, v_lower_bound=0.0, v_upper_bound=None
-        )
+        Electrode(control_channel=1, v_lower_bound=0.0, v_upper_bound=None)
 
 
 def test_base_instrument_config_communication_validation():
@@ -79,14 +70,12 @@ def test_measurement_instrument_timing_validation():
 def test_device_config_unique_channels():
     gate1 = Gate(
         type=GateType.PLUNGER,
-        readout=False,
         control_channel=1,
         v_lower_bound=0.0,
         v_upper_bound=1.0,
     )
     gate2 = Gate(
         type=GateType.BARRIER,
-        readout=False,
         control_channel=1,
         v_lower_bound=0.0,
         v_upper_bound=1.0,
@@ -122,14 +111,13 @@ def test_device_config_unique_channels():
 def test_device_config_required_instruments():
     gate = Gate(
         type=GateType.PLUNGER,
-        readout=True,
         measure_channel=1,
         v_lower_bound=0.0,
         v_upper_bound=1.0,
     )
 
     with pytest.raises(
-        ValueError, match="At least one measurement instrument is required"
+        ValueError, match="At least one MEASUREMENT or GENERAL instrument is required"
     ):
         DeviceConfig(
             name="test_device",
@@ -146,7 +134,9 @@ def test_device_config_required_instruments():
             ],
         )
 
-    with pytest.raises(ValueError, match="At least one control instrument is required"):
+    with pytest.raises(
+        ValueError, match="At least one CONTROL or GENERAL instrument is required"
+    ):
         DeviceConfig(
             name="test_device",
             gates={"gate1": gate},
@@ -167,14 +157,12 @@ def test_device_config_required_instruments():
 def test_valid_device_config():
     gate = Gate(
         type=GateType.PLUNGER,
-        readout=True,
         measure_channel=1,
         v_lower_bound=0.0,
         v_upper_bound=1.0,
     )
     contact = Contact(
         type=ContactType.SOURCE,
-        readout=True,
         measure_channel=2,
         v_lower_bound=0.0,
         v_upper_bound=1.0,
@@ -221,7 +209,6 @@ def test_device_config_duplicate_measure_channels():
                 "gate1": Gate(
                     name="gate1",
                     type=GateType.PLUNGER,
-                    readout=False,
                     v_lower_bound=-2.0,
                     v_upper_bound=2.0,
                     control_channel=1,
@@ -230,7 +217,6 @@ def test_device_config_duplicate_measure_channels():
                 "gate2": Gate(
                     name="gate2",
                     type=GateType.PLUNGER,
-                    readout=False,
                     v_lower_bound=-2.0,
                     v_upper_bound=2.0,
                     control_channel=2,

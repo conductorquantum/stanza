@@ -116,8 +116,8 @@ class QDAC2(BaseInstrument):
     def __init__(
         self,
         instrument_config: BaseInstrumentConfig,
-        current_range: QDAC2CurrentRange,
         channel_configs: dict[str, ChannelConfig],
+        current_range: QDAC2CurrentRange = QDAC2CurrentRange.LOW,
         is_simulation: bool = False,
         sim_file: str | None = None,
     ):

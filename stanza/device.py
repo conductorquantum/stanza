@@ -6,7 +6,6 @@ from stanza.instruments.channels import ChannelConfig
 from stanza.instruments.protocols import ControlInstrument, MeasurementInstrument
 from stanza.logger.session import LoggerSession
 from stanza.models import ContactType, DeviceConfig, GateType, PadType
-from stanza.utils import generate_channel_configs
 
 
 class Device:
@@ -19,7 +18,7 @@ class Device:
         self,
         name: str,
         device_config: DeviceConfig,
-        channel_configs: dict[str, ChannelConfig] | None,
+        channel_configs: dict[str, ChannelConfig],
         control_instrument: Any | None,
         measurement_instrument: Any | None,
     ):
@@ -40,10 +39,7 @@ class Device:
 
         self.control_instrument = control_instrument
         self.measurement_instrument = measurement_instrument
-
-        self.channel_configs = channel_configs or generate_channel_configs(
-            self.device_config
-        )
+        self.channel_configs = channel_configs
 
     @property
     def gates(self) -> list[str]:

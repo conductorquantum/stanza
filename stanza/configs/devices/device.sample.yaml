@@ -1,0 +1,44 @@
+name: "Sample Device"
+
+contacts:
+  IN: {type: SOURCE, control_channel: 1, measure_channel: 1, v_lower_bound: -3.0, v_upper_bound: 3.0}
+  OUT: {type: DRAIN, control_channel: 2, measure_channel: 2, v_lower_bound: -3.0, v_upper_bound: 3.0}
+
+gates:
+  G1: {type: BARRIER, control_channel: 3, measure_channel: 3, v_lower_bound: -3.0, v_upper_bound: 3.0}
+  G2: {type: PLUNGER, control_channel: 4, measure_channel: 4, v_lower_bound: -3.0, v_upper_bound: 3.0}
+  G3: {type: BARRIER, control_channel: 5, measure_channel: 5, v_lower_bound: -3.0, v_upper_bound: 3.0}
+
+routines:
+  - name: BATIS
+    routines:
+      - name: leakage_test
+        parameters:
+          leakage_threshold_resistance: 50e6
+          leakage_threshold_count: 0
+
+      - name: global_accumulation
+        parameters:
+          step_size: 1e-2
+
+      - name: reservoir_characterization
+        parameters:
+          step_size: 1e-2
+
+      - name: finger_gate_characterization
+        parameters:
+          step_size: 1e-2
+
+instruments:
+  - name: qdac2-control
+    type: CONTROL
+    driver: qdac2
+    ip_addr: 127.0.0.1
+    slew_rate: 1.0
+
+  - name: qdac2-measurement
+    type: MEASUREMENT
+    driver: qdac2
+    ip_addr: 127.0.0.1
+    measurement_duration: 1e-3
+    sample_time: 10e-6

@@ -1,12 +1,16 @@
+from __future__ import annotations
+
 import re
 from importlib.resources import files
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 from typing import Any
 
 import yaml
 
+from stanza.device import Device
 from stanza.instruments.channels import ChannelConfig
-from stanza.models import DeviceConfig, PadType
+from stanza.instruments.registry import load_driver_class
+from stanza.models import DeviceConfig, InstrumentType, PadType
 
 
 def substitute_parameters(template: str, substitutions: dict[str, Any]) -> str:
@@ -43,30 +47,31 @@ def get_config_resource(config_path: str | Path, encoding: str = "utf-8") -> str
     return resource.read_text(encoding)
 
 
-def load_device_config(file_path: str | Path) -> DeviceConfig:
+def load_device_config(
+    config_path: str | Path, is_stanza_config: bool = False
+) -> DeviceConfig:
     """Load a device configuration YAML file.
 
     Args:
-        file_path: The path to the device configuration YAML file.
+        file_content: The content of the device configuration YAML file.
+        is_stanza_config: Whether the config is a stanza config.
 
     Raises:
-        ValueError: If the file extension is not .yaml or .yml.
         ValueError: If the file cannot be loaded.
 
     Returns:
         The device configuration.
     """
-    if PurePosixPath(file_path).suffix not in [".yaml", ".yml"]:
-        raise ValueError(
-            f"Invalid file extension for device config: {file_path}. Expected .yaml or .yml"
-        )
-
     try:
-        with open(file_path) as f:
-            yaml_file = yaml.safe_load(f)
+        file_content = (
+            get_config_resource(config_path)
+            if is_stanza_config
+            else Path(config_path).read_text()
+        )
+        yaml_file = yaml.safe_load(file_content)
         return DeviceConfig.model_validate(yaml_file)
     except Exception as e:
-        raise ValueError(f"Failed to load device config from {file_path}: {e}") from e
+        raise ValueError(f"Failed to load device config: {e}") from e
 
 
 def generate_channel_configs(device_config: DeviceConfig) -> dict[str, ChannelConfig]:
@@ -89,7 +94,6 @@ def generate_channel_configs(device_config: DeviceConfig) -> dict[str, ChannelCo
             electrode_type=gate.type,
             output_mode="dc",
             enabled=True,
-            readout=gate.readout,
         )
 
     for contact_name, contact in device_config.contacts.items():
@@ -102,6 +106,58 @@ def generate_channel_configs(device_config: DeviceConfig) -> dict[str, ChannelCo
             electrode_type=contact.type,
             output_mode="dc",
             enabled=True,
-            readout=contact.readout,
         )
     return channel_configs
+
+
+def device_from_config(
+    config_path: str | Path,
+    is_stanza_config: bool = False,
+    **driver_kwargs: Any,
+) -> Device:
+    """Load a device from a YAML configuration file.
+
+    Args:
+        config_path: Path to the device configuration YAML file.
+        is_stanza_config: Whether the config is a stanza config.
+        **driver_kwargs: Additional keyword arguments to pass to driver constructors.
+
+    Returns:
+        A configured Device instance with instantiated instruments.
+
+    Raises:
+        ValueError: If required driver field is missing or instruments cannot be instantiated.
+    """
+    device_config = load_device_config(config_path, is_stanza_config)
+    channel_configs = generate_channel_configs(device_config)
+
+    control_instrument = None
+    measurement_instrument = None
+
+    for instrument_config in device_config.instruments:
+        if instrument_config.driver is None:
+            raise ValueError(
+                f"Instrument '{instrument_config.name}' missing driver field"
+            )
+
+        driver_class = load_driver_class(instrument_config.driver)
+        instrument = driver_class(instrument_config, channel_configs, **driver_kwargs)
+
+        if instrument_config.type in (InstrumentType.CONTROL, InstrumentType.GENERAL):
+            if control_instrument is None:
+                control_instrument = instrument
+
+        if instrument_config.type in (
+            InstrumentType.MEASUREMENT,
+            InstrumentType.GENERAL,
+        ):
+            if measurement_instrument is None:
+                measurement_instrument = instrument
+
+    return Device(
+        name=device_config.name,
+        device_config=device_config,
+        channel_configs=channel_configs,
+        control_instrument=control_instrument,
+        measurement_instrument=measurement_instrument,
+    )

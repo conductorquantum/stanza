@@ -151,67 +151,36 @@ class TestGetConfigResource:
 
 
 class TestLoadDeviceConfig:
-    def test_loads_yaml_config(self, valid_device_yaml, tmp_path):
+    def test_loads_sample_device_config(self):
+        result = load_device_config("devices/device.sample.yaml", is_stanza_config=True)
+
+        assert result.name == "Sample Device"
+        assert len(result.gates) == 3
+        assert len(result.contacts) == 2
+        assert len(result.instruments) == 2
+        assert "G1" in result.gates
+        assert "IN" in result.contacts
+        assert result.gates["G1"].control_channel == 3
+        assert result.gates["G1"].measure_channel == 3
+        assert result.contacts["IN"].control_channel == 1
+        assert result.contacts["IN"].measure_channel == 1
+
+    def test_loads_external_yaml_config(self, valid_device_yaml, tmp_path):
         config_file = tmp_path / "device.yaml"
         config_file.write_text(valid_device_yaml)
 
-        result = load_device_config(str(config_file))
+        result = load_device_config(str(config_file), is_stanza_config=False)
 
         assert result.name == "test_device"
         assert "G1" in result.gates
         assert result.gates["G1"].control_channel == 1
         assert "C1" in result.contacts
-        assert result.contacts["C1"].readout is True
+        assert result.contacts["C1"].measure_channel == 3
 
-    def test_loads_yml_extension(self, valid_device_yaml, tmp_path):
-        config_file = tmp_path / "device.yml"
-        config_file.write_text(valid_device_yaml)
-        assert load_device_config(str(config_file)).name == "test_device"
-
-    def test_handles_pathlib_path(self, valid_device_yaml, tmp_path):
-        config_file = tmp_path / "device.yaml"
-        config_file.write_text(valid_device_yaml)
-        assert load_device_config(config_file).name == "test_device"
-
-    def test_handles_nested_path(self, valid_device_yaml, tmp_path):
-        nested_dir = tmp_path / "configs" / "devices"
-        nested_dir.mkdir(parents=True)
-        config_file = nested_dir / "device.yaml"
-        config_file.write_text(valid_device_yaml)
-        assert load_device_config(str(config_file)).name == "test_device"
-
-    def test_rejects_invalid_extension(self):
-        with pytest.raises(
-            ValueError, match="Invalid file extension.*Expected .yaml or .yml"
-        ):
-            load_device_config("/path/to/config.json")
-
-    def test_rejects_no_extension(self):
-        with pytest.raises(
-            ValueError, match="Invalid file extension.*Expected .yaml or .yml"
-        ):
-            load_device_config("/path/to/config")
-
-    def test_rejects_txt_extension(self):
-        with pytest.raises(
-            ValueError, match="Invalid file extension.*Expected .yaml or .yml"
-        ):
-            load_device_config("/path/to/device.txt")
-
-    def test_raises_error_for_nonexistent_file(self):
+    def test_raises_error_for_nonexistent_stanza_config(self):
         with pytest.raises(ValueError, match="Failed to load device config"):
-            load_device_config("nonexistent.yaml")
+            load_device_config("nonexistent/path.yaml", is_stanza_config=True)
 
-    def test_raises_error_for_invalid_yaml(self, tmp_path):
-        config_file = tmp_path / "invalid.yaml"
-        config_file.write_text("{ invalid: yaml: content:")
-
+    def test_raises_error_for_nonexistent_external_file(self):
         with pytest.raises(ValueError, match="Failed to load device config"):
-            load_device_config(str(config_file))
-
-    def test_raises_error_for_invalid_schema(self, tmp_path):
-        config_file = tmp_path / "invalid_schema.yaml"
-        config_file.write_text("name: test\ngates: {}\ncontacts: {}\nroutines: []\n")
-
-        with pytest.raises(ValueError, match="Failed to load device config"):
-            load_device_config(str(config_file))
+            load_device_config("/nonexistent/path.yaml", is_stanza_config=False)

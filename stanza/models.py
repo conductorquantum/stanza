@@ -25,39 +25,26 @@ class Electrode(BaseModel):
     measure_channel: int | None = Field(
         None, ge=0, le=1024, description="Measurement channel for measurement signals"
     )
-    readout: bool
     v_lower_bound: float | None
     v_upper_bound: float | None
 
     @model_validator(mode="after")
-    def validate_readout_requires_measure_channel(self) -> "Electrode":
-        if self.readout and self.measure_channel is None:
-            raise ValueError("`measure_channel` must be specified when readout=True")
+    def validate_control_channel_required_when_no_measure_channel(self) -> "Electrode":
+        if self.measure_channel is None and self.control_channel is None:
+            raise ValueError(
+                "Either `control_channel` or `measure_channel` must be specified"
+            )
         return self
 
     @model_validator(mode="after")
-    def validate_control_channel_requires_measure_channel(self) -> "Electrode":
-        if not self.readout and self.control_channel is None:
-            raise ValueError("`control_channel` must be specified when readout=False")
-        return self
-
-    @model_validator(mode="after")
-    def validate_control_channel_requires_v_lower_bound_and_v_upper_bound(
+    def validate_control_channel_requires_v_bounds(
         self,
     ) -> "Electrode":
-        if (
-            not self.readout
-            and self.control_channel is not None
-            and self.v_lower_bound is None
-        ):
+        if self.control_channel is not None and self.v_lower_bound is None:
             raise ValueError(
                 "`v_lower_bound` must be specified when control_channel is set"
             )
-        if (
-            not self.readout
-            and self.control_channel is not None
-            and self.v_upper_bound is None
-        ):
+        if self.control_channel is not None and self.v_upper_bound is None:
             raise ValueError(
                 "`v_upper_bound` must be specified when control_channel is set"
             )
@@ -115,6 +102,10 @@ class BaseInstrumentConfig(BaseModelWithConfig):
     serial_addr: str | None = None
     port: int | None = None
     type: InstrumentType
+    driver: str | None = Field(
+        None,
+        description="Driver file name (e.g., 'qdac2' maps to stanza.drivers.qdac2.QDAC2)",
+    )
 
     @model_validator(mode="after")
     def check_comm_type(self) -> "BaseInstrumentConfig":
@@ -164,8 +155,16 @@ class ControlInstrumentConfig(BaseInstrumentConfig):
     slew_rate: float = Field(gt=0, description="Slew rate in V/s")
 
 
+class GeneralInstrumentConfig(ControlInstrumentConfig, MeasurementInstrumentConfig):
+    """Instrument configuration for general instruments with both control and measurement capabilities."""
+
+    model_config = ConfigDict(extra="allow")
+    type: Literal[InstrumentType.GENERAL] = InstrumentType.GENERAL  # type: ignore[assignment]
+
+
 InstrumentConfig = Annotated[
-    ControlInstrumentConfig | MeasurementInstrumentConfig, Discriminator("type")
+    ControlInstrumentConfig | MeasurementInstrumentConfig | GeneralInstrumentConfig,
+    Discriminator("type"),
 ]
 
 
@@ -227,17 +226,26 @@ class DeviceConfig(BaseModel):
 
     @model_validator(mode="after")
     def validate_required_instruments(self) -> "DeviceConfig":
-        """Ensure at least one control and one measurement instrument"""
         control_instruments = [
             i for i in self.instruments if i.type == InstrumentType.CONTROL
         ]
         measurement_instruments = [
             i for i in self.instruments if i.type == InstrumentType.MEASUREMENT
         ]
+        general_instruments = [
+            i for i in self.instruments if i.type == InstrumentType.GENERAL
+        ]
 
-        if not control_instruments:
-            raise ValueError("At least one control instrument is required")
-        if not measurement_instruments:
-            raise ValueError("At least one measurement instrument is required")
+        has_control = len(control_instruments) > 0 or len(general_instruments) > 0
+        has_measurement = (
+            len(measurement_instruments) > 0 or len(general_instruments) > 0
+        )
+
+        if not has_control:
+            raise ValueError("At least one CONTROL or GENERAL instrument is required")
+        if not has_measurement:
+            raise ValueError(
+                "At least one MEASUREMENT or GENERAL instrument is required"
+            )
 
         return self

@@ -20,7 +20,6 @@ class ChannelConfig:
         enabled: Whether channel is enabled
         unit: Channel units
         metadata: Additional channel metadata
-        readout: Whether channel supports readout
     """
 
     name: str
@@ -33,7 +32,6 @@ class ChannelConfig:
     enabled: bool = True
     unit: str = "V"
     metadata: dict[str, Any] | None = None
-    readout: bool = False
 
     def __post_init__(self) -> None:
         if self.metadata is None:

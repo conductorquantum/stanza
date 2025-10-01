@@ -121,7 +121,6 @@ class TestDevice:
         device_config.gates["gate2"] = Gate(
             name="gate2",
             type=GateType.PLUNGER,
-            readout=False,
             v_lower_bound=-2.0,
             v_upper_bound=2.0,
             control_channel=3,
@@ -144,7 +143,6 @@ class TestDevice:
         device_config.contacts["contact2"] = Contact(
             name="contact2",
             type=ContactType.SOURCE,
-            readout=True,
             v_lower_bound=-1.0,
             v_upper_bound=1.0,
             measure_channel=4,
