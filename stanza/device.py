@@ -4,6 +4,7 @@ from typing import Any, overload
 from stanza.exceptions import DeviceError
 from stanza.instruments.channels import ChannelConfig
 from stanza.instruments.protocols import ControlInstrument, MeasurementInstrument
+from stanza.logger.session import LoggerSession
 from stanza.models import ContactType, DeviceConfig, GateType, PadType
 from stanza.utils import generate_channel_configs
 
@@ -207,7 +208,11 @@ class Device:
             return [self._check(p) for p in pad]
 
     def sweep_1d(
-        self, gate_electrode: str, voltages: list[float], measure_electrode: str
+        self,
+        gate_electrode: str,
+        voltages: list[float],
+        measure_electrode: str,
+        session: LoggerSession | None = None,
     ) -> tuple[list[float], list[float]]:
         """Sweep a single gate electrode and measure the current of a single contact electrode."""
         voltage_measurements = []
@@ -219,6 +224,19 @@ class Device:
             voltage_measurements.append(self.check(gate_electrode))
             current_measurements.append(self.measure(measure_electrode))
 
+        if session:
+            session.log_sweep(
+                name=f"{gate_electrode} sweep",
+                x_data=voltage_measurements,
+                y_data=current_measurements,
+                x_label="Voltage",
+                y_label="Current",
+                metadata={
+                    "gate_electrodes": [gate_electrode],
+                    "measure_electrode": measure_electrode,
+                },
+            )
+
         return voltage_measurements, current_measurements
 
     def sweep_2d(
@@ -228,6 +246,7 @@ class Device:
         gate_2: str,
         voltages_2: list[float],
         measure_electrode: str,
+        session: LoggerSession | None = None,
     ) -> tuple[list[float], list[float]]:
         """Sweep two gate electrodes and measure the current of a single contact electrode."""
         voltage_measurements = []
@@ -242,10 +261,26 @@ class Device:
                 )
                 voltage_measurements.extend([self.check(gate_1), self.check(gate_2)])
                 current_measurements.append(self.measure(measure_electrode))
+
+        if session:
+            session.log_sweep(
+                name=f"{gate_1} and {gate_2} sweep",
+                x_data=voltage_measurements,
+                y_data=current_measurements,
+                x_label="Voltage",
+                y_label="Current",
+                metadata={
+                    "gate_electrodes": [gate_1, gate_2],
+                    "measure_electrode": measure_electrode,
+                },
+            )
         return voltage_measurements, current_measurements
 
     def sweep_all(
-        self, voltages: list[float], measure_electrode: str
+        self,
+        voltages: list[float],
+        measure_electrode: str,
+        session: LoggerSession | None = None,
     ) -> tuple[list[float], list[float]]:
         """Sweep all gate electrodes and measure the current of a single contact electrode."""
         voltage_measurements = []
@@ -261,6 +296,19 @@ class Device:
                 [self.check(gate) or voltage for gate in self.control_gates]
             )
             current_measurements.append(self.measure(measure_electrode))
+
+        if session:
+            session.log_sweep(
+                name="all gates sweep",
+                x_data=voltage_measurements,
+                y_data=current_measurements,
+                x_label="Voltage",
+                y_label="Current",
+                metadata={
+                    "gate_electrodes": self.control_gates,
+                    "measure_electrode": measure_electrode,
+                },
+            )
         return voltage_measurements, current_measurements
 
     def sweep_nd(
@@ -268,6 +316,7 @@ class Device:
         gate_electrodes: list[str],
         voltages: list[list[float]],
         measure_electrode: str,
+        session: LoggerSession | None = None,
     ) -> tuple[list[float], list[float]]:
         """Sweep multiple gate electrodes and measure the current of a single contact electrode."""
         voltage_measurements = []
@@ -287,4 +336,17 @@ class Device:
                 ]
             )
             current_measurements.append(self.measure(measure_electrode))
+
+        if session:
+            session.log_sweep(
+                name="n gates sweep",
+                x_data=voltage_measurements,
+                y_data=current_measurements,
+                x_label="Voltage",
+                y_label="Current",
+                metadata={
+                    "gate_electrodes": gate_electrodes,
+                    "measure_electrode": measure_electrode,
+                },
+            )
         return voltage_measurements, current_measurements

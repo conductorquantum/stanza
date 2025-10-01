@@ -40,7 +40,7 @@ class TestSweepData:
         assert len(sweep.x_data) == len(sweep.y_data)
 
     def test_rejects_mismatched_array_shapes(self):
-        with pytest.raises(ValueError, match="must have the same shape"):
+        with pytest.raises(ValueError, match="must have the same length"):
             SweepData(
                 name="bad_sweep",
                 x_data=np.array([0, 1, 2]),

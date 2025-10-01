@@ -44,8 +44,8 @@ class SweepData:
 
     def __post_init__(self) -> None:
         """Initialize the sweep data."""
-        if self.x_data.shape != self.y_data.shape:
-            raise ValueError("x_data and y_data must have the same shape")
+        if len(self.x_data) != len(self.y_data):
+            raise ValueError("x_data and y_data must have the same length")
 
     def to_dict(self) -> dict[str, Any]:
         """Convert sweep data to dictionary for serialization."""
