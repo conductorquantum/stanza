@@ -1,7 +1,9 @@
 import re
 from importlib.resources import files
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
+
+import yaml
 
 from stanza.instruments.channels import ChannelConfig
 from stanza.models import DeviceConfig, PadType
@@ -39,6 +41,32 @@ def get_config_resource(config_path: str | Path, encoding: str = "utf-8") -> str
     """
     resource = files("stanza.configs").joinpath(str(config_path))
     return resource.read_text(encoding)
+
+
+def load_device_config(file_path: str | Path) -> DeviceConfig:
+    """Load a device configuration YAML file.
+
+    Args:
+        file_path: The path to the device configuration YAML file.
+
+    Raises:
+        ValueError: If the file extension is not .yaml or .yml.
+        ValueError: If the file cannot be loaded.
+
+    Returns:
+        The device configuration.
+    """
+    if PurePosixPath(file_path).suffix not in [".yaml", ".yml"]:
+        raise ValueError(
+            f"Invalid file extension for device config: {file_path}. Expected .yaml or .yml"
+        )
+
+    try:
+        with open(file_path) as f:
+            yaml_file = yaml.safe_load(f)
+        return DeviceConfig.model_validate(yaml_file)
+    except Exception as e:
+        raise ValueError(f"Failed to load device config from {file_path}: {e}") from e
 
 
 def generate_channel_configs(device_config: DeviceConfig) -> dict[str, ChannelConfig]:

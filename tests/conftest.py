@@ -175,5 +175,40 @@ def routine_configs():
             name="configured_routine",
             parameters={"threshold": 1e-12, "multiplier": 2.5},
         ),
-        RoutineConfig(name="no_params_routine"),  # No parameters
+        RoutineConfig(name="no_params_routine"),
     ]
+
+
+@pytest.fixture
+def valid_device_yaml():
+    """Fixture providing valid device YAML configuration."""
+    return """
+name: test_device
+gates:
+  G1:
+    type: PLUNGER
+    control_channel: 1
+    measure_channel: null
+    readout: false
+    v_lower_bound: -1.0
+    v_upper_bound: 1.0
+contacts:
+  C1:
+    type: SOURCE
+    control_channel: 2
+    measure_channel: 3
+    readout: true
+    v_lower_bound: 0.0
+    v_upper_bound: 0.5
+routines: []
+instruments:
+  - name: test_control
+    type: CONTROL
+    ip_addr: "127.0.0.1"
+    slew_rate: 1.0
+  - name: test_measurement
+    type: MEASUREMENT
+    ip_addr: "127.0.0.1"
+    measurement_duration: 1.0
+    sample_time: 0.1
+"""
