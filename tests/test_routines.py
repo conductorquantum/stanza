@@ -1,6 +1,7 @@
 import pytest
 import yaml
 
+from stanza.logger.data_logger import DataLogger
 from stanza.models import DeviceConfig
 from stanza.registry import ResourceRegistry, ResultsRegistry
 from stanza.runner import (
@@ -515,3 +516,81 @@ class TestRoutineRunner:
         assert results["routine2"] == "result2_value2"
         assert len(results) == 2
         assert execution_order == ["routine1", "routine2"]
+
+
+class TestRoutineRunnerLoggerIntegration:
+    def test_run_routine_creates_and_passes_session(self, registry_fixture, tmp_path):
+        @routine
+        def test_routine(ctx, session=None):
+            assert session is not None
+            assert session.session_id == "test_routine"
+            assert ctx.resources.logger.current_session is session
+            return "success"
+
+        resource = MockResource("resource")
+        logger = DataLogger(
+            name="logger", routine_name="test", base_dir=tmp_path / "data"
+        )
+        runner = RoutineRunner(resources=[resource, logger])
+
+        result = runner.run("test_routine")
+
+        assert result == "success"
+        assert logger.current_session is None
+        assert "test_routine" not in logger._active_sessions
+
+    def test_run_routine_closes_session_on_failure(self, registry_fixture, tmp_path):
+        @routine
+        def failing_routine(ctx, session=None):
+            assert session is not None
+            raise ValueError("Test error")
+
+        resource = MockResource("resource")
+        logger = DataLogger(
+            name="logger", routine_name="test", base_dir=tmp_path / "data"
+        )
+        runner = RoutineRunner(resources=[resource, logger])
+
+        with pytest.raises(RuntimeError, match="Routine 'failing_routine' failed"):
+            runner.run("failing_routine")
+
+        assert logger.current_session is None
+        assert "failing_routine" not in logger._active_sessions
+
+    def test_run_routine_without_logger(self, registry_fixture):
+        @routine
+        def test_routine(ctx, session=None):
+            assert session is None
+            return "success"
+
+        resource = MockResource("resource")
+        runner = RoutineRunner(resources=[resource])
+
+        result = runner.run("test_routine")
+
+        assert result == "success"
+
+    def test_multiple_routines_get_separate_sessions(self, registry_fixture, tmp_path):
+        session_ids_seen = []
+
+        @routine
+        def first_routine(ctx, session=None):
+            session_ids_seen.append(session.session_id)
+            return "first"
+
+        @routine
+        def second_routine(ctx, session=None):
+            session_ids_seen.append(session.session_id)
+            return "second"
+
+        resource = MockResource("resource")
+        logger = DataLogger(
+            name="logger", routine_name="test", base_dir=tmp_path / "data"
+        )
+        runner = RoutineRunner(resources=[resource, logger])
+
+        runner.run("first_routine")
+        runner.run("second_routine")
+
+        assert session_ids_seen == ["first_routine", "second_routine"]
+        assert logger.current_session is None

@@ -71,14 +71,16 @@ class TestDevice:
         control_contacts = device.control_contacts
         assert isinstance(control_contacts, list)
 
-    def test_measure_gates_property(self, device):
-        measure_gates = device.measure_gates
-        assert isinstance(measure_gates, list)
-        assert "gate1" in measure_gates
+    def test_measurement_gates_property(self, device):
+        """Test the measurement_gates property (renamed from measure_gates)."""
+        measurement_gates = device.measurement_gates
+        assert isinstance(measurement_gates, list)
+        assert "gate1" in measurement_gates
 
-    def test_measure_contacts_property(self, device):
-        measure_contacts = device.measure_contacts
-        assert isinstance(measure_contacts, list)
+    def test_measurement_contacts_property(self, device):
+        """Test the measurement_contacts property (renamed from measure_contacts)."""
+        measurement_contacts = device.measurement_contacts
+        assert isinstance(measurement_contacts, list)
 
     def test_get_gates_by_type(self, device):
         gates = device.get_gates_by_type("PLUNGER")

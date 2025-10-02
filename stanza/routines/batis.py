@@ -1,0 +1,469 @@
+import logging
+import time
+from typing import Any
+
+import numpy as np
+
+from stanza.analysis.criterion import pcov_fail_criterion
+from stanza.analysis.curve_fit import fit_pinchoff_parameters
+from stanza.logger.session import LoggerSession
+from stanza.models import GateType
+from stanza.runner import RoutineContext, routine
+
+logger = logging.getLogger(__name__)
+
+
+@routine
+def noise_floor_measurement(
+    ctx: RoutineContext,
+    measure_electrode: str,
+    num_points: int = 100,
+    session: LoggerSession | None = None,
+) -> dict[str, float]:
+    """Measure the noise floor of the device to establish baseline current measurement statistics.
+
+    This routine performs repeated current measurements on a specified electrode to characterize
+    the measurement noise floor. The resulting mean and standard deviation are used to establish
+    minimum current thresholds for subsequent characterization routines, helping to distinguish
+    real signals from measurement noise.
+
+    Args:
+        ctx: Routine context containing device resources and previous results.
+        measure_electrode: Name of the electrode to measure current from.
+        num_points: Number of current measurements to collect for statistical analysis. Default is 100.
+        session: Optional logger session for recording measurements and analysis results.
+
+    Returns:
+        dict: Contains:
+            - current_mean: Mean of measured currents (A)
+            - current_std: Standard deviation of measured currents (A)
+
+    Notes:
+        - All measurements are taken at the device's current voltage configuration
+        - Results are automatically logged to session if provided
+        - The current_std value is commonly used in leakage_test as min_current_threshold
+    """
+    currents = []
+    for _ in range(num_points):
+        current = ctx.resources.device.measure(measure_electrode)
+        currents.append(current)
+    current_mean, current_std = np.mean(currents), np.std(currents)
+    if session:
+        session.log_analysis(
+            "noise_floor_measurement",
+            {
+                "measure_electrode": measure_electrode,
+                "currents": currents,
+                "current_mean": current_mean,
+                "current_std": current_std,
+            },
+        )
+    return {
+        "current_mean": current_mean,
+        "current_std": current_std,
+    }
+
+
+@routine
+def leakage_test(
+    ctx: RoutineContext,
+    leakage_threshold_resistance: int,
+    leakage_threshold_count: int = 0,
+    num_points: int = 10,
+    session: LoggerSession | None = None,
+) -> dict[str, float]:
+    """Test for leakage between control gates by measuring inter-gate resistance across voltage ranges.
+
+    This routine systematically tests for electrical leakage between all pairs of control gates
+    by sweeping each gate through its voltage range and measuring the current response on all
+    other gates. Leakage is quantified as resistance (dV/dI) between gate pairs. Gates with
+    resistance below the threshold indicate potential shorts or unwanted crosstalk.
+
+    The test sweeps both positive (max_voltage_bound) and negative (min_voltage_bound) directions
+    from the initial voltages to detect asymmetric leakage behavior.
+
+    Args:
+        ctx: Routine context containing device resources. Uses ctx.results.get("current_std")
+             if available from noise_floor_measurement, otherwise defaults to 1e-10 A.
+        leakage_threshold_resistance: Maximum acceptable resistance (Ohms) between gate pairs.
+                                     Lower values indicate more stringent leakage requirements.
+        leakage_threshold_count: Maximum number of leaky gate pairs allowed before failing the test.
+                                Default is 0 (any leakage causes failure).
+        num_points: Number of voltage steps to test in each direction. Default is 10.
+        session: Optional logger session for recording leakage matrices and analysis results.
+
+    Returns:
+        dict: Contains voltage bounds and the delta_V at which leakage was detected:
+            - max_voltage_bound: Maximum voltage tested (V)
+            - min_voltage_bound: Minimum voltage tested (V)
+            If leakage exceeds threshold, returns at the delta_V where it was first detected.
+            If no leakage detected, returns the final delta_V tested for each bound.
+
+    Raises:
+        Exception: Re-raises any exceptions encountered during testing after logging.
+
+    Notes:
+        - Device is always returned to initial voltages in the finally block
+        - Leakage matrix is symmetric, only upper triangle is checked
+        - Test stops early if leakage exceeds threshold
+        - Current differences below min_current_threshold are skipped to avoid noise
+        - Voltage bounds are determined from device channel configurations
+    """
+
+    max_voltage_bound = min(
+        ctx.resources.device.channel_configs.values(), key=lambda x: x.voltage_range[1]
+    ).voltage_range[1]
+    min_voltage_bound = max(
+        ctx.resources.device.channel_configs.values(), key=lambda x: x.voltage_range[0]
+    ).voltage_range[0]
+
+    voltage_bounds = {
+        "max_voltage_bound": max_voltage_bound,
+        "min_voltage_bound": min_voltage_bound,
+    }
+    min_current_threshold = ctx.results.get("current_std", 1e-10)
+
+    leakage_test_results = {}
+
+    try:
+        control_gates = ctx.resources.device.control_gates
+        initial_currents = ctx.resources.device.measure(control_gates)
+        initial_voltages = ctx.resources.device.check(control_gates)
+
+        prev_currents_array = np.array(initial_currents)
+        prev_voltages_dict = dict(zip(control_gates, initial_voltages, strict=False))
+        currents_matrix = []
+
+        for voltage_bound_name, voltage_bound in voltage_bounds.items():
+            for delta_V in np.linspace(0, voltage_bound, num_points):
+                for gate in control_gates:
+                    current_voltage = prev_voltages_dict[gate] + delta_V
+                    ctx.resources.device.jump(
+                        {gate: current_voltage}, wait_for_settling=True
+                    )
+
+                    currents_array = ctx.resources.device.measure(control_gates)
+                    currents_matrix.append(currents_array)
+
+                    current_diff = currents_array - prev_currents_array
+
+                    if np.isclose(
+                        current_voltage - prev_voltages_dict[gate], 0, atol=1e-10
+                    ):
+                        logger.warning(
+                            f"Voltage is too close to previous voltage for {gate}, skipping resistance calculation"
+                        )
+                        break
+
+                    if np.any(np.max(np.abs(current_diff)) < min_current_threshold):
+                        logger.warning(
+                            f"Current is too low for {gate}, skipping resistance calculation"
+                        )
+                        break
+
+                    with np.errstate(divide="ignore", invalid="ignore"):
+                        leakage_matrix = np.abs(delta_V / current_diff)
+                        leakage_matrix[current_diff == 0] = np.inf
+
+                    if session:
+                        session.log_measurement(
+                            "leakage_matrix",
+                            {
+                                "gates": ctx.resources.device.control_gates,
+                                "voltages": ctx.resources.device.check(control_gates),
+                                "delta_V": delta_V,
+                                "leakage_matrix": leakage_matrix,
+                            },
+                        )
+
+                    prev_currents_array = np.array(currents_array)
+                    prev_voltages_dict[gate] = current_voltage
+
+                    is_leaky = leakage_matrix > leakage_threshold_resistance
+                    upper_triangle = np.triu(is_leaky, k=1)
+                    num_leaky_connections = np.count_nonzero(upper_triangle)
+                    leaky_gate_pairs = []
+
+                    if num_leaky_connections > leakage_threshold_count:
+                        leaky_pairs = np.where(upper_triangle)
+                        leaky_gate_pairs = list(
+                            zip(leaky_pairs[0], leaky_pairs[1], strict=False)
+                        )
+
+                        if session:
+                            session.log_analysis(
+                                "leaky_gate_pairs",
+                                {
+                                    "gates": control_gates,
+                                    "leaky_gate_pairs": leaky_gate_pairs,
+                                    "num_leaky_connections": num_leaky_connections,
+                                    "delta_V": delta_V,
+                                },
+                            )
+                            logger.error(
+                                "Leakage test failed",
+                                f"Found {num_leaky_connections} leaky connections (threshold: {leakage_threshold_count})",
+                                f"Leaky gate pairs: {leaky_gate_pairs}",
+                            )
+                            leakage_test_results[voltage_bound_name] = delta_V
+                            return leakage_test_results
+
+                ctx.resources.device.jump(
+                    dict(zip(control_gates, initial_voltages, strict=False)),
+                    wait_for_settling=True,
+                )
+                prev_currents_array = np.array(initial_currents)
+                prev_voltages_dict = dict(
+                    zip(control_gates, initial_voltages, strict=False)
+                )
+
+            leakage_test_results[voltage_bound_name] = delta_V
+
+        if session:
+            session.log_analysis(
+                "leakage_test_success",
+                {
+                    "gates": control_gates,
+                    "leaky_gate_pairs": [],
+                    "num_leaky_connections": 0,
+                },
+            )
+
+        return leakage_test_results
+
+    except Exception as e:
+        logger.error(f"Error in leakage test: {str(e)}")
+        raise e
+
+    finally:
+        ctx.resources.device.jump(
+            {gate: initial_voltages[gate] for gate in control_gates},
+            wait_for_settling=True,
+        )
+
+
+@routine
+def global_accumulation(
+    ctx: RoutineContext,
+    measure_electrode: str,
+    step_size: float,
+    session: LoggerSession | None = None,
+) -> dict[str, float]:
+    """Determine the global turn-on voltage by sweeping all control gates simultaneously.
+
+    This BATIS routine sweeps all control gates together from minimum to maximum voltage
+    while measuring current at a specified electrode. The sweep data is analyzed using
+    a pinch-off heuristic to identify the voltage at which the device transitions from
+    depletion to accumulation (turn-on). After finding this voltage, all gates are set
+    to the turn-on voltage (vp).
+
+    This global characterization establishes a baseline operating point before individual
+    gate characterization in subsequent routines.
+
+    Args:
+        ctx: Routine context containing device resources and previous results. Requires
+             ctx.results["max_voltage_bound"] and ctx.results["min_voltage_bound"] from
+             prior routines (typically leakage_test).
+        measure_electrode: Name of the electrode to measure current from during the sweep.
+        step_size: Voltage increment (V) between sweep points. Smaller values provide
+                  higher resolution but increase measurement time.
+        session: Optional logger session for recording sweep measurements and analysis results.
+
+    Returns:
+        dict: Contains:
+            - global_turn_on_voltage: The pinch-off voltage (vp) where the device turns on (V)
+
+    Notes:
+        - All control gates are swept together (global sweep)
+        - Device is automatically set to vp after analysis
+        - The vp value is used by subsequent characterization routines (reservoir, finger gates)
+        - step_size is converted to num_points based on voltage range
+    """
+    max_voltage_bound = ctx.results["max_voltage_bound"]
+    min_voltage_bound = ctx.results["min_voltage_bound"]
+    num_points = int((max_voltage_bound - min_voltage_bound) / step_size)
+    voltages, currents = ctx.resources.device.sweep_all(
+        voltages=np.linspace(min_voltage_bound, max_voltage_bound, num_points),
+        measure_electrode=measure_electrode,
+        session=session,
+    )
+    turn_on_analysis = analyze_single_gate_heuristic(voltages, currents)
+    ctx.resources.device.jump(
+        dict.fromkeys(ctx.resources.device.control_gates, turn_on_analysis["vp"]),
+        wait_for_settling=True,
+    )
+
+    return {
+        "global_turn_on_voltage": turn_on_analysis["vp"],
+    }
+
+
+@routine
+def reservoir_characterization(
+    ctx: RoutineContext,
+    measure_electrode: str,
+    step_size: float,
+    session: LoggerSession | None = None,
+) -> dict[str, dict[str, float]]:
+    """Characterize individual reservoir gates by sweeping each while holding others in accumulation.
+
+    This BATIS routine determines the turn-on voltage (pinch-off voltage) for each reservoir gate
+    individually. For each reservoir under test, all other reservoirs are set to 120% of the global
+    turn-on voltage (to ensure they're fully conducting), while the target reservoir is swept from
+    minimum to maximum voltage. This isolates the behavior of each reservoir and identifies its
+    individual turn-on characteristics.
+
+    Args:
+        ctx: Routine context containing device resources and previous results. Requires:
+             - ctx.results["max_voltage_bound"]: Maximum voltage for sweeps
+             - ctx.results["min_voltage_bound"]: Minimum voltage for sweeps
+             - ctx.results["global_turn_on_voltage"]: From global_accumulation routine
+        measure_electrode: Name of the electrode to measure current from during sweeps.
+        step_size: Voltage increment (V) between sweep points. Smaller values provide
+                  higher resolution but increase measurement time.
+        session: Optional logger session for recording sweep measurements and analysis results.
+
+    Returns:
+        dict: Contains:
+            - reservoir_characterization: Dictionary mapping each reservoir name to its
+              turn-on voltage (vp) in volts.
+
+    Notes:
+        - Each reservoir is tested sequentially
+        - Other reservoirs are biased at min(1.2 * global_turn_on_voltage, max_voltage_bound)
+        - Target reservoir starts at 0V before sweeping
+        - 10 second settling time is used between voltage changes
+        - Pinch-off analysis may raise ValueError if curve fit fails
+    """
+    max_voltage_bound = ctx.results["max_voltage_bound"]
+    min_voltage_bound = ctx.results["min_voltage_bound"]
+    global_turn_on_voltage = min(
+        1.2 * ctx.results["global_turn_on_voltage"], max_voltage_bound
+    )
+
+    reservoir_characterization_results = {}
+
+    reservoirs = ctx.resources.device.get_gates_by_type(GateType.RESERVOIR)
+    for reservoir in reservoirs:
+        other_reservoirs = [r for r in reservoirs if r != reservoir]
+        ctx.resources.device.jump(
+            dict.fromkeys(other_reservoirs, global_turn_on_voltage),
+            wait_for_settling=True,
+        )
+        time.sleep(10)
+        ctx.resources.device.jump({reservoir: 0.0}, wait_for_settling=True)
+        time.sleep(10)
+        num_points = int((max_voltage_bound - min_voltage_bound) / step_size)
+        voltages, currents = ctx.resources.device.sweep_1d(
+            reservoir,
+            np.linspace(min_voltage_bound, max_voltage_bound, num_points),
+            measure_electrode,
+            session,
+        )
+        reservoir_analysis = analyze_single_gate_heuristic(voltages, currents)
+
+        reservoir_characterization_results[reservoir] = reservoir_analysis["vp"]
+
+    return {
+        "reservoir_characterization": reservoir_characterization_results,
+    }
+
+
+@routine
+def finger_gate_characterization(
+    ctx: RoutineContext,
+    measure_electrode: str,
+    step_size: float,
+    session: LoggerSession | None = None,
+) -> dict[str, dict[str, float]]:
+    """Characterize individual finger gates by sweeping each while holding others in accumulation.
+
+    This BATIS routine determines the turn-on voltage (pinch-off voltage) for each finger gate
+    individually. For each finger gate under test, all other finger gates are set to 120% of the
+    global turn-on voltage (to ensure they're fully conducting), while the target gate is swept
+    from minimum to maximum voltage. This isolates the behavior of each finger gate and identifies
+    its individual turn-on characteristics.
+
+    Args:
+        ctx: Routine context containing device resources and previous results. Requires:
+             - ctx.results["max_voltage_bound"]: Maximum voltage for sweeps
+             - ctx.results["min_voltage_bound"]: Minimum voltage for sweeps
+             - ctx.results["global_turn_on_voltage"]: From global_accumulation routine
+        measure_electrode: Name of the electrode to measure current from during sweeps.
+        step_size: Voltage increment (V) between sweep points. Smaller values provide
+                  higher resolution but increase measurement time.
+        session: Optional logger session for recording sweep measurements and analysis results.
+
+    Returns:
+        dict: Contains:
+            - finger_gate_characterization: Dictionary mapping each finger gate name to its
+              turn-on voltage (vp) in volts.
+
+    Notes:
+        - Each finger gate is tested sequentially
+        - Other finger gates are biased at min(1.2 * global_turn_on_voltage, max_voltage_bound)
+        - Target gate starts at 0V before sweeping
+        - 10 second settling time is used after setting target gate to 0V
+        - Pinch-off analysis may raise ValueError if curve fit fails
+    """
+    max_voltage_bound = ctx.results["max_voltage_bound"]
+    min_voltage_bound = ctx.results["min_voltage_bound"]
+    global_turn_on_voltage = min(
+        1.2 * ctx.results["global_turn_on_voltage"], max_voltage_bound
+    )
+
+    finger_gate_characterization_results = {}
+
+    plunger_gates = ctx.resources.device.get_gates_by_type(GateType.PLUNGER)
+    barrier_gates = ctx.resources.device.get_gates_by_type(GateType.BARRIER)
+    finger_gates = plunger_gates + barrier_gates
+
+    for gate in finger_gates:
+        other_gates = [g for g in finger_gates if g != gate]
+        ctx.resources.device.jump(
+            dict.fromkeys(other_gates, global_turn_on_voltage), wait_for_settling=True
+        )
+        ctx.resources.device.jump({gate: 0.0}, wait_for_settling=True)
+        time.sleep(10)
+        num_points = int((max_voltage_bound - min_voltage_bound) / step_size)
+        voltages, currents = ctx.resources.device.sweep_1d(
+            gate,
+            np.linspace(min_voltage_bound, max_voltage_bound, num_points),
+            measure_electrode,
+            session,
+        )
+        finger_gate_analysis = analyze_single_gate_heuristic(voltages, currents)
+
+        finger_gate_characterization_results[gate] = finger_gate_analysis["vp"]
+
+    return {
+        "finger_gate_characterization": finger_gate_characterization_results,
+    }
+
+
+def analyze_single_gate_heuristic(
+    voltages: np.ndarray, currents: np.ndarray
+) -> dict[str, Any]:
+    """Fit gate sweep data to extract pinch-off voltage using a heuristic model.
+
+    Args:
+        voltages: Array of gate voltages (V) from the sweep.
+        currents: Array of measured currents (A) corresponding to each voltage.
+
+    Returns:
+        dict: Contains vp (pinch-off voltage) and other fit parameters.
+
+    Raises:
+        ValueError: If the curve fit quality is poor based on covariance matrix.
+    """
+
+    pinchoff_fit = fit_pinchoff_parameters(voltages, currents)
+    pcov = pinchoff_fit["pcov"]
+
+    if pcov is None or pcov_fail_criterion(pcov):
+        raise ValueError("Curve fit covariance matrix indicates poor fit")
+
+    return {
+        "vp": pinchoff_fit["vp"],
+        **pinchoff_fit,
+    }

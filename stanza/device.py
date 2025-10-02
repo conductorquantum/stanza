@@ -75,7 +75,7 @@ class Device:
         ]
 
     @property
-    def measure_gates(self) -> list[str]:
+    def measurement_gates(self) -> list[str]:
         return [
             channel.name
             for channel in self.channel_configs.values()
@@ -83,7 +83,7 @@ class Device:
         ]
 
     @property
-    def measure_contacts(self) -> list[str]:
+    def measurement_contacts(self) -> list[str]:
         return [
             channel.name
             for channel in self.channel_configs.values()

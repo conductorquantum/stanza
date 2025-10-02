@@ -217,6 +217,13 @@ class RoutineRunner:
         # Get the routine function from global registry
         routine_func = _routine_registry[routine_name]
 
+        # Create logger session if logger exists and has create_session method
+        data_logger = getattr(self.resources, "logger", None)
+        session = None
+        if data_logger is not None and hasattr(data_logger, "create_session"):
+            session = data_logger.create_session(session_id=routine_name)
+            merged_params["session"] = session
+
         try:
             logger.info(f"Running routine: {routine_name}")
             result = routine_func(self.context, **merged_params)
@@ -230,6 +237,11 @@ class RoutineRunner:
         except Exception as e:
             logger.error(f"Routine {routine_name} failed: {e}")
             raise RuntimeError(f"Routine '{routine_name}' failed: {e}") from e
+
+        finally:
+            # Close logger session if it was created
+            if session is not None and data_logger is not None:
+                data_logger.close_session(session_id=routine_name)
 
     def run_all(self, parent_routine: str | None = None) -> dict[str, Any]:
         """Execute all routines from config in order.
