@@ -80,7 +80,8 @@ def leakage_test(
     resistance below the threshold indicate potential shorts or unwanted crosstalk.
 
     The test sweeps both positive (max_voltage_bound) and negative (min_voltage_bound) directions
-    from the initial voltages to detect asymmetric leakage behavior.
+    from the initial voltages to detect asymmetric leakage behavior. Both bounds are tested
+    independently, so failure at one bound does not prevent testing the other.
 
     Args:
         ctx: Routine context containing device resources. Uses ctx.results.get("current_std")
@@ -93,11 +94,11 @@ def leakage_test(
         session: Optional logger session for recording leakage matrices and analysis results.
 
     Returns:
-        dict: Contains voltage bounds and the delta_V at which leakage was detected:
-            - max_voltage_bound: Maximum voltage tested (V)
-            - min_voltage_bound: Minimum voltage tested (V)
-            If leakage exceeds threshold, returns at the delta_V where it was first detected.
-            If no leakage detected, returns the final delta_V tested for each bound.
+        dict: Contains the delta_V tested for each voltage bound:
+            - max_voltage_bound: The voltage offset tested for max bound (V)
+            - min_voltage_bound: The voltage offset tested for min bound (V)
+            If leakage exceeds threshold, returns the offset where it was first detected.
+            If no leakage detected, returns the final offset tested.
 
     Raises:
         Exception: Re-raises any exceptions encountered during testing after logging.
@@ -105,10 +106,14 @@ def leakage_test(
     Notes:
         - Device is always returned to initial voltages in the finally block
         - Leakage matrix is symmetric, only upper triangle is checked
-        - Test stops early if leakage exceeds threshold
+        - Both voltage bounds are tested regardless of failures
         - Current differences below min_current_threshold are skipped to avoid noise
         - Voltage bounds are determined from device channel configurations
     """
+
+    leakage_threshold_resistance = int(leakage_threshold_resistance)
+    leakage_threshold_count = int(leakage_threshold_count)
+    num_points = int(num_points)
 
     max_voltage_bound = min(
         ctx.resources.device.channel_configs.values(), key=lambda x: x.voltage_range[1]
@@ -117,12 +122,7 @@ def leakage_test(
         ctx.resources.device.channel_configs.values(), key=lambda x: x.voltage_range[0]
     ).voltage_range[0]
 
-    voltage_bounds = {
-        "max_voltage_bound": max_voltage_bound,
-        "min_voltage_bound": min_voltage_bound,
-    }
     min_current_threshold = ctx.results.get("current_std", 1e-10)
-
     leakage_test_results = {}
 
     try:
@@ -130,104 +130,47 @@ def leakage_test(
         initial_currents = ctx.resources.device.measure(control_gates)
         initial_voltages = ctx.resources.device.check(control_gates)
 
-        prev_currents_array = np.array(initial_currents)
-        prev_voltages_dict = dict(zip(control_gates, initial_voltages, strict=False))
-        currents_matrix = []
+        # Test max voltage bound
+        max_delta_v, max_leaked = _test_single_voltage_bound(
+            ctx,
+            max_voltage_bound,
+            control_gates,
+            initial_voltages,
+            initial_currents,
+            leakage_threshold_resistance,
+            leakage_threshold_count,
+            min_current_threshold,
+            num_points,
+            session,
+        )
+        leakage_test_results["max_voltage_bound"] = max_delta_v
 
-        for voltage_bound_name, voltage_bound in voltage_bounds.items():
-            for delta_V in np.linspace(0, voltage_bound, num_points):
-                for gate in control_gates:
-                    current_voltage = prev_voltages_dict[gate] + delta_V
-                    ctx.resources.device.jump(
-                        {gate: current_voltage}, wait_for_settling=True
-                    )
+        # Test min voltage bound
+        min_delta_v, min_leaked = _test_single_voltage_bound(
+            ctx,
+            min_voltage_bound,
+            control_gates,
+            initial_voltages,
+            initial_currents,
+            leakage_threshold_resistance,
+            leakage_threshold_count,
+            min_current_threshold,
+            num_points,
+            session,
+        )
+        leakage_test_results["min_voltage_bound"] = min_delta_v
 
-                    currents_array = ctx.resources.device.measure(control_gates)
-                    currents_matrix.append(currents_array)
-
-                    current_diff = currents_array - prev_currents_array
-
-                    if np.isclose(
-                        current_voltage - prev_voltages_dict[gate], 0, atol=1e-10
-                    ):
-                        logger.warning(
-                            f"Voltage is too close to previous voltage for {gate}, skipping resistance calculation"
-                        )
-                        break
-
-                    if np.any(np.max(np.abs(current_diff)) < min_current_threshold):
-                        logger.warning(
-                            f"Current is too low for {gate}, skipping resistance calculation"
-                        )
-                        break
-
-                    with np.errstate(divide="ignore", invalid="ignore"):
-                        leakage_matrix = np.abs(delta_V / current_diff)
-                        leakage_matrix[current_diff == 0] = np.inf
-
-                    if session:
-                        session.log_measurement(
-                            "leakage_matrix",
-                            {
-                                "gates": ctx.resources.device.control_gates,
-                                "voltages": ctx.resources.device.check(control_gates),
-                                "delta_V": delta_V,
-                                "leakage_matrix": leakage_matrix,
-                            },
-                        )
-
-                    prev_currents_array = np.array(currents_array)
-                    prev_voltages_dict[gate] = current_voltage
-
-                    is_leaky = leakage_matrix > leakage_threshold_resistance
-                    upper_triangle = np.triu(is_leaky, k=1)
-                    num_leaky_connections = np.count_nonzero(upper_triangle)
-                    leaky_gate_pairs = []
-
-                    if num_leaky_connections > leakage_threshold_count:
-                        leaky_pairs = np.where(upper_triangle)
-                        leaky_gate_pairs = list(
-                            zip(leaky_pairs[0], leaky_pairs[1], strict=False)
-                        )
-
-                        if session:
-                            session.log_analysis(
-                                "leaky_gate_pairs",
-                                {
-                                    "gates": control_gates,
-                                    "leaky_gate_pairs": leaky_gate_pairs,
-                                    "num_leaky_connections": num_leaky_connections,
-                                    "delta_V": delta_V,
-                                },
-                            )
-                            logger.error(
-                                "Leakage test failed",
-                                f"Found {num_leaky_connections} leaky connections (threshold: {leakage_threshold_count})",
-                                f"Leaky gate pairs: {leaky_gate_pairs}",
-                            )
-                            leakage_test_results[voltage_bound_name] = delta_V
-                            return leakage_test_results
-
-                ctx.resources.device.jump(
-                    dict(zip(control_gates, initial_voltages, strict=False)),
-                    wait_for_settling=True,
+        # Log success only if neither bound leaked
+        if not max_leaked and not min_leaked:
+            if session:
+                session.log_analysis(
+                    "leakage_test_success",
+                    {
+                        "gates": control_gates,
+                        "leaky_gate_pairs": [],
+                        "num_leaky_connections": 0,
+                    },
                 )
-                prev_currents_array = np.array(initial_currents)
-                prev_voltages_dict = dict(
-                    zip(control_gates, initial_voltages, strict=False)
-                )
-
-            leakage_test_results[voltage_bound_name] = delta_V
-
-        if session:
-            session.log_analysis(
-                "leakage_test_success",
-                {
-                    "gates": control_gates,
-                    "leaky_gate_pairs": [],
-                    "num_leaky_connections": 0,
-                },
-            )
 
         return leakage_test_results
 
@@ -237,7 +180,7 @@ def leakage_test(
 
     finally:
         ctx.resources.device.jump(
-            {gate: initial_voltages[gate] for gate in control_gates},
+            dict(zip(control_gates, initial_voltages, strict=False)),
             wait_for_settling=True,
         )
 
@@ -439,6 +382,171 @@ def finger_gate_characterization(
     return {
         "finger_gate_characterization": finger_gate_characterization_results,
     }
+
+
+def _calculate_leakage_matrix(delta_V: float, current_diff: np.ndarray) -> np.ndarray:
+    """Calculate leakage resistance matrix from voltage change and current differences.
+
+    Args:
+        delta_V: Voltage change applied (V).
+        current_diff: Array of current differences for each gate (A).
+
+    Returns:
+        Leakage resistance matrix (Ohms) where leakage_matrix[i,j] = |delta_V / (I_j - I_j_prev)|
+        when gate i was swept. Inf values indicate no measurable current change.
+    """
+    with np.errstate(divide="ignore", invalid="ignore"):
+        leakage_matrix = np.abs(delta_V / current_diff)
+        leakage_matrix[current_diff == 0] = np.inf
+    return leakage_matrix
+
+
+def _check_leakage_threshold(
+    leakage_matrix: np.ndarray,
+    leakage_threshold_resistance: int,
+    leakage_threshold_count: int,
+    control_gates: list[str],
+    delta_V: float,
+    session: LoggerSession | None,
+) -> bool:
+    """Check if leakage matrix exceeds threshold and log if it does.
+
+    Args:
+        leakage_matrix: Resistance matrix between gate pairs (Ohms).
+        leakage_threshold_resistance: Maximum acceptable resistance threshold (Ohms).
+        leakage_threshold_count: Maximum number of leaky gate pairs allowed.
+        control_gates: List of control gate names for reporting.
+        delta_V: Current voltage offset being tested (V).
+        session: Optional logger session for recording leakage analysis.
+
+    Returns:
+        True if leakage threshold is exceeded, False otherwise.
+    """
+    is_leaky = leakage_matrix < leakage_threshold_resistance
+    upper_triangle = np.triu(is_leaky, k=1)
+    num_leaky_connections = np.count_nonzero(upper_triangle)
+
+    if num_leaky_connections > leakage_threshold_count:
+        leaky_pairs = np.where(upper_triangle)
+        leaky_gate_pairs = list(zip(leaky_pairs[0], leaky_pairs[1], strict=False))
+
+        if session:
+            session.log_analysis(
+                "leaky_gate_pairs",
+                {
+                    "gates": control_gates,
+                    "leaky_gate_pairs": leaky_gate_pairs,
+                    "num_leaky_connections": num_leaky_connections,
+                    "delta_V": delta_V,
+                },
+            )
+
+        logger.error(
+            f"Leakage test failed: Found {num_leaky_connections} leaky connections "
+            f"(threshold: {leakage_threshold_count}). Leaky gate pairs: {leaky_gate_pairs}"
+        )
+        return True
+
+    return False
+
+
+def _test_single_voltage_bound(
+    ctx: RoutineContext,
+    voltage_bound: float,
+    control_gates: list[str],
+    initial_voltages: list[float],
+    initial_currents: list[float],
+    leakage_threshold_resistance: int,
+    leakage_threshold_count: int,
+    min_current_threshold: float,
+    num_points: int,
+    session: LoggerSession | None,
+) -> tuple[float, bool]:
+    """Test for leakage at a single voltage bound by sweeping gates incrementally.
+
+    Args:
+        ctx: Routine context containing device resources.
+        voltage_bound: Target voltage bound to test (V).
+        control_gates: List of control gate names to test.
+        initial_voltages: Initial voltage for each gate (V).
+        initial_currents: Initial current for each gate (A).
+        leakage_threshold_resistance: Maximum acceptable resistance between gates (Ohms).
+        leakage_threshold_count: Maximum number of leaky gate pairs allowed.
+        min_current_threshold: Minimum current change to consider for resistance calculation (A).
+        num_points: Number of voltage steps to test.
+        session: Optional logger session for recording measurements.
+
+    Returns:
+        Tuple of (delta_V, leaked) where:
+            - delta_V: The voltage offset tested (V). If leakage detected, the offset where it occurred.
+            - leaked: True if leakage threshold was exceeded, False otherwise.
+    """
+    prev_currents_array = np.array(initial_currents)
+    prev_voltages_dict = dict(zip(control_gates, initial_voltages, strict=False))
+
+    for delta_V in np.linspace(0, voltage_bound, num_points):
+        for gate in control_gates:
+            current_voltage = prev_voltages_dict[gate] + delta_V
+            ctx.resources.device.jump({gate: current_voltage}, wait_for_settling=True)
+
+            currents_array = ctx.resources.device.measure(control_gates)
+            current_diff = currents_array - prev_currents_array
+
+            # Skip if voltage change is negligible
+            if np.isclose(current_voltage - prev_voltages_dict[gate], 0, atol=1e-10):
+                logger.warning(
+                    f"Voltage is too close to previous voltage for {gate}, skipping resistance calculation"
+                )
+                break
+
+            # Skip if current change is below noise threshold
+            if np.any(np.max(np.abs(current_diff)) < min_current_threshold):
+                logger.warning(
+                    f"Current is too low for {gate}, skipping resistance calculation"
+                )
+                break
+
+            leakage_matrix = _calculate_leakage_matrix(delta_V, current_diff)
+
+            if session:
+                session.log_measurement(
+                    "leakage_matrix",
+                    {
+                        "gates": control_gates,
+                        "voltages": ctx.resources.device.check(control_gates),
+                        "delta_V": delta_V,
+                        "leakage_matrix": leakage_matrix,
+                    },
+                )
+
+            prev_currents_array = np.array(currents_array)
+            prev_voltages_dict[gate] = current_voltage
+
+            # Check if leakage threshold exceeded
+            if _check_leakage_threshold(
+                leakage_matrix,
+                leakage_threshold_resistance,
+                leakage_threshold_count,
+                control_gates,
+                delta_V,
+                session,
+            ):
+                # Reset to initial voltages before returning
+                ctx.resources.device.jump(
+                    dict(zip(control_gates, initial_voltages, strict=False)),
+                    wait_for_settling=True,
+                )
+                return delta_V, True
+
+        # Reset to initial state after each delta_V sweep
+        ctx.resources.device.jump(
+            dict(zip(control_gates, initial_voltages, strict=False)),
+            wait_for_settling=True,
+        )
+        prev_currents_array = np.array(initial_currents)
+        prev_voltages_dict = dict(zip(control_gates, initial_voltages, strict=False))
+
+    return delta_V, False
 
 
 def analyze_single_gate_heuristic(

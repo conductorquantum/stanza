@@ -121,20 +121,19 @@ class Device:
         if not self.control_instrument:
             raise DeviceError("Control instrument not configured")
 
-        settling_time = 0.0
-        if wait_for_settling:
-            current_voltage = self.control_instrument.get_voltage(pad)
-            slew_rate = self.control_instrument.get_slew_rate(pad)
-            voltage_diff = abs(voltage - current_voltage)
-            settling_time = 1.2 * (voltage_diff / slew_rate)
-
         try:
+            settling_time = 0.0
+            if wait_for_settling:
+                current_voltage = self.control_instrument.get_voltage(pad)
+                slew_rate = self.control_instrument.get_slew_rate(pad)
+                voltage_diff = abs(voltage - current_voltage)
+                settling_time = 1.2 * (voltage_diff / slew_rate)
+
             self.control_instrument.set_voltage(pad, voltage)
+            if settling_time > 0:
+                time.sleep(settling_time)
         except Exception as e:
             raise DeviceError(f"Failed to set voltage {voltage}V on {pad}: {e}") from e
-
-        if settling_time > 0:
-            time.sleep(settling_time)
 
     def jump(
         self, pad_voltages: dict[str, float], wait_for_settling: bool = False

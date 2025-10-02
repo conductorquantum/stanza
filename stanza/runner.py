@@ -150,6 +150,7 @@ class RoutineRunner:
             if isinstance(config, DeviceConfig):
                 device = device_from_config(config)
                 resources.append(device)
+                device.name = "device"
 
                 data_logger = DataLogger(
                     name="logger",

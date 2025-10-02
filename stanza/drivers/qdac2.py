@@ -125,8 +125,8 @@ class QDAC2(BaseInstrument):
         self.address = instrument_config.ip_addr or instrument_config.serial_addr
         self.port = instrument_config.port
         # Extract QDAC2-specific configuration from instrument config or defaults
-        self.sample_time = getattr(
-            instrument_config, "sample_time", 0.001
+        self.measurement_aperature_s = getattr(
+            instrument_config, "measurement_aperature_s", 0.001
         )  # default 1ms
         self.current_range = QDAC2CurrentRange(current_range)
 
@@ -152,7 +152,7 @@ class QDAC2(BaseInstrument):
         self._initialize_channels(channel_configs)
 
         self.set_current_ranges(self.current_range)
-        self.set_measurement_aperatures_s(self.sample_time)
+        self.set_measurement_aperatures_s(self.measurement_aperature_s)
 
     def _initialize_channels(self, channel_configs: dict[str, ChannelConfig]) -> None:
         for channel_config in channel_configs.values():
@@ -187,13 +187,13 @@ class QDAC2(BaseInstrument):
 
     def prepare_measurement(self) -> None:
         """Prepare the measurement."""
-        # Set the current measurment range
+        # Set the current measurement range
         channels_str = ",".join(str(ch) for _, ch in self.measurement_channels)
         self.driver.write(
             f"sens:rang {str(self.current_range).lower()},(@{channels_str})"
         )
         # Set the integration time
-        self.driver.write(f"sens:aper {self.sample_time},(@{channels_str})")
+        self.driver.write(f"sens:aper {self.measurement_aperature_s},(@{channels_str})")
 
     def set_voltage(self, channel_name: str, voltage: float) -> None:
         """Set the voltage on a specific channel."""
