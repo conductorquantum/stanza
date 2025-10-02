@@ -2,9 +2,10 @@ import logging
 from collections.abc import Callable
 from typing import Any
 
-from stanza.device import Device
-from stanza.models import RoutineConfig
+from stanza.logger.data_logger import DataLogger
+from stanza.models import DeviceConfig
 from stanza.routines.datatypes import ResourceRegistry, ResultsRegistry, RoutineContext
+from stanza.utils import device_from_config
 
 logger = logging.getLogger(__name__)
 
@@ -62,32 +63,110 @@ def clear_routine_registry() -> None:
 
 
 class RoutineRunner:
-    """Simple runner that executes decorated routine functions with routine configs and result access."""
+    """Simple runner that executes decorated routine functions with resources and configs.
 
-    def __init__(self, device: Device, routine_configs: list[RoutineConfig]):
-        """Initialize runner with device and routine configurations.
+    Resources can be provided in two ways:
+    1. Pass initialized resources directly via `resources` parameter
+    2. Pass configuration objects via `configs` parameter (runner instantiates resources)
+
+    When using the `configs` parameter, a DataLogger is automatically created and registered
+    with name="logger" for convenient logging within routines.
+
+    Examples:
+        # With initialized resources
+        >>> device = Device(name="device", ...)
+        >>> logger = DataLogger(name="logger", ...)
+        >>> runner = RoutineRunner(resources=[device, logger])
+
+        # With configs (runner creates device + logger automatically)
+        >>> device_config = DeviceConfig(...)
+        >>> runner = RoutineRunner(configs=[device_config])
+        >>> # Now ctx.resources.device and ctx.resources.logger are available
+    """
+
+    def __init__(
+        self,
+        resources: list[Any] | None = None,
+        configs: list[Any] | None = None,
+    ):
+        """Initialize runner with resources or configs.
 
         Args:
-            device: The quantum device to run experiments on
-            routine_configs: List of RoutineConfig objects from DeviceConfig
-        """
-        if not device.is_configured():
-            raise ValueError(
-                "Device must be configured with both control and measurement instruments"
-            )
+            resources: List of resource objects with .name attribute (Device, DataLogger, etc.)
+            configs: List of configuration objects (DeviceConfig, etc.) to instantiate resources from
 
-        # Set up resource and results registries
-        self.resources = ResourceRegistry(device)
+        Raises:
+            ValueError: If neither resources nor configs provided, or if both provided
+        """
+        if resources is None and configs is None:
+            raise ValueError("Must provide either 'resources' or 'configs'")
+
+        if resources is not None and configs is not None:
+            raise ValueError("Cannot provide both 'resources' and 'configs'")
+
+        if resources is not None:
+            self.resources = ResourceRegistry(*resources)
+            self.configs: dict[str, dict[str, Any]] = {}
+
+        else:
+            assert configs is not None
+            instantiated_resources = self._build_resources_from_configs(configs)
+            self.resources = ResourceRegistry(*instantiated_resources)
+            self.configs = self._extract_routine_configs(configs)
+
         self.results = ResultsRegistry()
         self.context = RoutineContext(self.resources, self.results)
 
-        # Extract routine configs
-        self.configs: dict[str, dict[str, Any]] = {}
-        for routine_config in routine_configs:
-            if routine_config.parameters:
-                self.configs[routine_config.name] = routine_config.parameters
+        logger.info(
+            f"Initialized RoutineRunner with {len(self.resources.list_resources())} resources"
+        )
 
-        logger.info(f"Loaded {len(self.configs)} routine configs")
+    def _build_resources_from_configs(
+        self, configs: list[Any]
+    ) -> list[DataLogger | Any]:
+        """Instantiate resources from configuration objects.
+
+        Args:
+            configs: List of configuration objects (e.g., DeviceConfig)
+
+        Returns:
+            List of instantiated resource objects
+        """
+
+        resources: list[Any] = []
+
+        for config in configs:
+            if isinstance(config, DeviceConfig):
+                device = device_from_config(config)
+                resources.append(device)
+
+                data_logger = DataLogger(
+                    name="logger",
+                    routine_name=device.name,
+                    base_dir="./data",
+                )
+                resources.append(data_logger)
+
+        return resources
+
+    def _extract_routine_configs(self, configs: list[Any]) -> dict[str, dict[str, Any]]:
+        """Extract routine parameters from configuration objects.
+
+        Args:
+            configs: List of configuration objects (e.g., DeviceConfig)
+
+        Returns:
+            Dictionary mapping routine names to their parameters
+        """
+        routine_configs = {}
+
+        for config in configs:
+            if isinstance(config, DeviceConfig):
+                for routine_config in config.routines:
+                    if routine_config.parameters:
+                        routine_configs[routine_config.name] = routine_config.parameters
+
+        return routine_configs
 
     def run(self, routine_name: str, **params: Any) -> Any:
         """Execute a registered routine.

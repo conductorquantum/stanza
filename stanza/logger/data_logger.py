@@ -29,6 +29,7 @@ class DataLogger:
         self,
         routine_name: str,
         base_dir: str | Path,
+        name: str = "logger",
         formats: list[str] | None = None,
         routine_dir_name: str | None = None,
         compression: str | None = None,
@@ -38,6 +39,7 @@ class DataLogger:
         if not routine_name or not routine_name.strip():
             raise ValueError("Routine name is required")
 
+        self.name = name
         self.routine_name = routine_name
         dir_name = routine_dir_name or self.routine_name
         dir_name = self._slugify(dir_name)

@@ -111,15 +111,13 @@ def generate_channel_configs(device_config: DeviceConfig) -> dict[str, ChannelCo
 
 
 def device_from_config(
-    config_path: str | Path,
-    is_stanza_config: bool = False,
+    device_config: DeviceConfig,
     **driver_kwargs: Any,
 ) -> Device:
-    """Load a device from a YAML configuration file.
+    """Create a device from a DeviceConfig object.
 
     Args:
-        config_path: Path to the device configuration YAML file.
-        is_stanza_config: Whether the config is a stanza config.
+        device_config: The device configuration object.
         **driver_kwargs: Additional keyword arguments to pass to driver constructors.
 
     Returns:
@@ -128,7 +126,6 @@ def device_from_config(
     Raises:
         ValueError: If required driver field is missing or instruments cannot be instantiated.
     """
-    device_config = load_device_config(config_path, is_stanza_config)
     channel_configs = generate_channel_configs(device_config)
 
     control_instrument = None
@@ -161,3 +158,25 @@ def device_from_config(
         control_instrument=control_instrument,
         measurement_instrument=measurement_instrument,
     )
+
+
+def device_from_yaml(
+    config_path: str | Path,
+    is_stanza_config: bool = False,
+    **driver_kwargs: Any,
+) -> Device:
+    """Load a device from a YAML configuration file.
+
+    Args:
+        config_path: Path to the device configuration YAML file.
+        is_stanza_config: Whether the config is a stanza config.
+        **driver_kwargs: Additional keyword arguments to pass to driver constructors.
+
+    Returns:
+        A configured Device instance with instantiated instruments.
+
+    Raises:
+        ValueError: If required driver field is missing or instruments cannot be instantiated.
+    """
+    device_config = load_device_config(config_path, is_stanza_config)
+    return device_from_config(device_config, **driver_kwargs)

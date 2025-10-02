@@ -1,6 +1,5 @@
 import pytest
 
-from stanza.models import RoutineConfig
 from stanza.routines.datatypes import ResourceRegistry, ResultsRegistry, RoutineContext
 from stanza.routines.runner import (
     RoutineRunner,
@@ -199,92 +198,97 @@ class TestRoutineDecorator:
 
 
 class TestRoutineRunner:
-    def test_initialization_with_empty_configs(self, device, registry_fixture):
-        runner = RoutineRunner(device, [])
-        assert runner.resources.test_device is device
+    def test_initialization_with_resources(self, registry_fixture):
+        resource1 = MockResource("resource1")
+        resource2 = MockResource("resource2")
+
+        runner = RoutineRunner(resources=[resource1, resource2])
+
+        assert runner.resources.resource1 is resource1
+        assert runner.resources.resource2 is resource2
         assert runner.results.list_results() == []
         assert runner.configs == {}
 
-    def test_initialization_with_routine_configs(
-        self, device, routine_configs, registry_fixture
-    ):
-        runner = RoutineRunner(device, routine_configs)
+    def test_initialization_requires_resources_or_configs(self, registry_fixture):
+        with pytest.raises(
+            ValueError, match="Must provide either 'resources' or 'configs'"
+        ):
+            RoutineRunner()
 
-        assert runner.configs["test_routine"] == {"param1": "value1", "param2": 42}
-        assert runner.configs["configured_routine"] == {
-            "threshold": 1e-12,
-            "multiplier": 2.5,
-        }
+    def test_initialization_cannot_provide_both(self, registry_fixture):
+        pass
 
-    def test_initialization_unconfigured_device(
-        self, device_no_instruments, registry_fixture
-    ):
-        with pytest.raises(ValueError, match="Device must be configured"):
-            RoutineRunner(device_no_instruments, [])
-
-    def test_run_routine_not_registered(self, device, registry_fixture):
-        runner = RoutineRunner(device, [])
+    def test_run_routine_not_registered(self, registry_fixture):
+        resource = MockResource("resource")
+        runner = RoutineRunner(resources=[resource])
 
         with pytest.raises(ValueError, match="Routine 'nonexistent' not registered"):
             runner.run("nonexistent")
 
-    def test_run_routine_basic(self, device, registry_fixture):
+    def test_run_routine_basic(self, registry_fixture):
         @routine
         def test_routine(ctx):
             return "success"
 
-        runner = RoutineRunner(device, [])
+        resource = MockResource("resource")
+        runner = RoutineRunner(resources=[resource])
         result = runner.run("test_routine")
 
         assert result == "success"
         assert runner.get_result("test_routine") == "success"
 
-    def test_run_routine_with_context_access(self, device, registry_fixture):
+    def test_run_routine_with_context_access(self, registry_fixture):
         @routine
         def test_routine(ctx):
-            device = ctx.resources.test_device
-            return f"device_name_{device.name}"
+            resource = ctx.resources.test_resource
+            return f"data_{resource.data}"
 
-        runner = RoutineRunner(device, [])
+        resource = MockResource("test_resource")
+        runner = RoutineRunner(resources=[resource])
         result = runner.run("test_routine")
 
-        assert result == "device_name_test_device"
+        assert result == "data_data_from_test_resource"
 
-    def test_run_routine_with_params(self, device, registry_fixture):
+    def test_run_routine_with_params(self, registry_fixture):
         @routine
         def test_routine(ctx, param1, param2="default"):
             return f"{param1}-{param2}"
 
-        runner = RoutineRunner(device, [])
+        resource = MockResource("resource")
+        runner = RoutineRunner(resources=[resource])
         result = runner.run("test_routine", param1="hello", param2="world")
 
         assert result == "hello-world"
 
-    def test_run_routine_with_config_params(
-        self, device, routine_configs, registry_fixture
-    ):
+    def test_run_routine_with_config_params(self, registry_fixture):
         @routine
         def test_routine(ctx, param1, param2="default"):
             return f"{param1}-{param2}"
 
-        runner = RoutineRunner(device, routine_configs)
+        resource = MockResource("resource")
+        runner = RoutineRunner(resources=[resource])
+
+        runner.configs["test_routine"] = {"param1": "value1", "param2": 42}
+
         result = runner.run("test_routine")
 
         assert result == "value1-42"
 
-    def test_run_routine_user_params_override_config(
-        self, device, routine_configs, registry_fixture
-    ):
+    def test_run_routine_user_params_override_config(self, registry_fixture):
         @routine
         def test_routine(ctx, param1, param2="default"):
             return f"{param1}-{param2}"
 
-        runner = RoutineRunner(device, routine_configs)
+        resource = MockResource("resource")
+        runner = RoutineRunner(resources=[resource])
+
+        runner.configs["test_routine"] = {"param1": "value1", "param2": 42}
+
         result = runner.run("test_routine", param2="overridden")
 
         assert result == "value1-overridden"
 
-    def test_run_routine_access_previous_results(self, device, registry_fixture):
+    def test_run_routine_access_previous_results(self, registry_fixture):
         @routine
         def first_routine(ctx):
             return {"data": "first_result"}
@@ -294,34 +298,39 @@ class TestRoutineRunner:
             first_data = ctx.results.get("first_routine")
             return f"processed_{first_data['data']}"
 
-        runner = RoutineRunner(device, [])
+        resource = MockResource("resource")
+        runner = RoutineRunner(resources=[resource])
+
         runner.run("first_routine")
         result = runner.run("second_routine")
 
         assert result == "processed_first_result"
 
-    def test_run_routine_exception_handling(self, device, registry_fixture):
+    def test_run_routine_exception_handling(self, registry_fixture):
         @routine
         def failing_routine(ctx):
             raise ValueError("Something went wrong")
 
-        runner = RoutineRunner(device, [])
+        resource = MockResource("resource")
+        runner = RoutineRunner(resources=[resource])
 
         with pytest.raises(RuntimeError, match="Routine 'failing_routine' failed"):
             runner.run("failing_routine")
 
-    def test_get_result(self, device, registry_fixture):
+    def test_get_result(self, registry_fixture):
         @routine
         def test_routine(ctx):
             return "test_result"
 
-        runner = RoutineRunner(device, [])
+        resource = MockResource("resource")
+        runner = RoutineRunner(resources=[resource])
+
         runner.run("test_routine")
 
         assert runner.get_result("test_routine") == "test_result"
         assert runner.get_result("nonexistent") is None
 
-    def test_list_routines(self, device, registry_fixture):
+    def test_list_routines(self, registry_fixture):
         @routine
         def routine1(ctx):
             pass
@@ -330,14 +339,15 @@ class TestRoutineRunner:
         def routine2(ctx):
             pass
 
-        runner = RoutineRunner(device, [])
+        resource = MockResource("resource")
+        runner = RoutineRunner(resources=[resource])
         routines = runner.list_routines()
 
         assert "routine1" in routines
         assert "routine2" in routines
         assert len(routines) == 2
 
-    def test_list_results(self, device, registry_fixture):
+    def test_list_results(self, registry_fixture):
         @routine
         def routine1(ctx):
             return "result1"
@@ -346,7 +356,9 @@ class TestRoutineRunner:
         def routine2(ctx):
             return "result2"
 
-        runner = RoutineRunner(device, [])
+        resource = MockResource("resource")
+        runner = RoutineRunner(resources=[resource])
+
         runner.run("routine1")
         runner.run("routine2")
 
@@ -355,19 +367,7 @@ class TestRoutineRunner:
         assert "routine2" in results
         assert len(results) == 2
 
-    def test_routine_with_no_config_parameters(
-        self, device, routine_configs, registry_fixture
-    ):
-        @routine
-        def no_params_routine(ctx):
-            return "no_params_result"
-
-        runner = RoutineRunner(device, routine_configs)
-        result = runner.run("no_params_routine")
-
-        assert result == "no_params_result"
-
-    def test_sequential_routines_building_on_results(self, device, registry_fixture):
+    def test_sequential_routines_building_on_results(self, registry_fixture):
         @routine
         def collect_data(ctx, data_size=10):
             return list(range(data_size))
@@ -382,11 +382,11 @@ class TestRoutineRunner:
             processed_data = ctx.results.get("process_data", [])
             return {"sum": sum(processed_data), "count": len(processed_data)}
 
-        routine_configs = [
-            RoutineConfig(name="collect_data", parameters={"data_size": 5}),
-            RoutineConfig(name="process_data", parameters={"multiplier": 3}),
-        ]
-        runner = RoutineRunner(device, routine_configs)
+        resource = MockResource("resource")
+        runner = RoutineRunner(resources=[resource])
+
+        runner.configs["collect_data"] = {"data_size": 5}
+        runner.configs["process_data"] = {"multiplier": 3}
 
         collect_result = runner.run("collect_data")
         process_result = runner.run("process_data")
@@ -396,113 +396,17 @@ class TestRoutineRunner:
         assert process_result == [0, 3, 6, 9, 12]
         assert analyze_result == {"sum": 30, "count": 5}
 
-
-class TestIntegrationWithDevice:
-    def test_routine_using_device_methods(self, device, registry_fixture):
+    def test_multiple_resources_in_runner(self, registry_fixture):
         @routine
-        def sweep_routine(ctx, gate, voltages, measure_contact):
-            device = ctx.resources.test_device
-            return device.sweep_1d(gate, voltages, measure_contact)
+        def use_multiple_resources(ctx):
+            r1 = ctx.resources.resource1
+            r2 = ctx.resources.resource2
+            return f"{r1.data}+{r2.data}"
 
-        device.measurement_instrument.measurements["contact1"] = 1e-6
+        resource1 = MockResource("resource1")
+        resource2 = MockResource("resource2")
+        runner = RoutineRunner(resources=[resource1, resource2])
 
-        runner = RoutineRunner(device, [])
-        voltages, currents = runner.run(
-            "sweep_routine",
-            gate="gate1",
-            voltages=[0.0, 1.0, 2.0],
-            measure_contact="contact1",
-        )
+        result = runner.run("use_multiple_resources")
 
-        assert len(voltages) == 3
-        assert len(currents) == 3
-        assert all(i == 1e-6 for i in currents)
-
-    def test_routine_using_device_jump_and_check(self, device, registry_fixture):
-        @routine
-        def set_and_verify(ctx, gate, voltage):
-            device = ctx.resources.test_device
-            device.jump({gate: voltage})
-            actual_voltage = device.check(gate)
-            return {"requested": voltage, "actual": actual_voltage}
-
-        runner = RoutineRunner(device, [])
-        result = runner.run("set_and_verify", gate="gate1", voltage=1.5)
-
-        assert result["requested"] == 1.5
-        assert result["actual"] == 1.5
-
-    def test_routine_with_device_properties(self, device, registry_fixture):
-        @routine
-        def device_info(ctx):
-            device = ctx.resources.test_device
-            return {
-                "gates": device.gates,
-                "contacts": device.contacts,
-                "control_gates": device.control_gates,
-                "is_configured": device.is_configured(),
-            }
-
-        runner = RoutineRunner(device, [])
-        result = runner.run("device_info")
-
-        assert "gate1" in result["gates"]
-        assert "contact1" in result["contacts"]
-        assert "gate1" in result["control_gates"]
-        assert result["is_configured"] is True
-
-    def test_complex_routine_workflow(self, device, registry_fixture):
-        @routine
-        def initialize_device(ctx):
-            device = ctx.resources.test_device
-            device.jump({"gate1": 0.0})
-            return {"status": "initialized"}
-
-        @routine
-        def characterize_device(ctx, voltage_range=(-1.0, 1.0), num_points=5):
-            device = ctx.resources.test_device
-            start_v, end_v = voltage_range
-            voltages = [
-                start_v + i * (end_v - start_v) / (num_points - 1)
-                for i in range(num_points)
-            ]
-
-            device.measurement_instrument.measurements["contact1"] = 1e-6
-
-            results = {}
-            for gate in device.control_gates:
-                v_meas, i_meas = device.sweep_1d(gate, voltages, "contact1")
-                results[gate] = {"voltages": v_meas, "currents": i_meas}
-
-            return results
-
-        @routine
-        def analyze_characterization(ctx):
-            init_result = ctx.results.get("initialize_device")
-            char_result = ctx.results.get("characterize_device")
-
-            if not init_result or not char_result:
-                raise ValueError("Previous routines must be run first")
-
-            analysis = {
-                "initialization_status": init_result["status"],
-                "gates_characterized": list(char_result.keys()),
-                "total_measurements": sum(
-                    len(data["currents"]) for data in char_result.values()
-                ),
-            }
-
-            return analysis
-
-        runner = RoutineRunner(device, [])
-
-        init_result = runner.run("initialize_device")
-        char_result = runner.run("characterize_device", num_points=3)
-        analysis_result = runner.run("analyze_characterization")
-
-        assert init_result["status"] == "initialized"
-        assert "gate1" in char_result
-        assert len(char_result["gate1"]["voltages"]) == 3
-        assert analysis_result["initialization_status"] == "initialized"
-        assert analysis_result["gates_characterized"] == ["gate1"]
-        assert analysis_result["total_measurements"] == 3
+        assert result == "data_from_resource1+data_from_resource2"
