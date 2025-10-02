@@ -4,7 +4,7 @@ import pytest
 from dotenv import load_dotenv
 from qm_saas import QmSaas, QOPVersion
 
-from stanza.instruments.channels import ChannelConfig
+from stanza.base.channels import ChannelConfig
 from stanza.models import GateType, InstrumentType, MeasurementInstrumentConfig, PadType
 from tests.test_opx_cloud_sim.conftest import OPXInstrumentNoPause
 

@@ -1,4 +1,4 @@
-from stanza.instruments.protocols import ControlInstrument, MeasurementInstrument
+from stanza.base.protocols import ControlInstrument, MeasurementInstrument
 
 
 class MockControlInstrument:

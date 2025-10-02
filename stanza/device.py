@@ -1,9 +1,9 @@
 import time
 from typing import Any, overload
 
+from stanza.base.channels import ChannelConfig
+from stanza.base.protocols import ControlInstrument, MeasurementInstrument
 from stanza.exceptions import DeviceError
-from stanza.instruments.channels import ChannelConfig
-from stanza.instruments.protocols import ControlInstrument, MeasurementInstrument
 from stanza.logger.session import LoggerSession
 from stanza.models import ContactType, DeviceConfig, GateType, PadType
 

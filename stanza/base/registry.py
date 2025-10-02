@@ -1,7 +1,7 @@
 import importlib
 
-from stanza.instruments.mixins import InstrumentChannelMixin
-from stanza.instruments.protocols import ControlInstrument, MeasurementInstrument
+from stanza.base.mixins import InstrumentChannelMixin
+from stanza.base.protocols import ControlInstrument, MeasurementInstrument
 from stanza.models import InstrumentType
 
 

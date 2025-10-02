@@ -7,10 +7,10 @@ from functools import cached_property
 # mypy: disable-error-code="union-attr,attr-defined"
 from typing import Any
 
+from stanza.base.channels import ChannelConfig, MeasurementChannel
+from stanza.base.instruments import BaseMeasurementInstrument
 from stanza.drivers.utils import demod2volts, wait_until_job_is_paused
 from stanza.exceptions import InstrumentError
-from stanza.instruments.base import BaseMeasurementInstrument
-from stanza.instruments.channels import ChannelConfig, MeasurementChannel
 from stanza.models import MeasurementInstrumentConfig
 from stanza.timing import seconds_to_ns
 from stanza.utils import get_config_resource, substitute_parameters

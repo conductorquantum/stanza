@@ -4,8 +4,8 @@ from importlib.resources import as_file
 import pytest
 import pyvisa
 
+from stanza.base.channels import ChannelConfig
 from stanza.drivers.qdac2 import QDAC2, QDAC2CurrentRange
-from stanza.instruments.channels import ChannelConfig
 from stanza.models import (
     BaseInstrumentConfig,
     ContactType,

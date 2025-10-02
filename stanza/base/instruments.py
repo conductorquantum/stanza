@@ -1,7 +1,7 @@
 from functools import cached_property
 from typing import Any
 
-from stanza.instruments.mixins import ControlInstrumentMixin, MeasurementInstrumentMixin
+from stanza.base.mixins import ControlInstrumentMixin, MeasurementInstrumentMixin
 from stanza.models import (
     BaseInstrumentConfig,
     ControlInstrumentConfig,

@@ -3,9 +3,9 @@ from unittest.mock import Mock, patch
 
 import pytest
 
+from stanza.base.channels import ChannelConfig
 from stanza.drivers.opx import OPXInstrument, OPXMeasurementChannel
 from stanza.exceptions import InstrumentError
-from stanza.instruments.channels import ChannelConfig
 from stanza.models import GateType, InstrumentType, MeasurementInstrumentConfig, PadType
 
 

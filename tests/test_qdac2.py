@@ -2,13 +2,13 @@ from unittest.mock import Mock, patch
 
 import pytest
 
+from stanza.base.channels import ChannelConfig
 from stanza.drivers.qdac2 import (
     QDAC2,
     QDAC2ControlChannel,
     QDAC2CurrentRange,
     QDAC2MeasurementChannel,
 )
-from stanza.instruments.channels import ChannelConfig
 from stanza.models import (
     BaseInstrumentConfig,
     ContactType,

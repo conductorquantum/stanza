@@ -1,7 +1,7 @@
 import pytest
 
-from stanza.instruments.base import BaseInstrument
-from stanza.instruments.registry import load_driver_class, validate_driver_protocols
+from stanza.base.instruments import BaseInstrument
+from stanza.base.registry import load_driver_class, validate_driver_protocols
 from stanza.models import InstrumentType
 
 

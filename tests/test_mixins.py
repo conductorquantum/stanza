@@ -2,12 +2,12 @@ from contextlib import contextmanager
 
 import pytest
 
-from stanza.instruments.channels import (
+from stanza.base.channels import (
     ChannelConfig,
     ControlChannel,
     MeasurementChannel,
 )
-from stanza.instruments.mixins import (
+from stanza.base.mixins import (
     ControlInstrumentMixin,
     InstrumentChannelMixin,
     MeasurementInstrumentMixin,

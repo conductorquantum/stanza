@@ -12,9 +12,9 @@ from qm.qua import (
     stream_processing,
 )
 
+from stanza.base.channels import ChannelConfig
 from stanza.drivers.opx import OPXInstrument, OPXMeasurementChannel
 from stanza.exceptions import InstrumentError
-from stanza.instruments.channels import ChannelConfig
 
 
 class OPXMeasurementChannelNoPause(OPXMeasurementChannel):
@@ -30,7 +30,7 @@ class OPXMeasurementChannelNoPause(OPXMeasurementChannel):
 
     def _setup_parameters(self) -> None:
         """Setup measurement parameters with custom getter."""
-        from stanza.instruments.channels import Parameter
+        from stanza.base.channels import Parameter
 
         current_param = Parameter(
             name="current",

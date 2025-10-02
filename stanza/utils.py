@@ -7,9 +7,9 @@ from typing import Any
 
 import yaml
 
+from stanza.base.channels import ChannelConfig
+from stanza.base.registry import load_driver_class
 from stanza.device import Device
-from stanza.instruments.channels import ChannelConfig
-from stanza.instruments.registry import load_driver_class
 from stanza.models import DeviceConfig, InstrumentType, PadType
 
 

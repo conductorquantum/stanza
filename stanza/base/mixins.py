@@ -1,7 +1,7 @@
 from collections.abc import Generator
 from contextlib import contextmanager
 
-from stanza.instruments.channels import InstrumentChannel
+from stanza.base.channels import InstrumentChannel
 
 
 class InstrumentChannelMixin:

@@ -1,14 +1,14 @@
 import pytest
 
-from stanza.instruments.base import (
-    BaseControlInstrument,
-    BaseInstrument,
-    BaseMeasurementInstrument,
-)
-from stanza.instruments.channels import (
+from stanza.base.channels import (
     ChannelConfig,
     ControlChannel,
     MeasurementChannel,
+)
+from stanza.base.instruments import (
+    BaseControlInstrument,
+    BaseInstrument,
+    BaseMeasurementInstrument,
 )
 from stanza.models import (
     BaseInstrumentConfig,

@@ -1,6 +1,6 @@
 import pytest
 
-from stanza.instruments.channels import (
+from stanza.base.channels import (
     ChannelConfig,
     ControlChannel,
     MeasurementChannel,

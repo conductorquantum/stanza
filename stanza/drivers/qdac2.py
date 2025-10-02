@@ -4,13 +4,13 @@ import logging
 from enum import Enum
 from functools import cached_property
 
-from stanza.instruments.base import BaseInstrument
-from stanza.instruments.channels import (
+from stanza.base.channels import (
     ChannelConfig,
     ControlChannel,
     MeasurementChannel,
     Parameter,
 )
+from stanza.base.instruments import BaseInstrument
 from stanza.models import BaseInstrumentConfig
 from stanza.pyvisa import PyVisaDriver
 
