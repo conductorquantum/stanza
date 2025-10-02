@@ -272,19 +272,19 @@ devices:
       current_range_1:
         default: "HIGH"
         getter:
-          q: "sens:1:rang?"
+          q: "sens:rang? (@1)"
           r: "{}"
         setter:
-          q: "sens:1:rang {}"
+          q: "sens:rang {},(@1)"
         specs:
           type: str
       measurement_aperature_1:
         default: 0.001
         getter:
-          q: "sens:1:aper?"
+          q: "sens:aper? (@1)"
           r: "{:.6f}"
         setter:
-          q: "sens:1:aper {:.6f}"
+          q: "sens:aper {},(@1)"
         specs:
           min: 0.0001
           max: 1.0
@@ -292,10 +292,10 @@ devices:
       measurement_nplc_1:
         default: 10.0
         getter:
-          q: "sens:1:nplc?"
+          q: "sens:nplc? (@1)"
           r: "{:.1f}"
         setter:
-          q: "sens:1:nplc {:.1f}"
+          q: "sens:nplc {},(@1)"
         specs:
           min: 0.01
           max: 100.0
@@ -306,6 +306,12 @@ devices:
       - q: "sens:rang low,(@1,2,3,4)"
         r: "OK"
       - q: "sens:aper 0.001,(@1,2,3,4)"
+        r: "OK"
+      - q: "sens:rang HIGH,(@1)"
+        r: "OK"
+      - q: "sens:rang LOW,(@1)"
+        r: "OK"
+      - q: "sens:aper 0.001,(@1)"
         r: "OK"
 resources:
   ASRL2::INSTR:

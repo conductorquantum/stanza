@@ -88,8 +88,8 @@ class QDAC2MeasurementChannel(MeasurementChannel):
             name="current_range",
             value=None,
             unit="",
-            getter=lambda: str(self.driver.query(f"sens:{self.channel_id}:rang?")),
-            setter=lambda r: self.driver.write(f"sens:{self.channel_id}:rang {r}"),
+            getter=lambda: str(self.driver.query(f"sens:rang? (@{self.channel_id})")),
+            setter=lambda r: self.driver.write(f"sens:rang {r},(@{self.channel_id})"),
         )
         self.add_parameter(current_range_param)
 
@@ -97,8 +97,8 @@ class QDAC2MeasurementChannel(MeasurementChannel):
             name="measurement_aperature_s",
             value=None,
             unit="s",
-            getter=lambda: float(self.driver.query(f"sens:{self.channel_id}:aper?")),
-            setter=lambda a: self.driver.write(f"sens:{self.channel_id}:aper {a}"),
+            getter=lambda: float(self.driver.query(f"sens:aper? (@{self.channel_id})")),
+            setter=lambda a: self.driver.write(f"sens:aper {a},(@{self.channel_id})"),
         )
         self.add_parameter(measurement_aperature_s)
 
@@ -106,8 +106,8 @@ class QDAC2MeasurementChannel(MeasurementChannel):
             name="measurement_nplc",
             value=None,
             unit="cycles",
-            getter=lambda: float(self.driver.query(f"sens:{self.channel_id}:nplc?")),
-            setter=lambda n: self.driver.write(f"sens:{self.channel_id}:nplc {n}"),
+            getter=lambda: float(self.driver.query(f"sens:nplc? (@{self.channel_id})")),
+            setter=lambda n: self.driver.write(f"sens:nplc {n},(@{self.channel_id})"),
         )
         self.add_parameter(measurement_nplc)
 

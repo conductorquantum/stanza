@@ -119,7 +119,7 @@ class TestQDAC2:
         )
 
         qdac.set_current_range("sense1", "HIGH")
-        mock_driver.write.assert_called_with("sens:2:rang HIGH")
+        mock_driver.write.assert_called_with("sens:rang HIGH,(@2)")
 
         current_range = qdac.get_current_range("sense1")
         assert current_range == "LOW"
@@ -138,7 +138,7 @@ class TestQDAC2:
         )
 
         qdac.set_measurement_aperature_s("sense1", 0.005)
-        mock_driver.write.assert_called_with("sens:2:aper 0.005")
+        mock_driver.write.assert_called_with("sens:aper 0.005,(@2)")
 
         aperature = qdac.get_measurement_aperature_s("sense1")
         assert aperature == 0.002
@@ -157,7 +157,7 @@ class TestQDAC2:
         )
 
         qdac.set_nplc_cycles("sense1", 15)
-        mock_driver.write.assert_called_with("sens:2:nplc 15")
+        mock_driver.write.assert_called_with("sens:nplc 15,(@2)")
 
         nplc = qdac.get_nplc_cycles("sense1")
         assert nplc == 20.0
@@ -187,10 +187,10 @@ class TestQDAC2:
         qdac.prepare_measurement()
 
         expected_calls = [
-            ("sens:2:rang HIGH",),
-            ("sens:2:rang HIGH",),
-            ("sens:2:aper 0.001",),
-            ("sens:2:aper 0.001",),
+            ("sens:rang HIGH,(@2)",),
+            ("sens:rang HIGH,(@2)",),
+            ("sens:aper 0.001,(@2)",),
+            ("sens:aper 0.001,(@2)",),
             ("sens:rang high,(@2,2)",),
             ("sens:aper 0.001,(@2,2)",),
         ]
