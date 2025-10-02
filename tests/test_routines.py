@@ -2,8 +2,9 @@ import pytest
 import yaml
 
 from stanza.models import DeviceConfig
-from stanza.routines.datatypes import ResourceRegistry, ResultsRegistry, RoutineContext
-from stanza.routines.runner import (
+from stanza.registry import ResourceRegistry, ResultsRegistry
+from stanza.runner import (
+    RoutineContext,
     RoutineRunner,
     clear_routine_registry,
     get_registered_routines,

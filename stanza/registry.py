@@ -1,6 +1,6 @@
 from typing import Any
 
-from stanza.routines.protocols import NamedResource
+from stanza.base.protocols import NamedResource
 
 
 class ResourceRegistry:
@@ -87,12 +87,3 @@ class ResultsRegistry:
     def clear(self) -> None:
         """Clear all stored results."""
         self._results.clear()
-
-
-class RoutineContext:
-    """Context object passed to routine functions containing resources and results."""
-
-    def __init__(self, resources: ResourceRegistry, results: ResultsRegistry) -> None:
-        """Initialize context with resource and results registries."""
-        self.resources = resources
-        self.results = results

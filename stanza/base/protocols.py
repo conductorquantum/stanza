@@ -25,3 +25,9 @@ class MeasurementInstrument(Protocol):
     def measure(self, channel_name: str) -> float:
         """Measure the current on a specific channel."""
         ...
+
+
+class NamedResource(Protocol):
+    """Protocol for resources that have a name attribute."""
+
+    name: str

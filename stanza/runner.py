@@ -4,13 +4,22 @@ from typing import Any
 
 from stanza.logger.data_logger import DataLogger
 from stanza.models import DeviceConfig
-from stanza.routines.datatypes import ResourceRegistry, ResultsRegistry, RoutineContext
+from stanza.registry import ResourceRegistry, ResultsRegistry
 from stanza.utils import device_from_config
 
 logger = logging.getLogger(__name__)
 
 # Global registry of routines
 _routine_registry: dict[str, Callable[..., Any]] = {}
+
+
+class RoutineContext:
+    """Context object passed to routine functions containing resources and results."""
+
+    def __init__(self, resources: ResourceRegistry, results: ResultsRegistry) -> None:
+        """Initialize context with resource and results registries."""
+        self.resources = resources
+        self.results = results
 
 
 def routine(

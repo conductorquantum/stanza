@@ -1,1 +1,1 @@
-from stanza.routines.runner import RoutineRunner, routine
+from stanza.runner import RoutineRunner, routine
