@@ -107,12 +107,14 @@ class RoutineRunner:
         if resources is not None:
             self.resources = ResourceRegistry(*resources)
             self.configs: dict[str, dict[str, Any]] = {}
+            self._device_configs: list[DeviceConfig] = []
 
         else:
             assert configs is not None
             instantiated_resources = self._build_resources_from_configs(configs)
             self.resources = ResourceRegistry(*instantiated_resources)
             self.configs = self._extract_routine_configs(configs)
+            self._device_configs = [c for c in configs if isinstance(c, DeviceConfig)]
 
         self.results = ResultsRegistry()
         self.context = RoutineContext(self.resources, self.results)
@@ -150,7 +152,7 @@ class RoutineRunner:
         return resources
 
     def _extract_routine_configs(self, configs: list[Any]) -> dict[str, dict[str, Any]]:
-        """Extract routine parameters from configuration objects.
+        """Extract routine parameters from configuration objects (recursive).
 
         Args:
             configs: List of configuration objects (e.g., DeviceConfig)
@@ -158,15 +160,30 @@ class RoutineRunner:
         Returns:
             Dictionary mapping routine names to their parameters
         """
-        routine_configs = {}
+        routine_configs: dict[str, dict[str, Any]] = {}
 
         for config in configs:
             if isinstance(config, DeviceConfig):
                 for routine_config in config.routines:
-                    if routine_config.parameters:
-                        routine_configs[routine_config.name] = routine_config.parameters
+                    self._extract_from_routine_config(routine_config, routine_configs)
 
         return routine_configs
+
+    def _extract_from_routine_config(
+        self, routine_config: Any, routine_configs: dict[str, dict[str, Any]]
+    ) -> None:
+        """Recursively extract parameters from routine config and its nested routines.
+
+        Args:
+            routine_config: The routine configuration to extract from
+            routine_configs: Dictionary to store extracted parameters
+        """
+        if routine_config.parameters:
+            routine_configs[routine_config.name] = routine_config.parameters
+
+        if routine_config.routines:
+            for nested_routine in routine_config.routines:
+                self._extract_from_routine_config(nested_routine, routine_configs)
 
     def run(self, routine_name: str, **params: Any) -> Any:
         """Execute a registered routine.
@@ -204,6 +221,43 @@ class RoutineRunner:
         except Exception as e:
             logger.error(f"Routine {routine_name} failed: {e}")
             raise RuntimeError(f"Routine '{routine_name}' failed: {e}") from e
+
+    def run_all(self, parent_routine: str | None = None) -> dict[str, Any]:
+        """Execute all routines from config in order.
+
+        Args:
+            parent_routine: If specified, run only nested routines under this parent.
+                          If None, run all top-level routines.
+
+        Returns:
+            Dictionary mapping routine names to their results
+        """
+        results: dict[str, Any] = {}
+
+        for device_config in self._device_configs:
+            for routine_config in device_config.routines:
+                if parent_routine is None:
+                    self._run_routine_tree(routine_config, results)
+                elif routine_config.name == parent_routine and routine_config.routines:
+                    for nested_routine in routine_config.routines:
+                        self._run_routine_tree(nested_routine, results)
+
+        return results
+
+    def _run_routine_tree(self, routine_config: Any, results: dict[str, Any]) -> None:
+        """Recursively run a routine and its nested routines.
+
+        Args:
+            routine_config: The routine configuration to execute
+            results: Dictionary to store results
+        """
+        if routine_config.name in _routine_registry:
+            result = self.run(routine_config.name)
+            results[routine_config.name] = result
+
+        if routine_config.routines:
+            for nested_routine in routine_config.routines:
+                self._run_routine_tree(nested_routine, results)
 
     def get_result(self, routine_name: str) -> Any:
         """Get stored result from a routine."""

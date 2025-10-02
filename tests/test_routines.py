@@ -1,5 +1,7 @@
 import pytest
+import yaml
 
+from stanza.models import DeviceConfig
 from stanza.routines.datatypes import ResourceRegistry, ResultsRegistry, RoutineContext
 from stanza.routines.runner import (
     RoutineRunner,
@@ -410,3 +412,105 @@ class TestRoutineRunner:
         result = runner.run("use_multiple_resources")
 
         assert result == "data_from_resource1+data_from_resource2"
+
+    def test_nested_routine_config_extraction(
+        self, registry_fixture, nested_routines_yaml
+    ):
+        device_config = DeviceConfig.model_validate(
+            yaml.safe_load(nested_routines_yaml)
+        )
+        runner = RoutineRunner(
+            resources=[MockResource("device"), MockResource("logger")]
+        )
+        extracted_configs = runner._extract_routine_configs([device_config])
+
+        assert extracted_configs["BATIS"] == {"parent_param": "value"}
+        assert extracted_configs["leakage_test"] == {
+            "leakage_threshold_resistance": 50000000.0,
+            "leakage_threshold_count": 0,
+        }
+        assert extracted_configs["global_accumulation"] == {"step_size": 0.01}
+        assert extracted_configs["reservoir_characterization"] == {"step_size": 0.01}
+        assert len(extracted_configs) == 4
+
+    def test_deeply_nested_routine_config_extraction(
+        self, registry_fixture, deeply_nested_routines_yaml
+    ):
+        device_config = DeviceConfig.model_validate(
+            yaml.safe_load(deeply_nested_routines_yaml)
+        )
+        runner = RoutineRunner(
+            resources=[MockResource("device"), MockResource("logger")]
+        )
+        extracted_configs = runner._extract_routine_configs([device_config])
+
+        assert extracted_configs["level1"] == {"level": 1}
+        assert extracted_configs["level2"] == {"level": 2}
+        assert extracted_configs["level3"] == {"level": 3}
+        assert len(extracted_configs) == 3
+
+    def test_run_all_nested_routines(self, registry_fixture, nested_routines_yaml):
+        execution_order = []
+
+        @routine
+        def leakage_test(ctx, leakage_threshold_resistance, leakage_threshold_count):
+            execution_order.append("leakage_test")
+            return f"leakage_{leakage_threshold_resistance}"
+
+        @routine
+        def global_accumulation(ctx, step_size):
+            execution_order.append("global_accumulation")
+            return f"accumulation_{step_size}"
+
+        @routine
+        def reservoir_characterization(ctx, step_size):
+            execution_order.append("reservoir_characterization")
+            return f"reservoir_{step_size}"
+
+        device_config = DeviceConfig.model_validate(
+            yaml.safe_load(nested_routines_yaml)
+        )
+        device = MockResource("device")
+        logger = MockResource("logger")
+        runner = RoutineRunner(resources=[device, logger])
+        runner.configs = runner._extract_routine_configs([device_config])
+        runner._device_configs = [device_config]
+        results = runner.run_all(parent_routine="BATIS")
+
+        assert results["leakage_test"] == "leakage_50000000.0"
+        assert results["global_accumulation"] == "accumulation_0.01"
+        assert results["reservoir_characterization"] == "reservoir_0.01"
+        assert len(results) == 3
+        assert execution_order == [
+            "leakage_test",
+            "global_accumulation",
+            "reservoir_characterization",
+        ]
+
+    def test_run_all_top_level_routines(self, registry_fixture, simple_routines_yaml):
+        execution_order = []
+
+        @routine
+        def routine1(ctx, param1):
+            execution_order.append("routine1")
+            return f"result1_{param1}"
+
+        @routine
+        def routine2(ctx, param2):
+            execution_order.append("routine2")
+            return f"result2_{param2}"
+
+        device_config = DeviceConfig.model_validate(
+            yaml.safe_load(simple_routines_yaml)
+        )
+        device = MockResource("device")
+        logger = MockResource("logger")
+        runner = RoutineRunner(resources=[device, logger])
+        runner.configs = runner._extract_routine_configs([device_config])
+        runner._device_configs = [device_config]
+        results = runner.run_all()
+
+        assert results["routine1"] == "result1_value1"
+        assert results["routine2"] == "result2_value2"
+        assert len(results) == 2
+        assert execution_order == ["routine1", "routine2"]

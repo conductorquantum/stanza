@@ -207,3 +207,137 @@ instruments:
     measurement_duration: 1.0
     sample_time: 0.1
 """
+
+
+@pytest.fixture
+def nested_routines_yaml():
+    """Fixture providing device YAML configuration with nested routines."""
+    return """
+name: "Test Device with Nested Routines"
+contacts:
+  IN:
+    type: SOURCE
+    control_channel: 1
+    measure_channel: 1
+    v_lower_bound: -3.0
+    v_upper_bound: 3.0
+gates:
+  G1:
+    type: PLUNGER
+    control_channel: 2
+    measure_channel: 2
+    v_lower_bound: -3.0
+    v_upper_bound: 3.0
+routines:
+  - name: BATIS
+    parameters:
+      parent_param: value
+    routines:
+      - name: leakage_test
+        parameters:
+          leakage_threshold_resistance: 50000000.0
+          leakage_threshold_count: 0
+      - name: global_accumulation
+        parameters:
+          step_size: 0.01
+      - name: reservoir_characterization
+        parameters:
+          step_size: 0.01
+instruments:
+  - name: test_control
+    type: CONTROL
+    driver: qdac2
+    ip_addr: "127.0.0.1"
+    slew_rate: 1.0
+  - name: test_measurement
+    type: MEASUREMENT
+    driver: qdac2
+    ip_addr: "127.0.0.1"
+    measurement_duration: 0.001
+    sample_time: 0.00001
+"""
+
+
+@pytest.fixture
+def deeply_nested_routines_yaml():
+    """Fixture providing device YAML configuration with deeply nested routines (3+ levels)."""
+    return """
+name: "Test Device with Deeply Nested Routines"
+contacts:
+  IN:
+    type: SOURCE
+    control_channel: 1
+    measure_channel: 1
+    v_lower_bound: -3.0
+    v_upper_bound: 3.0
+gates:
+  G1:
+    type: PLUNGER
+    control_channel: 2
+    measure_channel: 2
+    v_lower_bound: -3.0
+    v_upper_bound: 3.0
+routines:
+  - name: level1
+    parameters:
+      level: 1
+    routines:
+      - name: level2
+        parameters:
+          level: 2
+        routines:
+          - name: level3
+            parameters:
+              level: 3
+instruments:
+  - name: test_control
+    type: CONTROL
+    driver: qdac2
+    ip_addr: "127.0.0.1"
+    slew_rate: 1.0
+  - name: test_measurement
+    type: MEASUREMENT
+    driver: qdac2
+    ip_addr: "127.0.0.1"
+    measurement_duration: 0.001
+    sample_time: 0.00001
+"""
+
+
+@pytest.fixture
+def simple_routines_yaml():
+    """Fixture providing device YAML configuration with simple top-level routines."""
+    return """
+name: test
+gates:
+  G1:
+    type: PLUNGER
+    control_channel: 1
+    measure_channel: 1
+    v_lower_bound: -1.0
+    v_upper_bound: 1.0
+contacts:
+  C1:
+    type: SOURCE
+    control_channel: 2
+    measure_channel: 2
+    v_lower_bound: -1.0
+    v_upper_bound: 1.0
+routines:
+  - name: routine1
+    parameters:
+      param1: value1
+  - name: routine2
+    parameters:
+      param2: value2
+instruments:
+  - name: ctrl
+    type: CONTROL
+    ip_addr: "127.0.0.1"
+    slew_rate: 1.0
+  - name: meas
+    type: MEASUREMENT
+    ip_addr: "127.0.0.1"
+    measurement_duration: 0.001
+    sample_time: 0.0001
+"""
