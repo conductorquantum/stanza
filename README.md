@@ -1,6 +1,12 @@
 # Stanza
 
 <p align="center">
+<a href="https://pypi.org/project/cq-stanza" target="_blank">
+    <img src="https://img.shields.io/pypi/v/cq-stanza?color=%2334D058&label=pypi%20package" alt="Package version">
+</a>
+<a href="https://pypi.org/project/cq-stanza" target="_blank">
+    <img src="https://img.shields.io/pypi/pyversions/cq-stanza.svg?color=%2334D058" alt="Supported Python versions">
+</a>
 <a href="https://github.com/conductorquantum/stanza/actions?query=workflow%3A%22CI%2FCD+Tests%22+event%3Apush+branch%3Amain" target="_blank">
     <img src="https://github.com/conductorquantum/stanza/actions/workflows/test.yml/badge.svg?event=push&branch=main" alt="Test">
 </a>
