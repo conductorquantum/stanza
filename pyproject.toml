@@ -34,7 +34,7 @@ dependencies = [
     "pydantic>=2.11.7",
     "pyyaml>=6.0.2",
     "numpy>=1.24.0",
-    "scipy>=1.11.0",
+    "h5py>=3.8.0",
 ]
 
 [project.optional-dependencies]
@@ -61,15 +61,10 @@ test = [
     "pyvisa-sim>=0.7.0",
     "qm-saas>=1.1.5",
 ]
-pyvisa = [
-    "pyvisa>=1.11.0",
-    "pyvisa-py>=0.7.1"
-]
 qm = [
+    "pyvisa>=1.13.0",
+    "pyvisa-py>=0.7.1",
     "qm-qua>=1.2.0"
-]
-logging = [
-    "h5py>=3.0.0"
 ]
 
 [project.urls]
