@@ -34,3 +34,8 @@ def test_validate_driver_protocols_qdac2_control():
 def test_validate_driver_protocols_qdac2_measurement():
     driver = load_driver_class("qdac2")
     validate_driver_protocols(driver, InstrumentType.MEASUREMENT)
+
+
+def test_load_driver_class_no_instrument_found():
+    with pytest.raises(ImportError, match="No instrument class found"):
+        load_driver_class("utils")

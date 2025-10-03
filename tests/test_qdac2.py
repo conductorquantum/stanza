@@ -187,10 +187,6 @@ class TestQDAC2:
         qdac.prepare_measurement()
 
         expected_calls = [
-            ("sens:rang HIGH,(@2)",),
-            ("sens:rang HIGH,(@2)",),
-            ("sens:aper 0.001,(@2)",),
-            ("sens:aper 0.001,(@2)",),
             ("sens:rang high,(@2,2)",),
             ("sens:aper 0.001,(@2,2)",),
         ]
@@ -287,6 +283,113 @@ class TestQDAC2:
         str_repr = str(qdac)
         expected = "QDAC2(name=qdac2, address=192.168.1.1, port=5025, idn=QDevil,QDAC-II,12345,1.0.0)"
         assert str_repr == expected
+
+    def test_set_slew_rate(
+        self, mock_driver_class, instrument_config, control_channel_config
+    ):
+        mock_driver = Mock()
+        mock_driver_class.return_value = mock_driver
+
+        qdac = QDAC2(
+            instrument_config=instrument_config,
+            current_range=QDAC2CurrentRange.LOW,
+            channel_configs={"gate1": control_channel_config},
+        )
+
+        result = qdac.set_slew_rate("gate1", 0.5)
+        assert result is None
+        mock_driver.write.assert_called_with("sour1:volt:slew 0.5")
+
+    def test_set_current_ranges(
+        self, mock_driver_class, instrument_config, measurement_channel_config
+    ):
+        mock_driver = Mock()
+        mock_driver_class.return_value = mock_driver
+
+        channel_config2 = ChannelConfig(
+            name="sense2",
+            voltage_range=(-1.0, 1.0),
+            pad_type=PadType.CONTACT,
+            electrode_type=ContactType.DRAIN,
+            measure_channel=3,
+        )
+
+        qdac = QDAC2(
+            instrument_config=instrument_config,
+            current_range=QDAC2CurrentRange.LOW,
+            channel_configs={
+                "sense1": measurement_channel_config,
+                "sense2": channel_config2,
+            },
+        )
+
+        qdac.set_current_ranges("HIGH")
+        assert mock_driver.write.call_count >= 2
+
+    def test_set_measurement_aperatures_s(
+        self, mock_driver_class, instrument_config, measurement_channel_config
+    ):
+        mock_driver = Mock()
+        mock_driver_class.return_value = mock_driver
+
+        channel_config2 = ChannelConfig(
+            name="sense2",
+            voltage_range=(-1.0, 1.0),
+            pad_type=PadType.CONTACT,
+            electrode_type=ContactType.DRAIN,
+            measure_channel=3,
+        )
+
+        qdac = QDAC2(
+            instrument_config=instrument_config,
+            current_range=QDAC2CurrentRange.LOW,
+            channel_configs={
+                "sense1": measurement_channel_config,
+                "sense2": channel_config2,
+            },
+        )
+
+        qdac.set_measurement_aperatures_s(0.002)
+        assert mock_driver.write.call_count >= 2
+
+    def test_set_all_nplc_cycles(
+        self, mock_driver_class, instrument_config, measurement_channel_config
+    ):
+        mock_driver = Mock()
+        mock_driver_class.return_value = mock_driver
+
+        channel_config2 = ChannelConfig(
+            name="sense2",
+            voltage_range=(-1.0, 1.0),
+            pad_type=PadType.CONTACT,
+            electrode_type=ContactType.DRAIN,
+            measure_channel=3,
+        )
+
+        qdac = QDAC2(
+            instrument_config=instrument_config,
+            current_range=QDAC2CurrentRange.LOW,
+            channel_configs={
+                "sense1": measurement_channel_config,
+                "sense2": channel_config2,
+            },
+        )
+
+        qdac.set_all_nplc_cycles(10)
+        assert mock_driver.write.call_count >= 2
+
+    def test_close(self, mock_driver_class, instrument_config):
+        mock_driver = Mock()
+        mock_driver_class.return_value = mock_driver
+
+        qdac = QDAC2(
+            instrument_config=instrument_config,
+            current_range=QDAC2CurrentRange.LOW,
+            channel_configs={},
+        )
+
+        qdac.close()
+        mock_driver.close.assert_called_once()
 
 
 class TestQDAC2ControlChannel:

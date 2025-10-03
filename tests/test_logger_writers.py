@@ -292,6 +292,32 @@ class TestHDF5Writer:
             with h5py.File(Path(tmpdir) / "test_session.h5", "r") as f:
                 assert f["metadata"].attrs["end_time"] == 250.0
 
+    def test_write_measurement_error_handling(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            writer = HDF5Writer(tmpdir)
+            session = SessionMetadata(
+                session_id="test_session",
+                start_time=100.0,
+                user="test_user",
+            )
+            writer.initialize_session(session)
+
+            class UnserializableObject:
+                pass
+
+            measurement = MeasurementData(
+                name="test_measurement",
+                data={"bad": UnserializableObject()},
+                metadata={},
+                timestamp=100.0,
+                session_id="test_session",
+            )
+
+            with pytest.raises(WriterError, match="Failed to write measurement"):
+                writer.write_measurement(measurement)
+
+            writer.finalize_session()
+
 
 class TestJSONLWriter:
     def test_creates_jsonl_file_and_writes_session(self):

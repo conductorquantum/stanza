@@ -4,7 +4,7 @@ import yaml
 from stanza.logger.data_logger import DataLogger
 from stanza.models import DeviceConfig
 from stanza.registry import ResourceRegistry, ResultsRegistry
-from stanza.runner import (
+from stanza.routines import (
     RoutineContext,
     RoutineRunner,
     clear_routine_registry,
@@ -219,8 +219,17 @@ class TestRoutineRunner:
         ):
             RoutineRunner()
 
-    def test_initialization_cannot_provide_both(self, registry_fixture):
-        pass
+    def test_initialization_cannot_provide_both(
+        self, registry_fixture, simple_routines_yaml
+    ):
+        with pytest.raises(
+            ValueError, match="Cannot provide both 'resources' and 'configs'"
+        ):
+            device = MockResource("device")
+            device_config = DeviceConfig.model_validate(
+                yaml.safe_load(simple_routines_yaml)
+            )
+            RoutineRunner(resources=[device], configs=[device_config])
 
     def test_run_routine_not_registered(self, registry_fixture):
         resource = MockResource("resource")
@@ -594,3 +603,58 @@ class TestRoutineRunnerLoggerIntegration:
 
         assert session_ids_seen == ["first_routine", "second_routine"]
         assert logger.current_session is None
+
+    def test_initialization_with_configs(self, registry_fixture):
+        device = MockResource("device")
+        logger = MockResource("logger")
+        runner = RoutineRunner(resources=[device, logger])
+
+        assert "device" in runner.resources.list_resources()
+        assert "logger" in runner.resources.list_resources()
+        assert len(runner._device_configs) == 0
+        assert runner.configs == {}
+
+    def test_run_routine_tree_with_unregistered_routine(
+        self, registry_fixture, nested_routines_yaml
+    ):
+        device_config = DeviceConfig.model_validate(
+            yaml.safe_load(nested_routines_yaml)
+        )
+        runner = RoutineRunner(resources=[MockResource("device")])
+        runner._device_configs = [device_config]
+
+        results = {}
+        routine_config = device_config.routines[0]
+        runner._run_routine_tree(routine_config, results)
+
+        assert len(results) == 0
+
+    def test_initialization_with_configs_using_mock(
+        self, registry_fixture, simple_routines_yaml, tmp_path
+    ):
+        from unittest.mock import Mock, patch
+
+        device_config = DeviceConfig.model_validate(
+            yaml.safe_load(simple_routines_yaml)
+        )
+
+        mock_device = Mock()
+        mock_device.name = "test_device"
+
+        with patch("stanza.routines.device_from_config", return_value=mock_device):
+            with patch("stanza.routines.DataLogger") as mock_logger_class:
+                mock_logger = Mock()
+                mock_logger.name = "logger"
+                mock_logger_class.return_value = mock_logger
+
+                runner = RoutineRunner(configs=[device_config])
+
+                assert "device" in runner.resources.list_resources()
+                assert "logger" in runner.resources.list_resources()
+                assert len(runner._device_configs) == 1
+                assert runner.configs["routine1"]["param1"] == "value1"
+                assert runner.configs["routine2"]["param2"] == "value2"
+
+                mock_logger_class.assert_called_once_with(
+                    name="logger", routine_name="device", base_dir="./data"
+                )
