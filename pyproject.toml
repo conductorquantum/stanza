@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "stanza"
+name = "cq-stanza"
 dynamic = ["version"]
 description = "Stanza, build tune up sequences for quantum computers fast. Easy to code. Easy to run."
 readme = "README.md"
