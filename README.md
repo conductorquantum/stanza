@@ -15,6 +15,11 @@
  </a>
 </p>
 
+
+**Documentation**: <a href="https://docs.conductorquantum.com/stanza" target="_blank">https://docs.conductorquantum.com/stanza</a>
+
+
+
 Stanza is a Python framework for building tune-up sequences for quantum devices. Configure devices with YAML, write routines as decorated functions, and execute them with automatic logging.
 
 ## Quick Start
@@ -157,10 +162,9 @@ v_data, i_data = device.sweep_nd(["G1", "G2"], voltages, "DRAIN")
 
 ## Examples
 
-See the [examples](examples/) directory for:
+See the [cookbooks](cookbooks/) directory for:
 - Basic device configuration
 - Writing custom routines
-- Multi-step tune-up sequences
 - Jupyter notebook workflows
 
 ## Development
