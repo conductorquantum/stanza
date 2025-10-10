@@ -49,6 +49,9 @@ dev = [
     "types-PyYAML>=6.0.0",
     "scipy-stubs>=1.11.0"
 ]
+routines = [
+    "scipy>=1.14.1"
+]
 docs = [
     "mkdocs>=1.5.0",
     "mkdocs-material>=9.0.0",
