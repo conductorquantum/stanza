@@ -644,8 +644,8 @@ class TestRoutineRunnerLoggerIntegration:
         mock_device = Mock()
         mock_device.name = "test_device"
 
-        with patch("stanza.routines.device_from_config", return_value=mock_device):
-            with patch("stanza.routines.DataLogger") as mock_logger_class:
+        with patch("stanza.routines.core.device_from_config", return_value=mock_device):
+            with patch("stanza.routines.core.DataLogger") as mock_logger_class:
                 mock_logger = Mock()
                 mock_logger.name = "logger"
                 mock_logger_class.return_value = mock_logger

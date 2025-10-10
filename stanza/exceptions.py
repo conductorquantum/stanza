@@ -22,6 +22,13 @@ class LoggingError(Exception):
         self.error_code = error_code
 
 
+class RoutineError(Exception):
+    """Exception raised when a routine operation fails."""
+
+    def __init__(self, message: str):
+        super().__init__(message)
+
+
 class LoggerSessionError(LoggingError):
     """Exception raised when a logging session operation fails."""
 
