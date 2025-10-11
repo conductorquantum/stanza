@@ -127,7 +127,6 @@ class TestQDAC2PyVisaSim:
     def test_current_measurement(self, qdac2_sim):
         """Test current measurement on measurement channels."""
         current = qdac2_sim.measure("sense1")
-        # Should return the default current value from simulation
         assert current == pytest.approx(0.000001, rel=1e-9)
 
     def test_multiple_channels(self, qdac2_sim):

@@ -1,4 +1,4 @@
-from typing import Protocol, runtime_checkable
+from typing import Protocol, overload, runtime_checkable
 
 
 @runtime_checkable
@@ -22,8 +22,18 @@ class ControlInstrument(Protocol):
 class MeasurementInstrument(Protocol):
     """Protocol for measurement instruments."""
 
+    @overload
     def measure(self, channel_name: str) -> float:
         """Measure the current on a specific channel."""
+        ...
+
+    @overload
+    def measure(self, channel_name: list[str]) -> list[float]:
+        """Optional overload for measuring the current on multiple channels."""
+        ...
+
+    def measure(self, channel_name: str | list[str]) -> float | list[float]:
+        """Measure the current on a specific channel(s)."""
         ...
 
 
