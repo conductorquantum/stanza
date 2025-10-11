@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from enum import Enum
 from functools import cached_property
+from typing import overload
 
 from stanza.base.channels import (
     ChannelConfig,
@@ -147,6 +148,7 @@ class QDAC2(BaseInstrument):
             visa_addr = f"TCPIP::{self.address}::{self.port}::SOCKET"
 
         self.driver = PyVisaDriver(visa_addr, sim_file=sim_file)
+        self.channel_configs = channel_configs
         super().__init__(instrument_config)
         self._initialize_channels(channel_configs)
 
@@ -272,9 +274,26 @@ class QDAC2(BaseInstrument):
                 "measurement_nplc", nplc_cycles
             )
 
-    def measure(self, channel_name: str) -> float:
+    @overload
+    def measure(self, channel_name: str) -> float: ...
+
+    @overload
+    def measure(self, channel_name: list[str]) -> list[float]: ...
+
+    def measure(self, channel_name: str | list[str]) -> float | list[float]:
         """Measure the current on a specific channel."""
-        return super().measure(f"measure_{channel_name}")
+        if isinstance(channel_name, str):
+            return super().measure(f"measure_{channel_name}")
+        else:
+            channel_numbers = [
+                self.channel_configs[ch].measure_channel for ch in channel_name
+            ]
+            channel_str = ",".join(str(ch) for ch in channel_numbers)
+            channels_suffix = f",(@{channel_str})"
+
+            currents_str = self.driver.query(f"read? {channels_suffix}")
+            currents = [float(current.strip()) for current in currents_str.split(",")]
+            return currents
 
     def close(self) -> None:
         """Close the QDAC2 driver."""

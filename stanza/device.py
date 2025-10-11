@@ -174,7 +174,17 @@ class Device:
         if isinstance(pad, str):
             return self._measure(pad)
         else:
-            return [self._measure(p) for p in pad]
+            if (
+                self.measurement_instrument
+                and hasattr(self.measurement_instrument, "measure")
+                and callable(self.measurement_instrument.measure)
+            ):
+                try:
+                    return self.measurement_instrument.measure(pad)
+                except Exception as _:
+                    return [self._measure(p) for p in pad]
+            else:
+                return [self._measure(p) for p in pad]
 
     def _check(self, pad: str) -> float:
         """Check the current voltage of a single gate electrode."""
