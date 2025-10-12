@@ -126,18 +126,22 @@ def leakage_test(
     leakage_threshold_count = int(leakage_threshold_count)
     num_points = int(num_points)
 
+    control_gates = ctx.resources.device.control_gates
+    control_gate_configs = {
+        gate: ctx.resources.device.channel_configs[gate] for gate in control_gates
+    }
+
     max_voltage_bound = min(
-        ctx.resources.device.channel_configs.values(), key=lambda x: x.voltage_range[1]
+        control_gate_configs.values(), key=lambda x: x.voltage_range[1]
     ).voltage_range[1]
     min_voltage_bound = max(
-        ctx.resources.device.channel_configs.values(), key=lambda x: x.voltage_range[0]
+        control_gate_configs.values(), key=lambda x: x.voltage_range[0]
     ).voltage_range[0]
 
     min_current_threshold = ctx.results.get("current_std", 1e-10)
     leakage_test_results = {}
 
     try:
-        control_gates = ctx.resources.device.control_gates
         initial_currents = ctx.resources.device.measure(control_gates)
         initial_voltages = ctx.resources.device.check(control_gates)
 
