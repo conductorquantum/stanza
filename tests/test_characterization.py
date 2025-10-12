@@ -333,10 +333,13 @@ class TestAnalyzeSingleGateHeuristic:
             analyze_single_gate_heuristic(voltages, currents)
 
     def test_returns_all_expected_keys(self):
-        voltages = np.linspace(-10, 10, 100)
+        voltages = np.linspace(-2, 2, 100)
         currents = pinchoff_curve(voltages, 1.0, 1.0, 1.0)
+        np.random.seed(42)
+        noise = np.random.normal(0, 0.01 * np.max(currents), size=currents.shape)
+        currents_noisy = currents + noise
 
-        result = analyze_single_gate_heuristic(voltages, currents)
+        result = analyze_single_gate_heuristic(voltages, currents_noisy)
         assert "vp" in result
         assert "vt" in result
         assert "vc" in result
@@ -345,6 +348,21 @@ class TestAnalyzeSingleGateHeuristic:
         assert isinstance(result["vp"], float)
         assert isinstance(result["vt"], float)
         assert isinstance(result["vc"], float)
+
+    def test_negative_amplitude_curve(self):
+        voltages = np.linspace(-2, 2, 200)
+        currents = pinchoff_curve(voltages, -0.5, 2.0, -1.0)
+        np.random.seed(42)
+        noise = np.random.normal(
+            0, 0.01 * np.abs(np.max(currents) - np.min(currents)), size=currents.shape
+        )
+        currents_noisy = currents + noise
+
+        result = analyze_single_gate_heuristic(voltages, currents_noisy)
+        assert "vp" in result
+        assert "vt" in result
+        assert "vc" in result
+        assert result["vc"] < result["vt"] < result["vp"]
 
 
 class TestLeakageHelperFunctions:

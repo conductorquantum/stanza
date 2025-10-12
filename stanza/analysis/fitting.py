@@ -14,7 +14,7 @@ from stanza.analysis.preprocessing import normalize
 
 # Constants for parameter bounds computation
 DEFAULT_C_MARGIN = 10.0
-DEFAULT_BOUNDS = [(1e-8, 1.0), (0.1, 20.0), (-10.0, 10.0)]
+DEFAULT_BOUNDS = [(1e-8, 1.0), (-20.0, 20.0), (-10.0, 10.0)]
 
 
 @dataclass
@@ -25,8 +25,17 @@ class PinchoffFitResult:
         vp: Pinchoff voltage (where device turns off)
         vt: Transition voltage (midpoint of transition)
         vc: Conducting voltage (where device is fully on)
-        popt: Fitted parameters [a, b, c] for pinchoff_curve
+        popt: Fitted parameters [a, b, c] for pinchoff_curve in normalized space
         pcov: Covariance matrix of fitted parameters
+        v_min: Minimum voltage value used for normalization
+        v_max: Maximum voltage value used for normalization
+        i_min: Minimum current value used for normalization
+        i_max: Maximum current value used for normalization
+
+    Note:
+        popt parameters are fitted in normalized [0,1] space. To generate the
+        fitted curve in original space, use the fit_curve() method or manually
+        normalize voltages before applying pinchoff_curve().
     """
 
     vp: float | None
@@ -34,6 +43,24 @@ class PinchoffFitResult:
     vc: float | None
     popt: np.ndarray
     pcov: np.ndarray
+
+    v_min: float = 0.0
+    v_max: float = 1.0
+    i_min: float = 0.0
+    i_max: float = 1.0
+
+    def fit_curve(self, voltages: np.ndarray) -> np.ndarray:
+        """Generate fitted curve in original voltage/current space.
+
+        Args:
+            voltages: Voltage array in original space
+
+        Returns:
+            Fitted current values in original space
+        """
+        v_norm = (voltages - self.v_min) / (self.v_max - self.v_min)
+        i_norm = pinchoff_curve(v_norm, *self.popt)
+        return i_norm * (self.i_max - self.i_min) + self.i_min
 
 
 def pinchoff_curve(x: np.ndarray, a: float, b: float, c: float) -> np.ndarray:
@@ -55,46 +82,59 @@ def pinchoff_curve(x: np.ndarray, a: float, b: float, c: float) -> np.ndarray:
     return a * (1 + np.tanh(b * x + c))
 
 
-def derivative_extrema_indices(
-    x: np.ndarray, y: np.ndarray
-) -> tuple[int, int, int, int]:
+def derivative_extrema_indices(x: np.ndarray, y: np.ndarray) -> tuple[int, int, int]:
     """
-    Return the indices of:
-        - minimum of the first derivative
-        - maximum of the first derivative
-        - minimum of the second derivative
-        - maximum of the second derivative
+    Return the indices of key voltages for pinchoff curves.
+
+    vp corresponds to the pinchoff state (low current)
+    vc corresponds to the conducting state (high current)
+    vt corresponds to the transition (steepest slope)
 
     Args:
         x (np.ndarray): Input x values
         y (np.ndarray): Input y values
 
     Returns:
-        Tuple[int, int, int, int]:
-            (imin_grad, imax_grad, imin_second, imax_second)
+        Tuple[int, int, int]:
+            (transition_v_ind, conducting_v_ind, pinchoff_v_ind)
     """
     grad = np.gradient(y, x)
     second = np.gradient(grad, x)
 
-    imin_grad = int(np.argmin(grad))
-    imax_grad = int(np.argmax(grad))
+    # Transition voltage: at maximum absolute slope (steepest point)
+    transition_v_ind = int(np.argmax(np.abs(grad)))
+
+    # Find the two inflection points (extrema of second derivative)
     imin_second = int(np.argmin(second))
     imax_second = int(np.argmax(second))
 
-    return imin_grad, imax_grad, imin_second, imax_second
+    if y[imin_second] < y[imax_second]:
+        pinchoff_v_ind = imin_second
+        conducting_v_ind = imax_second
+    else:
+        pinchoff_v_ind = imax_second
+        conducting_v_ind = imin_second
+
+    return transition_v_ind, conducting_v_ind, pinchoff_v_ind
 
 
 def _compute_initial_params(v_norm: np.ndarray, i_norm: np.ndarray) -> np.ndarray:
-    """Compute initial parameter estimates from normalized data."""
+    """Compute initial parameter estimates from normalized data.
+
+    For inverted curves (decreasing with voltage), we use negative b values
+    to represent the inversion while keeping amplitude positive.
+    """
     i_range = max(np.ptp(i_norm), 1.0)
     v_range = max(np.ptp(v_norm), 1.0)
     v_center = (v_norm.min() + v_norm.max()) / 2.0
 
+    slope_sign = 1.0 if i_norm[-1] >= i_norm[0] else -1.0
+
     return np.array(
         [
-            i_range / 2.0,  # a: amplitude
-            4.0 / v_range,  # b: slope
-            -4.0 * v_center / v_range,  # c: offset
+            i_range / 2.0,  # a: amplitude (always positive in normalized space)
+            slope_sign * 4.0 / v_range,  # b: slope (negative for inverted curves)
+            -slope_sign * 4.0 * v_center / v_range,  # c: offset
         ]
     )
 
@@ -110,8 +150,9 @@ def _compute_parameter_bounds(
     # Amplitude bounds
     a_bounds = (max(0.01 * i_range, 1e-8), max(2.0 * i_range, 1.0))
 
-    # Slope bounds
-    b_bounds = (max(0.1 / v_range, 0.1), min(20.0 / v_range, 100.0))
+    # Slope bounds (allow negative values for inverted curves)
+    max_abs_b = min(20.0 / v_range, 100.0)
+    b_bounds = (-max_abs_b, max_abs_b)
 
     # Offset bounds with margin
     c_bounds = (
@@ -143,7 +184,7 @@ def _map_index_to_voltage(index: int, voltages: np.ndarray) -> float | None:
 
 
 def fit_pinchoff_parameters(
-    voltages: np.ndarray, currents: np.ndarray, sigma: float = 0.01
+    voltages: np.ndarray, currents: np.ndarray, sigma: float = 2.0
 ) -> PinchoffFitResult:
     """Fit the pinchoff parameters a, b, c of the pinchoff curve, and returns
     the pinchoff, transition, and conducting voltages.
@@ -173,7 +214,7 @@ def fit_pinchoff_parameters(
 
     i_fit = pinchoff_curve(v_norm, *popt)
 
-    _, transition_v_ind, conducting_v_ind, pinchoff_v_ind = derivative_extrema_indices(
+    transition_v_ind, conducting_v_ind, pinchoff_v_ind = derivative_extrema_indices(
         v_norm, i_fit
     )
 
@@ -183,4 +224,8 @@ def fit_pinchoff_parameters(
         vc=_map_index_to_voltage(conducting_v_ind, voltages),
         popt=popt,
         pcov=pcov,
+        v_min=voltages.min(),
+        v_max=voltages.max(),
+        i_min=filtered_current.min(),
+        i_max=filtered_current.max(),
     )

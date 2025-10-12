@@ -2,7 +2,6 @@ import numpy as np
 import pytest
 
 from stanza.analysis.fitting import (
-    DEFAULT_BOUNDS,
     PinchoffFitResult,
     _compute_initial_params,
     _compute_parameter_bounds,
@@ -38,26 +37,42 @@ class TestDerivativeExtremaIndices:
     def test_basic_ordering(self):
         x = np.linspace(-10, 10, 100)
         y = pinchoff_curve(x, 1.0, 1.0, 1.0)
-        imin_grad, imax_grad, imin_second, imax_second = derivative_extrema_indices(
+        transition_v_ind, conducting_v_ind, pinchoff_v_ind = derivative_extrema_indices(
             x, y
         )
-        assert imin_grad > imax_grad
-        assert imin_second > imax_second
+        assert pinchoff_v_ind < transition_v_ind < conducting_v_ind
+        assert y[pinchoff_v_ind] < y[transition_v_ind] < y[conducting_v_ind]
 
     def test_negative_amplitude(self):
         x = np.linspace(-10, 10, 100)
         y = pinchoff_curve(x, 1.0, -1.0, 1.0)
-        imin_grad, imax_grad, imin_second, imax_second = derivative_extrema_indices(
+        transition_v_ind, conducting_v_ind, pinchoff_v_ind = derivative_extrema_indices(
             x, y
         )
-        assert imin_grad > imax_grad
-        assert imin_second < imax_second
+        assert conducting_v_ind < transition_v_ind < pinchoff_v_ind
+        assert y[conducting_v_ind] > y[transition_v_ind] > y[pinchoff_v_ind]
 
     def test_returns_integers(self):
         x = np.linspace(-10, 10, 50)
         y = pinchoff_curve(x, 1.0, 1.0, 1.0)
         result = derivative_extrema_indices(x, y)
         assert all(isinstance(idx, int) for idx in result)
+
+    def test_inverted_current_assignment(self):
+        x = np.linspace(0, 1, 100)
+        y_norm = normalize(pinchoff_curve(np.linspace(-2, 2, 100), -0.5, 2.0, -1.0))
+        transition_v_ind, conducting_v_ind, pinchoff_v_ind = derivative_extrema_indices(
+            x, y_norm
+        )
+        assert y_norm[pinchoff_v_ind] < y_norm[conducting_v_ind]
+
+    def test_decreasing_curve_else_branch(self):
+        x = np.linspace(0, 1, 100)
+        y = 1.0 - pinchoff_curve(x, 1.0, 1.0, -0.5)
+        transition_v_ind, conducting_v_ind, pinchoff_v_ind = derivative_extrema_indices(
+            x, y
+        )
+        assert y[pinchoff_v_ind] < y[conducting_v_ind]
 
 
 class TestComputeInitialParams:
@@ -103,8 +118,20 @@ class TestComputeParameterBounds:
         i_norm = np.array([0.0, 1.0])
         lower, upper = _compute_parameter_bounds(v_norm, i_norm)
         assert np.all(lower < upper)
-        assert lower[1] == DEFAULT_BOUNDS[1][0]
-        assert upper[1] == DEFAULT_BOUNDS[1][1]
+        v_range = 1e6
+        max_abs_b = min(20.0 / v_range, 100.0)
+        assert lower[1] == pytest.approx(-max_abs_b)
+        assert upper[1] == pytest.approx(max_abs_b)
+
+    def test_invalid_bounds_use_defaults(self):
+        v_norm = np.array([-10.0, -10.0])
+        i_norm = np.array([0.0, 1.0])
+        lower, upper = _compute_parameter_bounds(v_norm, i_norm)
+        assert np.all(lower < upper)
+        v_min, v_max = v_norm.min(), v_norm.max()
+        assert v_min == v_max
+        a_bounds = (max(0.01 * 1.0, 1e-8), max(2.0 * 1.0, 1.0))
+        assert a_bounds[0] < a_bounds[1]
 
 
 class TestMapIndexToVoltage:
@@ -118,6 +145,26 @@ class TestMapIndexToVoltage:
         voltages = np.array([1.0, 2.0, 3.0])
         assert _map_index_to_voltage(3, voltages) is None
         assert _map_index_to_voltage(10, voltages) is None
+
+
+class TestPinchoffFitResult:
+    def test_fit_curve_method(self):
+        voltages = np.linspace(-2, 2, 100)
+        currents = pinchoff_curve(voltages, 0.5, 2.0, -1.0)
+        result = fit_pinchoff_parameters(voltages, currents)
+        fitted_currents = result.fit_curve(voltages)
+        assert len(fitted_currents) == len(voltages)
+        assert isinstance(fitted_currents, np.ndarray)
+        rmse = np.sqrt(np.mean((currents - fitted_currents) ** 2))
+        assert rmse < 0.01
+
+    def test_fit_curve_normalization_bounds(self):
+        voltages = np.linspace(-2, 2, 100)
+        currents = pinchoff_curve(voltages, 0.5, 2.0, -1.0)
+        result = fit_pinchoff_parameters(voltages, currents)
+        assert result.v_min == voltages.min()
+        assert result.v_max == voltages.max()
+        assert result.i_min < result.i_max
 
 
 class TestFitPinchoffParameters:
