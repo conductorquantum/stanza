@@ -1,4 +1,4 @@
-"""Tests for device characterization routines."""
+"""Tests for device health check routines."""
 
 from unittest.mock import patch
 
@@ -10,7 +10,7 @@ from stanza.exceptions import RoutineError
 from stanza.models import GateType
 from stanza.registry import ResourceRegistry, ResultsRegistry
 from stanza.routines import RoutineContext
-from stanza.routines.builtins.characterization import (
+from stanza.routines.builtins.health_check import (
     _calculate_leakage_matrix,
     _check_leakage_threshold,
     analyze_single_gate_heuristic,

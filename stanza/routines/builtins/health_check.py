@@ -1,6 +1,6 @@
-"""Device characterization routines for quantum dot devices.
+"""Device health check routines for quantum dot devices.
 
-Characterization tests adapted from:
+Health check tests adapted from:
     Kovach, T. et al. BATIS: Bootstrapping, Autonomous Testing, and
     Initialization System for Si/SiGe Multi-quantum Dot Devices. arXiv
     preprint arXiv:2412.07676 (2024). https://arxiv.org/abs/2412.07676

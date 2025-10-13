@@ -67,30 +67,6 @@ class TestSweep1DLogging:
             assert data["y_label"] == "Current"
 
 
-class TestSweep2DLogging:
-    def test_raises_length_mismatch_error(self, device, temp_dir):
-        logger = DataLogger("test_routine", temp_dir)
-        session = logger.create_session()
-
-        with pytest.raises(
-            ValueError, match="x_data and y_data must have the same length"
-        ):
-            device.sweep_2d("gate1", [0.0, 1.0], "gate1", [0.5], "contact1", session)
-
-        logger.close_session(session.session_id)
-
-    def test_does_not_buffer_data_on_error(self, device, temp_dir):
-        logger = DataLogger("test_routine", temp_dir)
-        session = logger.create_session()
-
-        with pytest.raises(ValueError):
-            device.sweep_2d("gate1", [0.0, 1.0], "gate1", [0.5], "contact1", session)
-
-        assert len(session._buffer) == 0
-
-        logger.close_session(session.session_id)
-
-
 class TestSweepAllLogging:
     def test_returns_correct_measurement_lengths(self, device, temp_dir):
         logger = DataLogger("test_routine", temp_dir)

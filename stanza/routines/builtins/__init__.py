@@ -1,6 +1,6 @@
-"""Built-in routines for common characterization and measurement tasks."""
+"""Built-in routines for common health check and measurement tasks."""
 
-from stanza.routines.builtins.characterization import (
+from stanza.routines.builtins.health_check import (
     finger_gate_characterization,
     global_accumulation,
     leakage_test,

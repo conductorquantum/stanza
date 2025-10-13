@@ -170,7 +170,7 @@ class TestDevice:
     def test_sweep_2d(self, device):
         device.measurement_instrument.measurements["contact1"] = 1e-6
         voltages, currents = device.sweep_2d("gate1", [0.0], "gate1", [1.0], "contact1")
-        assert len(voltages) == 2
+        assert len(voltages) == 1
         assert len(currents) == 1
 
     def test_sweep_all(self, device):

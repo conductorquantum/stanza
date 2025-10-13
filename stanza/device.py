@@ -254,7 +254,7 @@ class Device:
         voltages_2: list[float],
         measure_electrode: str,
         session: LoggerSession | None = None,
-    ) -> tuple[list[float], list[float]]:
+    ) -> tuple[list[list[float]], list[float]]:
         """Sweep two gate electrodes and measure the current of a single contact electrode."""
         voltage_measurements = []
         current_measurements = []
@@ -266,7 +266,7 @@ class Device:
                     {gate_1: voltage_1, gate_2: voltage_2},
                     wait_for_settling=should_settle,
                 )
-                voltage_measurements.extend([self.check(gate_1), self.check(gate_2)])
+                voltage_measurements.append([self.check(gate_1), self.check(gate_2)])
                 current_measurements.append(self.measure(measure_electrode))
 
         if session:
@@ -288,7 +288,7 @@ class Device:
         voltages: list[float],
         measure_electrode: str,
         session: LoggerSession | None = None,
-    ) -> tuple[list[float], list[float]]:
+    ) -> tuple[list[list[float]], list[float]]:
         """Sweep all gate electrodes and measure the current of a single contact electrode."""
         voltage_measurements = []
         current_measurements = []
@@ -299,7 +299,7 @@ class Device:
                 dict.fromkeys(self.control_gates, voltage),
                 wait_for_settling=should_settle,
             )
-            voltage_measurements.extend(
+            voltage_measurements.append(
                 [self.check(gate) or voltage for gate in self.control_gates]
             )
             current_measurements.append(self.measure(measure_electrode))
@@ -324,7 +324,7 @@ class Device:
         voltages: list[list[float]],
         measure_electrode: str,
         session: LoggerSession | None = None,
-    ) -> tuple[list[float], list[float]]:
+    ) -> tuple[list[list[float]], list[float]]:
         """Sweep multiple gate electrodes and measure the current of a single contact electrode."""
         voltage_measurements = []
         current_measurements = []
@@ -336,7 +336,7 @@ class Device:
                 wait_for_settling=should_settle,
             )
 
-            voltage_measurements.extend(
+            voltage_measurements.append(
                 [
                     self.check(gate) or v
                     for gate, v in zip(gate_electrodes, voltage, strict=True)
