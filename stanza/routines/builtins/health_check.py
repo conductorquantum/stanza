@@ -12,7 +12,7 @@ from typing import Any
 
 import numpy as np
 
-from stanza.analysis.criterion import pcov_fail_criterion
+from stanza.analysis.criterion import fit_quality_criterion
 from stanza.analysis.fitting import fit_pinchoff_parameters
 from stanza.exceptions import RoutineError
 from stanza.logger.session import LoggerSession
@@ -35,7 +35,7 @@ def noise_floor_measurement(
 
     This routine performs repeated current measurements on a specified electrode to characterize
     the measurement noise floor. The resulting mean and standard deviation are used to establish
-    minimum current thresholds for subsequent characterization routines, helping to distinguish
+    minimum current thresholds for subsequent health check routines, helping to distinguish
     real signals from measurement noise.
 
     Args:
@@ -207,6 +207,8 @@ def global_accumulation(
     ctx: RoutineContext,
     measure_electrode: str,
     step_size: float,
+    bias_gate: str,
+    bias_voltage: float,
     session: LoggerSession | None = None,
 ) -> dict[str, float]:
     """Determine the global turn-on voltage by sweeping all control gates simultaneously.
@@ -239,20 +241,25 @@ def global_accumulation(
         - The vp value is used by subsequent characterization routines (reservoir, finger gates)
         - step_size is converted to num_points based on voltage range
     """
-    max_voltage_bound = ctx.results["max_safe_voltage_bound"]
-    min_voltage_bound = ctx.results["min_safe_voltage_bound"]
+    leakage_test_results = ctx.results.get("leakage_test", {})
+    max_voltage_bound = leakage_test_results["max_safe_voltage_bound"]
 
     if step_size <= 0:
         raise RoutineError("Step size must be greater than 0")
 
-    num_points = max(2, int((max_voltage_bound - min_voltage_bound) / step_size))
-    voltages, currents = ctx.resources.device.sweep_all(
-        voltages=np.linspace(min_voltage_bound, max_voltage_bound, num_points),
+    ctx.resources.device.jump({bias_gate: bias_voltage}, wait_for_settling=True)
+
+    num_points = max(2, int(max_voltage_bound / step_size))
+    sweep_voltages = np.linspace(0, max_voltage_bound, num_points)
+    _, currents = ctx.resources.device.sweep_all(
+        voltages=sweep_voltages,
         measure_electrode=measure_electrode,
         session=session,
     )
     try:
-        turn_on_analysis = analyze_single_gate_heuristic(voltages, currents)
+        turn_on_analysis = analyze_single_gate_heuristic(
+            sweep_voltages, np.array(currents)
+        )
     except Exception as e:
         raise RoutineError(f"Error in global_accumulation: {str(e)}") from e
 
@@ -260,6 +267,12 @@ def global_accumulation(
         dict.fromkeys(ctx.resources.device.control_gates, turn_on_analysis["vp"]),
         wait_for_settling=True,
     )
+
+    if session:
+        session.log_analysis(
+            name="global_cutoff_voltage",
+            data=turn_on_analysis,
+        )
 
     return {
         "global_turn_on_voltage": turn_on_analysis["vp"],
@@ -271,8 +284,10 @@ def reservoir_characterization(
     ctx: RoutineContext,
     measure_electrode: str,
     step_size: float,
+    bias_gate: str,
+    bias_voltage: float,
     session: LoggerSession | None = None,
-) -> dict[str, dict[str, float]]:
+) -> dict[str, dict[str, Any]]:
     """Characterize individual reservoir gates by sweeping each while holding others in accumulation.
 
     This BATIS routine determines the turn-on voltage (pinch-off voltage) for each reservoir gate
@@ -306,10 +321,14 @@ def reservoir_characterization(
     if step_size <= 0:
         raise RoutineError("Step size must be greater than 0")
 
-    max_voltage_bound = ctx.results["max_safe_voltage_bound"]
-    min_voltage_bound = ctx.results["min_safe_voltage_bound"]
+    ctx.resources.device.jump({bias_gate: bias_voltage}, wait_for_settling=True)
+
+    leakage_test_results = ctx.results.get("leakage_test", {})
+    global_accumulation_results = ctx.results.get("global_accumulation", {})
+
+    max_voltage_bound = leakage_test_results["max_safe_voltage_bound"]
     global_turn_on_voltage = min(
-        1.2 * ctx.results["global_turn_on_voltage"], max_voltage_bound
+        1.2 * global_accumulation_results["global_turn_on_voltage"], max_voltage_bound
     )
 
     reservoir_characterization_results = {}
@@ -325,19 +344,27 @@ def reservoir_characterization(
         ctx.resources.device.jump({reservoir: 0.0}, wait_for_settling=True)
         time.sleep(DEFAULT_SETTLING_TIME_S)
 
-        num_points = max(2, int((max_voltage_bound - min_voltage_bound) / step_size))
+        num_points = max(2, int(max_voltage_bound / step_size))
         voltages, currents = ctx.resources.device.sweep_1d(
             reservoir,
-            np.linspace(min_voltage_bound, max_voltage_bound, num_points),
+            np.linspace(0, max_voltage_bound, num_points),
             measure_electrode,
             session,
         )
         try:
-            reservoir_analysis = analyze_single_gate_heuristic(voltages, currents)
+            reservoir_analysis = analyze_single_gate_heuristic(
+                np.array(voltages), np.array(currents)
+            )
         except Exception as e:
             raise RoutineError(f"Error in reservoir_characterization: {str(e)}") from e
 
-        reservoir_characterization_results[reservoir] = reservoir_analysis["vp"]
+        reservoir_characterization_results[reservoir] = reservoir_analysis
+
+        if session:
+            session.log_analysis(
+                name=f"reservoir_characterization_{reservoir}",
+                data=reservoir_analysis,
+            )
 
     return {
         "reservoir_characterization": reservoir_characterization_results,
@@ -349,8 +376,10 @@ def finger_gate_characterization(
     ctx: RoutineContext,
     measure_electrode: str,
     step_size: float,
+    bias_gate: str,
+    bias_voltage: float,
     session: LoggerSession | None = None,
-) -> dict[str, dict[str, float]]:
+) -> dict[str, dict[str, Any]]:
     """Characterize individual finger gates by sweeping each while holding others in accumulation.
 
     This BATIS routine determines the turn-on voltage (pinch-off voltage) for each finger gate
@@ -384,10 +413,14 @@ def finger_gate_characterization(
     if step_size <= 0:
         raise RoutineError("Step size must be greater than 0")
 
-    max_voltage_bound = ctx.results["max_safe_voltage_bound"]
-    min_voltage_bound = ctx.results["min_safe_voltage_bound"]
+    ctx.resources.device.jump({bias_gate: bias_voltage}, wait_for_settling=True)
+
+    leakage_test_results = ctx.results.get("leakage_test", {})
+    global_accumulation_results = ctx.results.get("global_accumulation", {})
+
+    max_voltage_bound = leakage_test_results["max_safe_voltage_bound"]
     global_turn_on_voltage = min(
-        1.2 * ctx.results["global_turn_on_voltage"], max_voltage_bound
+        1.2 * global_accumulation_results["global_turn_on_voltage"], max_voltage_bound
     )
 
     finger_gate_characterization_results = {}
@@ -403,19 +436,27 @@ def finger_gate_characterization(
         )
         ctx.resources.device.jump({gate: 0.0}, wait_for_settling=True)
         time.sleep(DEFAULT_SETTLING_TIME_S)
-        num_points = max(2, int((max_voltage_bound - min_voltage_bound) / step_size))
+        num_points = max(2, int(max_voltage_bound / step_size))
         voltages, currents = ctx.resources.device.sweep_1d(
             gate,
-            np.linspace(min_voltage_bound, max_voltage_bound, num_points),
+            np.linspace(0, max_voltage_bound, num_points),
             measure_electrode,
             session,
         )
         try:
-            finger_gate_analysis = analyze_single_gate_heuristic(voltages, currents)
+            finger_gate_analysis = analyze_single_gate_heuristic(
+                np.array(voltages), np.array(currents)
+            )
         except Exception as e:
             raise RoutineError(f"Error in finger_gate_characterization: {e}") from e
 
-        finger_gate_characterization_results[gate] = finger_gate_analysis["vp"]
+        finger_gate_characterization_results[gate] = finger_gate_analysis
+
+        if session:
+            session.log_analysis(
+                name=f"finger_gate_characterization_{gate}",
+                data=finger_gate_analysis,
+            )
 
     return {
         "finger_gate_characterization": finger_gate_characterization_results,
@@ -597,14 +638,15 @@ def analyze_single_gate_heuristic(
         dict: Contains vp (pinch-off voltage) and other fit parameters.
 
     Raises:
-        ValueError: If the curve fit quality is poor based on covariance matrix.
+        ValueError: If the curve fit quality is poor based on R² and NRMSE metrics.
     """
 
     pinchoff_fit = fit_pinchoff_parameters(voltages, currents)
-    pcov = pinchoff_fit.pcov
+    y_pred = pinchoff_fit.fit_curve(voltages)
+    is_good_fit = fit_quality_criterion(voltages, currents, y_pred)
 
-    if pcov is None or pcov_fail_criterion(pcov):
-        raise ValueError("Curve fit covariance matrix indicates poor fit")
+    if not is_good_fit:
+        raise ValueError("Curve fit quality is poor (low R² or high NRMSE)")
 
     return {
         "vp": pinchoff_fit.vp,

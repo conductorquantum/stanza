@@ -210,11 +210,19 @@ class TestLeakageTest:
 
 class TestGlobalAccumulation:
     def test_invalid_step_size(self, routine_context):
-        routine_context.results.store("max_safe_voltage_bound", 10.0)
-        routine_context.results.store("min_safe_voltage_bound", -10.0)
+        routine_context.results.store(
+            "leakage_test",
+            {"max_safe_voltage_bound": 10.0, "min_safe_voltage_bound": -10.0},
+        )
 
         with pytest.raises(RoutineError, match="Step size must be greater than 0"):
-            global_accumulation(routine_context, measure_electrode="G1", step_size=0)
+            global_accumulation(
+                routine_context,
+                measure_electrode="G1",
+                step_size=0,
+                bias_gate="G1",
+                bias_voltage=0.0,
+            )
 
     def test_calls_sweep_all(self, routine_context):
         class TrackedDevice(MockDevice):
@@ -234,11 +242,19 @@ class TestGlobalAccumulation:
 
         tracked_device = TrackedDevice()
         routine_context.resources._resources["device"] = tracked_device
-        routine_context.results.store("max_safe_voltage_bound", 10.0)
-        routine_context.results.store("min_safe_voltage_bound", -10.0)
+        routine_context.results.store(
+            "leakage_test",
+            {"max_safe_voltage_bound": 10.0, "min_safe_voltage_bound": -10.0},
+        )
 
         with pytest.raises((RoutineError, ValueError)):
-            global_accumulation(routine_context, measure_electrode="G1", step_size=2.0)
+            global_accumulation(
+                routine_context,
+                measure_electrode="G1",
+                step_size=2.0,
+                bias_gate="G1",
+                bias_voltage=0.0,
+            )
 
         assert tracked_device.sweep_all_called
         assert tracked_device.sweep_params["measure_electrode"] == "G1"
@@ -248,15 +264,23 @@ class TestGlobalAccumulation:
 class TestReservoirCharacterization:
     @pytest.fixture
     def reservoir_context(self, routine_context):
-        routine_context.results.store("max_safe_voltage_bound", 10.0)
-        routine_context.results.store("min_safe_voltage_bound", -10.0)
-        routine_context.results.store("global_turn_on_voltage", 0.5)
+        routine_context.results.store(
+            "leakage_test",
+            {"max_safe_voltage_bound": 10.0, "min_safe_voltage_bound": -10.0},
+        )
+        routine_context.results.store(
+            "global_accumulation", {"global_turn_on_voltage": 0.5}
+        )
         return routine_context
 
     def test_invalid_step_size(self, reservoir_context):
         with pytest.raises(RoutineError, match="Step size must be greater than 0"):
             reservoir_characterization(
-                reservoir_context, measure_electrode="G1", step_size=-0.1
+                reservoir_context,
+                measure_electrode="G1",
+                step_size=-0.1,
+                bias_gate="G1",
+                bias_voltage=0.0,
             )
 
     def test_sweeps_each_reservoir(self, reservoir_context):
@@ -274,7 +298,11 @@ class TestReservoirCharacterization:
 
         with pytest.raises((RoutineError, ValueError)):
             reservoir_characterization(
-                reservoir_context, measure_electrode="G1", step_size=2.0
+                reservoir_context,
+                measure_electrode="G1",
+                step_size=2.0,
+                bias_gate="G1",
+                bias_voltage=0.0,
             )
 
         assert len(tracked_device.swept_gates) >= 1
@@ -284,15 +312,23 @@ class TestReservoirCharacterization:
 class TestFingerGateCharacterization:
     @pytest.fixture
     def finger_context(self, routine_context):
-        routine_context.results.store("max_safe_voltage_bound", 10.0)
-        routine_context.results.store("min_safe_voltage_bound", -10.0)
-        routine_context.results.store("global_turn_on_voltage", 0.5)
+        routine_context.results.store(
+            "leakage_test",
+            {"max_safe_voltage_bound": 10.0, "min_safe_voltage_bound": -10.0},
+        )
+        routine_context.results.store(
+            "global_accumulation", {"global_turn_on_voltage": 0.5}
+        )
         return routine_context
 
     def test_invalid_step_size(self, finger_context):
         with pytest.raises(RoutineError, match="Step size must be greater than 0"):
             finger_gate_characterization(
-                finger_context, measure_electrode="G1", step_size=0
+                finger_context,
+                measure_electrode="G1",
+                step_size=0,
+                bias_gate="G1",
+                bias_voltage=0.0,
             )
 
     def test_sweeps_plunger_and_barrier_gates(self, finger_context):
@@ -310,7 +346,11 @@ class TestFingerGateCharacterization:
 
         with pytest.raises((RoutineError, ValueError)):
             finger_gate_characterization(
-                finger_context, measure_electrode="G1", step_size=2.0
+                finger_context,
+                measure_electrode="G1",
+                step_size=2.0,
+                bias_gate="G1",
+                bias_voltage=0.0,
             )
 
         assert len(tracked_device.swept_gates) >= 1
@@ -322,14 +362,7 @@ class TestAnalyzeSingleGateHeuristic:
         voltages = np.linspace(-1, 1, 10)
         currents = np.random.random(10) * 1e-15
 
-        with pytest.raises(ValueError, match="poor fit"):
-            analyze_single_gate_heuristic(voltages, currents)
-
-    def test_linear_data_fails(self):
-        voltages = np.linspace(-1, 1, 20)
-        currents = voltages * 1e-11
-
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="Curve fit quality is poor"):
             analyze_single_gate_heuristic(voltages, currents)
 
     def test_returns_all_expected_keys(self):

@@ -95,20 +95,23 @@ class Device:
 
     def get_gates_by_type(self, gate_type: str | GateType) -> list[str]:
         """Get the gate electrodes of a given type."""
+        if isinstance(gate_type, str):
+            gate_type = GateType(gate_type.upper())
         return [
             channel.name
             for channel in self.channel_configs.values()
-            if channel.pad_type == PadType.GATE
-            and channel.electrode_type == str(gate_type).upper()
+            if channel.pad_type == PadType.GATE and channel.electrode_type == gate_type
         ]
 
     def get_contacts_by_type(self, contact_type: str | ContactType) -> list[str]:
         """Get the contact electrodes of a given type."""
+        if isinstance(contact_type, str):
+            contact_type = ContactType(contact_type.upper())
         return [
             channel.name
             for channel in self.channel_configs.values()
             if channel.pad_type == PadType.CONTACT
-            and channel.electrode_type == str(contact_type).upper()
+            and channel.electrode_type == contact_type
         ]
 
     def is_configured(self) -> bool:

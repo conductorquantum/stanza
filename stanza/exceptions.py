@@ -7,7 +7,7 @@ class InstrumentError(RuntimeError):
 
 
 class DeviceError(RuntimeError):
-    """Exception raised when an instrument operation fails."""
+    """Exception raised when a device operation fails."""
 
     def __init__(self, message: str):
         self.message = message
