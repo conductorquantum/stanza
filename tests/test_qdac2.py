@@ -391,6 +391,141 @@ class TestQDAC2:
         qdac.close()
         mock_driver.close.assert_called_once()
 
+    def test_measure_single_channel(
+        self, mock_driver_class, instrument_config, measurement_channel_config
+    ):
+        mock_driver = Mock()
+        mock_driver.query.return_value = "0.002"
+        mock_driver_class.return_value = mock_driver
+
+        qdac = QDAC2(
+            instrument_config=instrument_config,
+            current_range=QDAC2CurrentRange.LOW,
+            channel_configs={"sense1": measurement_channel_config},
+        )
+
+        current = qdac.measure("sense1")
+        assert isinstance(current, float)
+        assert current == 0.002
+
+    def test_measure_multiple_channels(self, mock_driver_class, instrument_config):
+        mock_driver = Mock()
+        mock_driver.query.return_value = "0.001, 0.002, 0.003"
+        mock_driver_class.return_value = mock_driver
+
+        channel_configs = {
+            "sense1": ChannelConfig(
+                name="sense1",
+                voltage_range=(-1.0, 1.0),
+                pad_type=PadType.CONTACT,
+                electrode_type=ContactType.SOURCE,
+                measure_channel=2,
+            ),
+            "sense2": ChannelConfig(
+                name="sense2",
+                voltage_range=(-1.0, 1.0),
+                pad_type=PadType.CONTACT,
+                electrode_type=ContactType.DRAIN,
+                measure_channel=3,
+            ),
+            "sense3": ChannelConfig(
+                name="sense3",
+                voltage_range=(-1.0, 1.0),
+                pad_type=PadType.CONTACT,
+                electrode_type=ContactType.SOURCE,
+                measure_channel=4,
+            ),
+        }
+
+        qdac = QDAC2(
+            instrument_config=instrument_config,
+            current_range=QDAC2CurrentRange.LOW,
+            channel_configs=channel_configs,
+        )
+
+        currents = qdac.measure(["sense1", "sense2", "sense3"])
+
+        mock_driver.query.assert_called_with("read? ,(@2,3,4)")
+        assert isinstance(currents, list)
+        assert len(currents) == 3
+        assert currents == [0.001, 0.002, 0.003]
+
+    def test_measure_two_channels(self, mock_driver_class, instrument_config):
+        mock_driver = Mock()
+        mock_driver.query.return_value = "0.0015, 0.0025"
+        mock_driver_class.return_value = mock_driver
+
+        channel_configs = {
+            "sense1": ChannelConfig(
+                name="sense1",
+                voltage_range=(-1.0, 1.0),
+                pad_type=PadType.CONTACT,
+                electrode_type=ContactType.SOURCE,
+                measure_channel=5,
+            ),
+            "sense2": ChannelConfig(
+                name="sense2",
+                voltage_range=(-1.0, 1.0),
+                pad_type=PadType.CONTACT,
+                electrode_type=ContactType.DRAIN,
+                measure_channel=6,
+            ),
+        }
+
+        qdac = QDAC2(
+            instrument_config=instrument_config,
+            current_range=QDAC2CurrentRange.HIGH,
+            channel_configs=channel_configs,
+        )
+
+        currents = qdac.measure(["sense1", "sense2"])
+
+        mock_driver.query.assert_called_with("read? ,(@5,6)")
+        assert isinstance(currents, list)
+        assert len(currents) == 2
+        assert currents == pytest.approx([0.0015, 0.0025])
+
+    def test_measure_channels_with_whitespace(
+        self, mock_driver_class, instrument_config
+    ):
+        mock_driver = Mock()
+        mock_driver.query.return_value = "  0.001  ,  0.002  ,0.003"
+        mock_driver_class.return_value = mock_driver
+
+        channel_configs = {
+            "sense1": ChannelConfig(
+                name="sense1",
+                voltage_range=(-1.0, 1.0),
+                pad_type=PadType.CONTACT,
+                electrode_type=ContactType.SOURCE,
+                measure_channel=1,
+            ),
+            "sense2": ChannelConfig(
+                name="sense2",
+                voltage_range=(-1.0, 1.0),
+                pad_type=PadType.CONTACT,
+                electrode_type=ContactType.DRAIN,
+                measure_channel=2,
+            ),
+            "sense3": ChannelConfig(
+                name="sense3",
+                voltage_range=(-1.0, 1.0),
+                pad_type=PadType.CONTACT,
+                electrode_type=ContactType.SOURCE,
+                measure_channel=3,
+            ),
+        }
+
+        qdac = QDAC2(
+            instrument_config=instrument_config,
+            current_range=QDAC2CurrentRange.LOW,
+            channel_configs=channel_configs,
+        )
+
+        currents = qdac.measure(["sense1", "sense2", "sense3"])
+
+        assert currents == [0.001, 0.002, 0.003]
+
 
 class TestQDAC2ControlChannel:
     @patch("stanza.drivers.qdac2.PyVisaDriver")
