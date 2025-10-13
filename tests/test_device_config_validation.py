@@ -227,3 +227,58 @@ def test_device_config_duplicate_measure_channels():
             routines=[],
             instruments=[],
         )
+
+
+def test_routine_config_converts_float_to_int():
+    """Test that floats with no fractional part are converted to ints."""
+    routine = RoutineConfig(
+        name="test_routine",
+        parameters={
+            "frequency": 50e6,
+            "amplitude": 0.5,
+            "count": 100.0,
+            "enabled": True,
+            "name": "test",
+        },
+    )
+
+    assert routine.parameters["frequency"] == 50000000
+    assert isinstance(routine.parameters["frequency"], int)
+
+    assert routine.parameters["amplitude"] == 0.5
+    assert isinstance(routine.parameters["amplitude"], float)
+
+    assert routine.parameters["count"] == 100
+    assert isinstance(routine.parameters["count"], int)
+
+    assert routine.parameters["enabled"] is True
+    assert isinstance(routine.parameters["enabled"], bool)
+
+    assert routine.parameters["name"] == "test"
+    assert isinstance(routine.parameters["name"], str)
+
+
+def test_routine_config_with_no_parameters():
+    """Test that RoutineConfig works with no parameters."""
+    routine = RoutineConfig(name="test_routine")
+    assert routine.parameters is None
+
+
+def test_routine_config_with_nested_routines():
+    """Test that nested routines also convert numbers correctly."""
+    routine = RoutineConfig(
+        name="parent_routine",
+        parameters={"value": 42.0},
+        routines=[
+            RoutineConfig(
+                name="child_routine",
+                parameters={"frequency": 1e9},
+            )
+        ],
+    )
+
+    assert routine.parameters["value"] == 42
+    assert isinstance(routine.parameters["value"], int)
+
+    assert routine.routines[0].parameters["frequency"] == 1000000000
+    assert isinstance(routine.routines[0].parameters["frequency"], int)

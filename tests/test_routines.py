@@ -440,7 +440,7 @@ class TestRoutineRunner:
             "type": "holes",
         }
         assert extracted_configs["leakage_test"] == {
-            "leakage_threshold_resistance": 50000000.0,
+            "leakage_threshold_resistance": 50000000,
             "leakage_threshold_count": 0,
         }
         assert extracted_configs["global_accumulation"] == {"step_size": 0.01}
@@ -491,7 +491,7 @@ class TestRoutineRunner:
         runner._device_configs = [device_config]
         results = runner.run_all(parent_routine="health_check")
 
-        assert results["leakage_test"] == "leakage_50000000.0"
+        assert results["leakage_test"] == "leakage_50000000"
         assert results["global_accumulation"] == "accumulation_0.01"
         assert results["reservoir_characterization"] == "reservoir_0.01"
         assert len(results) == 3
