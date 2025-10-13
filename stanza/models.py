@@ -98,8 +98,15 @@ class RoutineConfig(BaseModelWithConfig):
         """Convert float values to int if they have no fractional part."""
         if self.parameters:
             for key, value in self.parameters.items():
-                if isinstance(value, float) and value.is_integer():
-                    self.parameters[key] = int(value)
+                if isinstance(value, str):
+                    try:
+                        numeric_value = float(value)
+                        if numeric_value.is_integer():
+                            self.parameters[key] = int(numeric_value)
+                        else:
+                            self.parameters[key] = numeric_value
+                    except ValueError:
+                        pass
         return self
 
 

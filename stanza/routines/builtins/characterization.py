@@ -158,7 +158,7 @@ def leakage_test(
             num_points,
             session,
         )
-        leakage_test_results["max_voltage_bound"] = max_delta_v
+        leakage_test_results["max_safe_voltage_bound"] = max_delta_v
 
         # Test min voltage bound
         min_delta_v, min_leaked = _test_single_voltage_bound(
@@ -173,7 +173,7 @@ def leakage_test(
             num_points,
             session,
         )
-        leakage_test_results["min_voltage_bound"] = min_delta_v
+        leakage_test_results["min_safe_voltage_bound"] = min_delta_v
 
         # Log success only if neither bound leaked
         if not max_leaked and not min_leaked:
@@ -182,6 +182,8 @@ def leakage_test(
                     "leakage_test_success",
                     {
                         "gates": control_gates,
+                        "max_safe_voltage_bound": max_delta_v,
+                        "min_safe_voltage_bound": min_delta_v,
                         "leaky_gate_pairs": [],
                         "num_leaky_connections": 0,
                     },
@@ -190,7 +192,7 @@ def leakage_test(
         return leakage_test_results
 
     except Exception as e:
-        logger.error(f"Error in leakage test: {str(e)}")
+        logger.error("Error in leakage test: %s", e)
         raise e
 
     finally:
@@ -237,8 +239,8 @@ def global_accumulation(
         - The vp value is used by subsequent characterization routines (reservoir, finger gates)
         - step_size is converted to num_points based on voltage range
     """
-    max_voltage_bound = ctx.results["max_voltage_bound"]
-    min_voltage_bound = ctx.results["min_voltage_bound"]
+    max_voltage_bound = ctx.results["max_safe_voltage_bound"]
+    min_voltage_bound = ctx.results["min_safe_voltage_bound"]
 
     if step_size <= 0:
         raise RoutineError("Step size must be greater than 0")
@@ -281,8 +283,8 @@ def reservoir_characterization(
 
     Args:
         ctx: Routine context containing device resources and previous results. Requires:
-             - ctx.results["max_voltage_bound"]: Maximum voltage for sweeps
-             - ctx.results["min_voltage_bound"]: Minimum voltage for sweeps
+             - ctx.results["max_safe_voltage_bound"]: Maximum voltage for sweeps
+             - ctx.results["min_safe_voltage_bound"]: Minimum voltage for sweeps
              - ctx.results["global_turn_on_voltage"]: From global_accumulation routine
         measure_electrode: Name of the electrode to measure current from during sweeps.
         step_size: Voltage increment (V) between sweep points. Smaller values provide
@@ -304,8 +306,8 @@ def reservoir_characterization(
     if step_size <= 0:
         raise RoutineError("Step size must be greater than 0")
 
-    max_voltage_bound = ctx.results["max_voltage_bound"]
-    min_voltage_bound = ctx.results["min_voltage_bound"]
+    max_voltage_bound = ctx.results["max_safe_voltage_bound"]
+    min_voltage_bound = ctx.results["min_safe_voltage_bound"]
     global_turn_on_voltage = min(
         1.2 * ctx.results["global_turn_on_voltage"], max_voltage_bound
     )
@@ -359,8 +361,8 @@ def finger_gate_characterization(
 
     Args:
         ctx: Routine context containing device resources and previous results. Requires:
-             - ctx.results["max_voltage_bound"]: Maximum voltage for sweeps
-             - ctx.results["min_voltage_bound"]: Minimum voltage for sweeps
+             - ctx.results["max_safe_voltage_bound"]: Maximum voltage for sweeps
+             - ctx.results["min_safe_voltage_bound"]: Minimum voltage for sweeps
              - ctx.results["global_turn_on_voltage"]: From global_accumulation routine
         measure_electrode: Name of the electrode to measure current from during sweeps.
         step_size: Voltage increment (V) between sweep points. Smaller values provide
@@ -382,8 +384,8 @@ def finger_gate_characterization(
     if step_size <= 0:
         raise RoutineError("Step size must be greater than 0")
 
-    max_voltage_bound = ctx.results["max_voltage_bound"]
-    min_voltage_bound = ctx.results["min_voltage_bound"]
+    max_voltage_bound = ctx.results["max_safe_voltage_bound"]
+    min_voltage_bound = ctx.results["min_safe_voltage_bound"]
     global_turn_on_voltage = min(
         1.2 * ctx.results["global_turn_on_voltage"], max_voltage_bound
     )
@@ -411,9 +413,7 @@ def finger_gate_characterization(
         try:
             finger_gate_analysis = analyze_single_gate_heuristic(voltages, currents)
         except Exception as e:
-            raise RoutineError(
-                f"Error in finger_gate_characterization: {str(e)}"
-            ) from e
+            raise RoutineError(f"Error in finger_gate_characterization: {e}") from e
 
         finger_gate_characterization_results[gate] = finger_gate_analysis["vp"]
 

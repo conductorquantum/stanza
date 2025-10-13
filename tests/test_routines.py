@@ -491,7 +491,7 @@ class TestRoutineRunner:
         runner._device_configs = [device_config]
         results = runner.run_all(parent_routine="health_check")
 
-        assert results["leakage_test"] == "leakage_50000000"
+        assert results["leakage_test"] == "leakage_50000000.0"
         assert results["global_accumulation"] == "accumulation_0.01"
         assert results["reservoir_characterization"] == "reservoir_0.01"
         assert len(results) == 3

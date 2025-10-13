@@ -152,6 +152,14 @@ class QDAC2(BaseInstrument):
         super().__init__(instrument_config)
         self._initialize_channels(channel_configs)
 
+        # Set current measurement range
+        channels_str = ",".join(str(ch) for _, ch in self.measurement_channels)
+        self.driver.write(
+            f"sens:rang {str(self.current_range).lower()},(@{channels_str})"
+        )
+        # Set the integration time
+        self.driver.write(f"sens:aper {self.measurement_aperature_s},(@{channels_str})")
+
     def _initialize_channels(self, channel_configs: dict[str, ChannelConfig]) -> None:
         for channel_config in channel_configs.values():
             if (
@@ -185,13 +193,7 @@ class QDAC2(BaseInstrument):
 
     def prepare_measurement(self) -> None:
         """Prepare the measurement."""
-        # Set current measurement range
-        channels_str = ",".join(str(ch) for _, ch in self.measurement_channels)
-        self.driver.write(
-            f"sens:rang {str(self.current_range).lower()},(@{channels_str})"
-        )
-        # Set the integration time
-        self.driver.write(f"sens:aper {self.measurement_aperature_s},(@{channels_str})")
+        pass
 
     def set_voltage(self, channel_name: str, voltage: float) -> None:
         """Set the voltage on a specific channel."""

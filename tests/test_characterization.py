@@ -149,10 +149,10 @@ class TestLeakageTest:
             num_points=3,
         )
 
-        assert "max_voltage_bound" in result
-        assert "min_voltage_bound" in result
-        assert isinstance(result["max_voltage_bound"], (int, float))
-        assert isinstance(result["min_voltage_bound"], (int, float))
+        assert "max_safe_voltage_bound" in result
+        assert "min_safe_voltage_bound" in result
+        assert isinstance(result["max_safe_voltage_bound"], (int, float))
+        assert isinstance(result["min_safe_voltage_bound"], (int, float))
 
     def test_leakage_uses_current_std_from_results(self, routine_context):
         routine_context.results.store("current_std", 5e-11)
@@ -210,8 +210,8 @@ class TestLeakageTest:
 
 class TestGlobalAccumulation:
     def test_invalid_step_size(self, routine_context):
-        routine_context.results.store("max_voltage_bound", 10.0)
-        routine_context.results.store("min_voltage_bound", -10.0)
+        routine_context.results.store("max_safe_voltage_bound", 10.0)
+        routine_context.results.store("min_safe_voltage_bound", -10.0)
 
         with pytest.raises(RoutineError, match="Step size must be greater than 0"):
             global_accumulation(routine_context, measure_electrode="G1", step_size=0)
@@ -234,8 +234,8 @@ class TestGlobalAccumulation:
 
         tracked_device = TrackedDevice()
         routine_context.resources._resources["device"] = tracked_device
-        routine_context.results.store("max_voltage_bound", 10.0)
-        routine_context.results.store("min_voltage_bound", -10.0)
+        routine_context.results.store("max_safe_voltage_bound", 10.0)
+        routine_context.results.store("min_safe_voltage_bound", -10.0)
 
         with pytest.raises((RoutineError, ValueError)):
             global_accumulation(routine_context, measure_electrode="G1", step_size=2.0)
@@ -248,8 +248,8 @@ class TestGlobalAccumulation:
 class TestReservoirCharacterization:
     @pytest.fixture
     def reservoir_context(self, routine_context):
-        routine_context.results.store("max_voltage_bound", 10.0)
-        routine_context.results.store("min_voltage_bound", -10.0)
+        routine_context.results.store("max_safe_voltage_bound", 10.0)
+        routine_context.results.store("min_safe_voltage_bound", -10.0)
         routine_context.results.store("global_turn_on_voltage", 0.5)
         return routine_context
 
@@ -284,8 +284,8 @@ class TestReservoirCharacterization:
 class TestFingerGateCharacterization:
     @pytest.fixture
     def finger_context(self, routine_context):
-        routine_context.results.store("max_voltage_bound", 10.0)
-        routine_context.results.store("min_voltage_bound", -10.0)
+        routine_context.results.store("max_safe_voltage_bound", 10.0)
+        routine_context.results.store("min_safe_voltage_bound", -10.0)
         routine_context.results.store("global_turn_on_voltage", 0.5)
         return routine_context
 
