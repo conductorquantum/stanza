@@ -232,6 +232,7 @@ routines:
   - name: health_check
     parameters:
       parent_param: value
+      type: holes
     routines:
       - name: leakage_test
         parameters:
@@ -330,6 +331,48 @@ routines:
   - name: routine2
     parameters:
       param2: value2
+instruments:
+  - name: ctrl
+    type: CONTROL
+    ip_addr: "127.0.0.1"
+    slew_rate: 1.0
+  - name: meas
+    type: MEASUREMENT
+    ip_addr: "127.0.0.1"
+    measurement_duration: 0.001
+    sample_time: 0.0001
+"""
+
+
+@pytest.fixture
+def param_override_yaml():
+    """Fixture for testing parent parameter override behavior."""
+    return """
+name: test_device
+gates:
+  G1:
+    type: PLUNGER
+    control_channel: 1
+    measure_channel: 1
+    v_lower_bound: -1.0
+    v_upper_bound: 1.0
+contacts:
+  C1:
+    type: SOURCE
+    control_channel: 2
+    measure_channel: 2
+    v_lower_bound: -1.0
+    v_upper_bound: 1.0
+routines:
+  - name: parent_routine
+    parameters:
+      shared_param: parent_value
+      parent_only: parent_data
+    routines:
+      - name: child_routine
+        parameters:
+          shared_param: child_value
+          child_only: child_data
 instruments:
   - name: ctrl
     type: CONTROL
