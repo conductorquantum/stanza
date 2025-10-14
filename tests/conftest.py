@@ -229,7 +229,7 @@ gates:
     v_lower_bound: -3.0
     v_upper_bound: 3.0
 routines:
-  - name: BATIS
+  - name: health_check
     parameters:
       parent_param: value
     routines:

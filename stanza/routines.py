@@ -125,6 +125,7 @@ class RoutineRunner:
             self.configs = self._extract_routine_configs(configs)
             self._device_configs = [c for c in configs if isinstance(c, DeviceConfig)]
 
+        self._routine_hierarchy: dict[str, str] = {}
         self.results = ResultsRegistry()
         self.context = RoutineContext(self.resources, self.results)
 
@@ -180,7 +181,10 @@ class RoutineRunner:
         return routine_configs
 
     def _extract_from_routine_config(
-        self, routine_config: Any, routine_configs: dict[str, dict[str, Any]]
+        self,
+        routine_config: Any,
+        routine_configs: dict[str, dict[str, Any]],
+        parent_path: str = "",
     ) -> None:
         """Recursively extract parameters from routine config and its nested routines.
 
@@ -192,8 +196,29 @@ class RoutineRunner:
             routine_configs[routine_config.name] = routine_config.parameters
 
         if routine_config.routines:
+            current_path = (
+                f"{parent_path}/{routine_config.name}".lower()
+                if parent_path
+                else routine_config.name.lower()
+            )
             for nested_routine in routine_config.routines:
-                self._extract_from_routine_config(nested_routine, routine_configs)
+                self._routine_hierarchy[nested_routine.name] = (
+                    f"{current_path}/{nested_routine.name}"
+                )
+                self._extract_from_routine_config(
+                    nested_routine, routine_configs, current_path
+                )
+
+    def _get_routine_path(self, routine_name: str) -> str:
+        """Get the full path for a routine including parent hierarhcy.
+
+        Args:
+            routine_name: Name of the routine
+
+        Returns:
+            Full path like "health_check/noise_floor_measurement" or just "routine_name" if no parent
+        """
+        return self._routine_hierarchy.get(routine_name, routine_name)
 
     def run(self, routine_name: str, **params: Any) -> Any:
         """Execute a registered routine.
@@ -222,7 +247,8 @@ class RoutineRunner:
         data_logger = getattr(self.resources, "logger", None)
         session = None
         if data_logger is not None and hasattr(data_logger, "create_session"):
-            session = data_logger.create_session(session_id=routine_name)
+            session_id = self._get_routine_path(routine_name)
+            session = data_logger.create_session(session_id=session_id)
             merged_params["session"] = session
 
         try:
@@ -242,7 +268,8 @@ class RoutineRunner:
         finally:
             # Close logger session if it was created
             if session is not None and data_logger is not None:
-                data_logger.close_session(session_id=routine_name)
+                session_id = self._get_routine_path(routine_name)
+                data_logger.close_session(session_id=session_id)
 
     def run_all(self, parent_routine: str | None = None) -> dict[str, Any]:
         """Execute all routines from config in order.
