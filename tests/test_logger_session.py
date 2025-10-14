@@ -1,10 +1,10 @@
+import logging
 import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
 import numpy as np
 import pytest
-import logging
 
 from stanza.exceptions import LoggerSessionError
 from stanza.logger.datatypes import SessionMetadata
