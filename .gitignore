@@ -29,3 +29,6 @@ archive.zip
 
 # macOS
 .DS_Store
+
+# uv 
+uv.lock

@@ -24,6 +24,7 @@ class LoggerSession:
         writer_refs: list[str],
         base_dir: str | Path,
         buffer_size: int = 1000,
+        auto_flush_interval: float | None = 30.0,
     ):
         if not writer_pool or not writer_refs:
             raise LoggerSessionError("Writer pool and references are required")
@@ -37,11 +38,15 @@ class LoggerSession:
         self._writer_refs = writer_refs
         self._base_dir = base_path
         self._buffer_size = buffer_size
+        self._auto_flush_interval = auto_flush_interval
 
         self._active = False
         self._buffer: list[MeasurementData | SweepData] = []
+        self._last_flush_time = time.time()
+        self._buffer_size_warning_threshold = buffer_size * 10
+        self._buffer_size_warned = False
 
-        logger.debug(f"Created session: {self.metadata.session_id}")
+        logger.debug("Created session: %s", self.metadata.session_id)
 
     @property
     def session_id(self) -> str:
@@ -50,6 +55,21 @@ class LoggerSession:
     @property
     def routine_name(self) -> str:
         return self.metadata.routine_name or ""
+
+    def _check_buffer_size_warning(self) -> None:
+        """Check if buffer has grown too large and log warning once."""
+        if (
+            not self._buffer_size_warned
+            and len(self._buffer) >= self._buffer_size_warning_threshold
+        ):
+            logger.warning(
+                "Buffer size critical for session %s: %d items (threshold: %d). "
+                "Consider flushing more frequently or increasing buffer size.",
+                self.session_id,
+                len(self._buffer),
+                self._buffer_size_warning_threshold,
+            )
+            self._buffer_size_warned = True
 
     def initialize(self) -> None:
         """Initialize the session.
@@ -66,7 +86,8 @@ class LoggerSession:
                 writer.initialize_session(self.metadata)
 
             self._active = True
-            logger.info(f"Initialized session: {self.session_id}")
+            self._last_flush_time = time.time()
+            logger.info("Initialized session: %s", self.session_id)
 
         except Exception as e:
             self._active = False
@@ -85,7 +106,7 @@ class LoggerSession:
                 writer.finalize_session(self.metadata)
 
             self._active = False
-            logger.info(f"Finalized session: {self.session_id}")
+            logger.info("Finalized session: %s", self.session_id)
 
         except Exception as e:
             self._active = False
@@ -118,11 +139,17 @@ class LoggerSession:
         )
 
         self._buffer.append(measurement)
+        self._check_buffer_size_warning()
 
-        if len(self._buffer) >= self._buffer_size:
+        should_flush = len(self._buffer) >= self._buffer_size or (
+            self._auto_flush_interval is not None
+            and time.time() - self._last_flush_time >= self._auto_flush_interval
+        )
+
+        if should_flush:
             self.flush()
 
-        logger.debug(f"Logged measurement '{name}' to session {self.session_id}")
+        logger.debug("Logged measurement '%s' to session %s", name, self.session_id)
 
     def log_analysis(
         self,
@@ -170,11 +197,17 @@ class LoggerSession:
         )
 
         self._buffer.append(sweep)
+        self._check_buffer_size_warning()
 
-        if len(self._buffer) >= self._buffer_size:
+        should_flush = len(self._buffer) >= self._buffer_size or (
+            self._auto_flush_interval is not None
+            and time.time() - self._last_flush_time >= self._auto_flush_interval
+        )
+
+        if should_flush:
             self.flush()
 
-        logger.debug(f"Logged sweep '{name}' to session {self.session_id}")
+        logger.debug("Logged sweep '%s' to session %s", name, self.session_id)
 
     def log_parameters(self, parameters: dict[str, Any]) -> None:
         """Log parameters to a session."""
@@ -189,7 +222,17 @@ class LoggerSession:
         self.metadata.parameters.update(parameters)
 
     def flush(self) -> None:
-        """Flush buffered data to all writers."""
+        """Flush buffered data to all writers.
+
+        Raises:
+            LoggerSessionError: If any writer fails to write or flush data
+        """
+        if not self._buffer:
+            return
+
+        write_errors = []
+        flush_errors = []
+
         for item in self._buffer:
             for writer_ref in self._writer_refs:
                 writer = self._writer_pool[writer_ref]
@@ -200,22 +243,33 @@ class LoggerSession:
                         writer.write_sweep(item)
                     else:
                         raise LoggerSessionError(f"Invalid item type: {type(item)}")
-                except Exception as e:
-                    logger.error(
-                        f"Failed to write data to writer {writer_ref}: {str(e)}"
-                    )
+                except Exception as e:  # noqa: BLE001
+                    error_msg = f"Failed to write data to writer {writer_ref}: {str(e)}"
+                    logger.error(error_msg)
+                    write_errors.append(error_msg)
 
         for writer_ref in self._writer_refs:
             writer = self._writer_pool[writer_ref]
             try:
                 writer.flush()
-            except Exception as e:
-                logger.error(f"Failed to flush data to writer {writer_ref}: {str(e)}")
+            except Exception as e:  # noqa: BLE001
+                error_msg = f"Failed to flush data to writer {writer_ref}: {str(e)}"
+                logger.error(error_msg)
+                flush_errors.append(error_msg)
 
+        # If there were any errors, don't clear buffer and raise exception
+        if write_errors or flush_errors:
+            all_errors = write_errors + flush_errors
+            raise LoggerSessionError(
+                f"Flush failed with {len(all_errors)} error(s): {all_errors[0]}"
+            )
+
+        # Clear buffer and mark success
         count = len(self._buffer)
         self._buffer.clear()
-
-        logger.debug(f"Flushed {count} items to session {self.session_id}")
+        self._last_flush_time = time.time()
+        self._buffer_size_warned = False  # Reset warning flag when buffer clears
+        logger.debug("Flushed %s items to session %s", count, self.session_id)
 
     def __enter__(self) -> LoggerSession:
         """Enter the session context."""
@@ -234,7 +288,7 @@ class LoggerSession:
             if self._active:
                 self.finalize()
         except Exception as e:
-            logger.error(f"Failed to finalize session: {str(e)}")
+            logger.error("Failed to finalize session: %s", str(e))
             raise LoggerSessionError(f"Failed to finalize session: {str(e)}") from e
 
     def __repr__(self) -> str:

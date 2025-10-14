@@ -97,6 +97,39 @@ class TestDataLogger:
 
             logger.close_session(session2.session_id)
 
+    def test_close_session_flushes_buffer(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            logger = DataLogger(
+                routine_name="test_routine",
+                base_dir=tmpdir,
+                buffer_size=100,  # Large buffer to prevent auto-flush
+            )
+
+            session = logger.create_session(session_id="test_session")
+
+            # Log measurements without triggering buffer flush
+            session.log_measurement("m1", {"value": 1})
+            session.log_measurement("m2", {"value": 2})
+            session.log_measurement("m3", {"value": 3})
+
+            # Verify buffer has data
+            assert len(session._buffer) > 0
+
+            # Close session - should flush buffer
+            logger.close_session("test_session")
+
+            # Verify data was written to file
+            measurement_file = (
+                logger.base_directory / "test_session" / "measurement.jsonl"
+            )
+            assert measurement_file.exists()
+
+            with open(measurement_file) as f:
+                lines = f.readlines()
+                assert len(lines) == 3
+                data = json.loads(lines[0])
+                assert data["name"] == "m1"
+
     def test_end_to_end_measurement_logging(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             logger = DataLogger(
