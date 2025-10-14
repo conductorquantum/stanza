@@ -435,7 +435,10 @@ class TestRoutineRunner:
         )
         extracted_configs = runner._extract_routine_configs([device_config])
 
-        assert extracted_configs["BATIS"] == {"parent_param": "value", "type": "holes"}
+        assert extracted_configs["health_check"] == {
+            "parent_param": "value",
+            "type": "holes",
+        }
         assert extracted_configs["leakage_test"] == {
             "leakage_threshold_resistance": 50000000.0,
             "leakage_threshold_count": 0,
@@ -486,7 +489,7 @@ class TestRoutineRunner:
         runner = RoutineRunner(resources=[device, logger])
         runner.configs = runner._extract_routine_configs([device_config])
         runner._device_configs = [device_config]
-        results = runner.run_all(parent_routine="BATIS")
+        results = runner.run_all(parent_routine="health_check")
 
         assert results["leakage_test"] == "leakage_50000000.0"
         assert results["global_accumulation"] == "accumulation_0.01"
@@ -692,7 +695,7 @@ class TestParentParameterInheritance:
         runner.configs = runner._extract_routine_configs([device_config])
         runner._device_configs = [device_config]
 
-        results = runner.run_all(parent_routine="BATIS")
+        results = runner.run_all(parent_routine="health_check")
 
         assert received_params["parent_param"] == "value"
         assert received_params["type"] == "holes"
@@ -753,7 +756,7 @@ class TestParentParameterInheritance:
         runner.configs = runner._extract_routine_configs([device_config])
         runner._device_configs = [device_config]
 
-        runner.run_all(parent_routine="BATIS")
+        runner.run_all(parent_routine="health_check")
 
         assert received_leakage_params["type"] == "holes"
         assert received_accumulation_params["type"] == "holes"

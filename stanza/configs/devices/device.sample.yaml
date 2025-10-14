@@ -10,7 +10,7 @@ gates:
   G3: {type: BARRIER, control_channel: 5, measure_channel: 5, v_lower_bound: -3.0, v_upper_bound: 3.0}
 
 routines:
-  - name: BATIS
+  - name: health_check
     routines:
       - name: leakage_test
         parameters:
