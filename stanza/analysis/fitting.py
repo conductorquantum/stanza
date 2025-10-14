@@ -86,9 +86,9 @@ def derivative_extrema_indices(x: np.ndarray, y: np.ndarray) -> tuple[int, int, 
     """
     Return the indices of key voltages for pinchoff curves.
 
-    vp corresponds to the pinchoff state (low current)
-    vc corresponds to the conducting state (high current)
-    vt corresponds to the transition (steepest slope)
+    v_pinch_off corresponds to the pinchoff state (low current)
+    v_cut_off corresponds to the conducting state (high current)
+    v_transition corresponds to the transition (steepest slope)
 
     Args:
         x (np.ndarray): Input x values

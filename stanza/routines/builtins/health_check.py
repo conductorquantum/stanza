@@ -30,6 +30,7 @@ def noise_floor_measurement(
     measure_electrode: str,
     num_points: int = 100,
     session: LoggerSession | None = None,
+    **kwargs: Any,
 ) -> dict[str, float]:
     """Measure the noise floor of the device to establish baseline current measurement statistics.
 
@@ -83,6 +84,7 @@ def leakage_test(
     leakage_threshold_count: int = 0,
     num_points: int = 10,
     session: LoggerSession | None = None,
+    **kwargs: Any,
 ) -> dict[str, float]:
     """Test for leakage between control gates by measuring inter-gate resistance across voltage ranges.
 
@@ -211,6 +213,7 @@ def global_accumulation(
     bias_gate: str,
     bias_voltage: float,
     session: LoggerSession | None = None,
+    **kwargs: Any,
 ) -> dict[str, float]:
     """Determine the global turn-on voltage by sweeping all control gates simultaneously.
 
@@ -288,6 +291,7 @@ def reservoir_characterization(
     bias_gate: str,
     bias_voltage: float,
     session: LoggerSession | None = None,
+    **kwargs: Any,
 ) -> dict[str, dict[str, Any]]:
     """Characterize individual reservoir gates by sweeping each while holding others in accumulation.
 
@@ -380,6 +384,7 @@ def finger_gate_characterization(
     bias_gate: str,
     bias_voltage: float,
     session: LoggerSession | None = None,
+    **kwargs: Any,
 ) -> dict[str, dict[str, Any]]:
     """Characterize individual finger gates by sweeping each while holding others in accumulation.
 
