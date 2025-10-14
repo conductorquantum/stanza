@@ -9,6 +9,9 @@ gates:
   G2: {type: PLUNGER, control_channel: 4, measure_channel: 4, v_lower_bound: -3.0, v_upper_bound: 3.0}
   G3: {type: BARRIER, control_channel: 5, measure_channel: 5, v_lower_bound: -3.0, v_upper_bound: 3.0}
 
+gpios:
+  MUX0: {type: MUX, control_channel: 6, v_lower_bound: -3.0, v_upper_bound: 3.0}
+
 routines:
   - name: health_check
     routines:

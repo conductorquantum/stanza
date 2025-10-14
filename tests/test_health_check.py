@@ -63,6 +63,10 @@ class MockDevice:
     def get_gates_by_type(self, gate_type):
         return [name for name, gtype in self.gate_types.items() if gtype == gate_type]
 
+    def zero(self, pad_type=None):
+        """Set all gates to 0V."""
+        self.voltages = dict.fromkeys(self.control_gates, 0.0)
+
 
 @pytest.fixture
 def mock_device():

@@ -1,13 +1,17 @@
+from unittest.mock import patch
+
 import pytest
 
 from stanza.device import Device
 from stanza.models import (
+    GPIO,
     Contact,
     ContactType,
     ControlInstrumentConfig,
     DeviceConfig,
     Gate,
     GateType,
+    GPIOType,
     InstrumentType,
     MeasurementInstrumentConfig,
     RoutineConfig,
@@ -45,6 +49,13 @@ class MockMeasurementInstrument:
         return self.measurements.get(channel_name, 0.0)
 
 
+@pytest.fixture(autouse=True)
+def mock_time_sleep():
+    """Automatically patch time.sleep for all tests to avoid actual delays."""
+    with patch("time.sleep"):
+        yield
+
+
 @pytest.fixture
 def control_instrument():
     """Fixture providing a mock control instrument."""
@@ -79,6 +90,16 @@ def device_config():
                 v_lower_bound=-1.0,
                 v_upper_bound=1.0,
                 measure_channel=2,
+            )
+        },
+        gpios={
+            "gpio_a0": GPIO(
+                name="gpio_a0",
+                type=GPIOType.MUX,
+                v_lower_bound=None,
+                v_upper_bound=None,
+                control_channel=None,
+                measure_channel=3,
             )
         },
         routines=[],

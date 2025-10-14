@@ -81,7 +81,7 @@ def generate_channel_configs(device_config: DeviceConfig) -> dict[str, ChannelCo
         device_config: The device configuration.
 
     Returns:
-        A dictionary mapping of gate/contact name to ChannelConfigs.
+        A dictionary mapping of gate/contact/gpio name to ChannelConfigs.
     """
     channel_configs = {}
     for gate_name, gate in device_config.gates.items():
@@ -104,6 +104,18 @@ def generate_channel_configs(device_config: DeviceConfig) -> dict[str, ChannelCo
             voltage_range=(contact.v_lower_bound, contact.v_upper_bound),
             pad_type=PadType.CONTACT,
             electrode_type=contact.type,
+            output_mode="dc",
+            enabled=True,
+        )
+
+    for gpio_name, gpio in device_config.gpios.items():
+        channel_configs[gpio_name] = ChannelConfig(
+            name=gpio_name,
+            control_channel=gpio.control_channel,
+            measure_channel=gpio.measure_channel,
+            voltage_range=(gpio.v_lower_bound, gpio.v_upper_bound),
+            pad_type=PadType.GPIO,
+            electrode_type=gpio.type,
             output_mode="dc",
             enabled=True,
         )
