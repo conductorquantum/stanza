@@ -35,6 +35,7 @@ class DataLogger:
         compression: str | None = None,
         compression_level: int = 6,
         buffer_size: int = 1000,
+        auto_flush_interval: float | None = 30.0,
     ):
         if not routine_name or not routine_name.strip():
             raise ValueError("Routine name is required")
@@ -59,6 +60,7 @@ class DataLogger:
         self._compression = compression
         self._compression_level = compression_level
         self._buffer_size = buffer_size
+        self._auto_flush_interval = auto_flush_interval
 
     @staticmethod
     def _slugify(name: str) -> str:
@@ -79,10 +81,6 @@ class DataLogger:
 
         if self._current_session is not None:
             if len(self._current_session._buffer) > 0:
-                logger.info(
-                    f"Auto-flushing {len(self._current_session._buffer)} buffered items "
-                    f"before closing session {self._current_session.session_id}"
-                )
                 self._current_session.flush()
             current_session_id = self._current_session.session_id
             self.close_session(current_session_id)
@@ -120,13 +118,14 @@ class DataLogger:
             writer_refs=writer_refs,
             base_dir=session_base_dir,
             buffer_size=self._buffer_size,
+            auto_flush_interval=self._auto_flush_interval,
         )
 
         self._active_sessions[session_id] = session
         self._current_session = session
         session.initialize()
 
-        logger.info(f"Created session: {session_id}")
+        logger.info("Created session: %s", session_id)
         return session
 
     def get_session(self, session_id: str) -> LoggerSession | None:
@@ -151,10 +150,17 @@ class DataLogger:
         session = self._active_sessions[session_id]
 
         try:
+            if len(session._buffer) > 0:
+                logger.debug(
+                    "Flushing %s buffered items before closing session %s",
+                    len(session._buffer),
+                    session_id,
+                )
+                session.flush()
             session.finalize()
-            logger.debug(f"Closed session: {session_id}")
+            logger.debug("Closed session: %s", session_id)
         except Exception as e:
-            logger.error(f"Failed to close session: {session_id}: {str(e)}")
+            logger.error("Failed to close session %s: %s", session_id, str(e))
         finally:
             del self._active_sessions[session_id]
             if self._current_session is session:
@@ -167,9 +173,9 @@ class DataLogger:
             try:
                 self.close_session(session_id)
             except Exception as e:
-                logger.error(f"Failed to close session: {session_id}: {str(e)}")
+                logger.error("Failed to close session %s: %s", session_id, str(e))
 
-        logger.debug(f"Closed {len(session_ids)} sessions")
+        logger.debug("Closed %s sessions", len(session_ids))
 
     def finalize(self) -> None:
         """Finalize the data logger."""

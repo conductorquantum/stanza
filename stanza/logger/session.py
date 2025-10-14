@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -24,6 +25,8 @@ class LoggerSession:
         writer_refs: list[str],
         base_dir: str | Path,
         buffer_size: int = 1000,
+        auto_flush_interval: float | None = 30.0,
+        max_auto_flush_failures: int = 5,
     ):
         if not writer_pool or not writer_refs:
             raise LoggerSessionError("Writer pool and references are required")
@@ -37,11 +40,16 @@ class LoggerSession:
         self._writer_refs = writer_refs
         self._base_dir = base_path
         self._buffer_size = buffer_size
+        self._auto_flush_interval = auto_flush_interval
+        self._max_auto_flush_failures = max_auto_flush_failures
 
         self._active = False
         self._buffer: list[MeasurementData | SweepData] = []
+        self._flush_lock = threading.Lock()
+        self._flush_timer: threading.Timer | None = None
+        self._consecutive_flush_failures = 0
 
-        logger.debug(f"Created session: {self.metadata.session_id}")
+        logger.debug("Created session: %s", self.metadata.session_id)
 
     @property
     def session_id(self) -> str:
@@ -50,6 +58,52 @@ class LoggerSession:
     @property
     def routine_name(self) -> str:
         return self.metadata.routine_name or ""
+
+    def _schedule_auto_flush(self) -> None:
+        """Schedule the next auto-flush if enabled."""
+        if self._auto_flush_interval is not None and self._auto_flush_interval > 0:
+            self._flush_timer = threading.Timer(
+                self._auto_flush_interval, self._auto_flush_callback
+            )
+            self._flush_timer.daemon = True
+            self._flush_timer.start()
+
+    def _cancel_auto_flush(self) -> None:
+        """Cancel any pending auto-flush timer."""
+        if self._flush_timer is not None:
+            self._flush_timer.cancel()
+            self._flush_timer = None
+
+    def _auto_flush_callback(self) -> None:
+        """Callback for periodic auto-flush."""
+        should_reschedule = True
+        try:
+            if self._active and len(self._buffer) > 0:
+                logger.debug(
+                    "Auto-flushing %s buffered items for session %s",
+                    len(self._buffer),
+                    self.session_id,
+                )
+                self.flush()
+                self._consecutive_flush_failures = 0  # Reset on success
+        except Exception as e:  # noqa: BLE001
+            self._consecutive_flush_failures += 1
+            logger.error(
+                "Auto-flush failed for session %s (%d/%d): %s",
+                self.session_id,
+                self._consecutive_flush_failures,
+                self._max_auto_flush_failures,
+                str(e),
+            )
+            if self._consecutive_flush_failures >= self._max_auto_flush_failures:
+                logger.critical(
+                    "Max auto-flush failures reached for session %s, stopping auto-flush",
+                    self.session_id,
+                )
+                should_reschedule = False
+        finally:
+            if self._active and should_reschedule:
+                self._schedule_auto_flush()
 
     def initialize(self) -> None:
         """Initialize the session.
@@ -66,7 +120,9 @@ class LoggerSession:
                 writer.initialize_session(self.metadata)
 
             self._active = True
-            logger.info(f"Initialized session: {self.session_id}")
+            self._consecutive_flush_failures = 0  # Reset on initialization
+            self._schedule_auto_flush()
+            logger.info("Initialized session: %s", self.session_id)
 
         except Exception as e:
             self._active = False
@@ -78,6 +134,7 @@ class LoggerSession:
             raise LoggerSessionError("Session is not initialized")
 
         try:
+            self._cancel_auto_flush()
             self.flush()
 
             for writer_ref in self._writer_refs:
@@ -85,10 +142,11 @@ class LoggerSession:
                 writer.finalize_session(self.metadata)
 
             self._active = False
-            logger.info(f"Finalized session: {self.session_id}")
+            logger.info("Finalized session: %s", self.session_id)
 
         except Exception as e:
             self._active = False
+            self._cancel_auto_flush()
             raise LoggerSessionError(f"Failed to finalize session: {str(e)}") from e
 
     def log_measurement(
@@ -122,7 +180,7 @@ class LoggerSession:
         if len(self._buffer) >= self._buffer_size:
             self.flush()
 
-        logger.debug(f"Logged measurement '{name}' to session {self.session_id}")
+        logger.debug("Logged measurement '%s' to session %s", name, self.session_id)
 
     def log_analysis(
         self,
@@ -174,7 +232,7 @@ class LoggerSession:
         if len(self._buffer) >= self._buffer_size:
             self.flush()
 
-        logger.debug(f"Logged sweep '{name}' to session {self.session_id}")
+        logger.debug("Logged sweep '%s' to session %s", name, self.session_id)
 
     def log_parameters(self, parameters: dict[str, Any]) -> None:
         """Log parameters to a session."""
@@ -189,33 +247,56 @@ class LoggerSession:
         self.metadata.parameters.update(parameters)
 
     def flush(self) -> None:
-        """Flush buffered data to all writers."""
-        for item in self._buffer:
+        """Flush buffered data to all writers.
+
+        Raises:
+            LoggerSessionError: If any writer fails to write or flush data
+        """
+        with self._flush_lock:
+            if not self._buffer:
+                return
+
+            write_errors = []
+            flush_errors = []
+
+            for item in self._buffer:
+                for writer_ref in self._writer_refs:
+                    writer = self._writer_pool[writer_ref]
+                    try:
+                        if isinstance(item, MeasurementData):
+                            writer.write_measurement(item)
+                        elif isinstance(item, SweepData):
+                            writer.write_sweep(item)
+                        else:
+                            raise LoggerSessionError(f"Invalid item type: {type(item)}")
+                    except Exception as e:  # noqa: BLE001
+                        error_msg = (
+                            f"Failed to write data to writer {writer_ref}: {str(e)}"
+                        )
+                        logger.error(error_msg)
+                        write_errors.append(error_msg)
+
             for writer_ref in self._writer_refs:
                 writer = self._writer_pool[writer_ref]
                 try:
-                    if isinstance(item, MeasurementData):
-                        writer.write_measurement(item)
-                    elif isinstance(item, SweepData):
-                        writer.write_sweep(item)
-                    else:
-                        raise LoggerSessionError(f"Invalid item type: {type(item)}")
-                except Exception as e:
-                    logger.error(
-                        f"Failed to write data to writer {writer_ref}: {str(e)}"
-                    )
+                    writer.flush()
+                except Exception as e:  # noqa: BLE001
+                    error_msg = f"Failed to flush data to writer {writer_ref}: {str(e)}"
+                    logger.error(error_msg)
+                    flush_errors.append(error_msg)
 
-        for writer_ref in self._writer_refs:
-            writer = self._writer_pool[writer_ref]
-            try:
-                writer.flush()
-            except Exception as e:
-                logger.error(f"Failed to flush data to writer {writer_ref}: {str(e)}")
+            # If there were any errors, don't clear buffer and raise exception
+            if write_errors or flush_errors:
+                all_errors = write_errors + flush_errors
+                raise LoggerSessionError(
+                    f"Flush failed with {len(all_errors)} error(s): {all_errors[0]}"
+                )
 
-        count = len(self._buffer)
-        self._buffer.clear()
+            count = len(self._buffer)
+            self._buffer.clear()
+            self._consecutive_flush_failures = 0  # Reset on successful manual flush
 
-        logger.debug(f"Flushed {count} items to session {self.session_id}")
+            logger.debug("Flushed %s items to session %s", count, self.session_id)
 
     def __enter__(self) -> LoggerSession:
         """Enter the session context."""
@@ -234,7 +315,7 @@ class LoggerSession:
             if self._active:
                 self.finalize()
         except Exception as e:
-            logger.error(f"Failed to finalize session: {str(e)}")
+            logger.error("Failed to finalize session: %s", str(e))
             raise LoggerSessionError(f"Failed to finalize session: {str(e)}") from e
 
     def __repr__(self) -> str:

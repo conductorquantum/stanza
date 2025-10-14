@@ -1,4 +1,6 @@
 import tempfile
+import threading
+import time
 from pathlib import Path
 
 import numpy as np
@@ -265,9 +267,13 @@ class TestLoggerSession:
         session._active = True
 
         session.log_measurement("test", {"value": 1})
-        session.flush()
 
-        assert len(session._buffer) == 0
+        # Flush should now raise an exception when writers fail
+        with pytest.raises(LoggerSessionError, match="Flush failed"):
+            session.flush()
+
+        # Buffer should NOT be cleared when flush fails
+        assert len(session._buffer) == 1
 
     def test_finalize_when_not_active_raises_error(self, logger_session):
         with pytest.raises(LoggerSessionError, match="not initialized"):
@@ -322,3 +328,133 @@ class TestLoggerSession:
         )
 
         assert session.routine_name == ""
+
+
+def test_time_based_auto_flush_creates_threading_timer(tmpdir_path, session_metadata):
+    """Test that auto-flush creates a threading timer when initialized."""
+    writer = JSONLWriter(tmpdir_path)
+    session = LoggerSession(
+        metadata=session_metadata,
+        writer_pool={"jsonl": writer},
+        writer_refs=["jsonl"],
+        base_dir=tmpdir_path,
+        auto_flush_interval=1.0,
+    )
+
+    # Before initialization, no timer should exist
+    assert session._flush_timer is None
+
+    session.initialize()
+
+    # After initialization, timer should be created
+    assert session._flush_timer is not None
+    assert isinstance(session._flush_timer, threading.Timer)
+    assert session._flush_timer.is_alive()
+
+    session.finalize()
+
+
+def test_time_based_auto_flush_thread_calls_callback(tmpdir_path, session_metadata):
+    """Test that the timer actually calls the auto-flush callback."""
+    writer = JSONLWriter(tmpdir_path)
+    session = LoggerSession(
+        metadata=session_metadata,
+        writer_pool={"jsonl": writer},
+        writer_refs=["jsonl"],
+        base_dir=tmpdir_path,
+        auto_flush_interval=0.1,  # Short interval for testing
+        buffer_size=100,  # Large buffer to prevent manual flush
+    )
+
+    session.initialize()
+
+    # Add some data to buffer
+    session.log_measurement("test", {"value": 1})
+    assert len(session._buffer) == 1
+
+    # Wait for auto-flush to trigger
+    time.sleep(0.25)
+
+    # Buffer should be flushed
+    assert len(session._buffer) == 0
+
+    session.finalize()
+
+
+def test_auto_flush_retries_on_failure(tmpdir_path, session_metadata):
+    """Test that auto-flush retries after a failure."""
+    call_count = [0]
+
+    class FailOnceThenSucceedWriter(JSONLWriter):
+        def write_measurement(self, data):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                raise RuntimeError("Simulated failure")
+            # Succeed on subsequent calls
+            super().write_measurement(data)
+
+    writer = FailOnceThenSucceedWriter(tmpdir_path)
+    session = LoggerSession(
+        metadata=session_metadata,
+        writer_pool={"jsonl": writer},
+        writer_refs=["jsonl"],
+        base_dir=tmpdir_path,
+        auto_flush_interval=0.1,
+        buffer_size=100,
+        max_auto_flush_failures=5,
+    )
+
+    session.initialize()
+    session.log_measurement("test", {"value": 1})
+
+    # Wait for first auto-flush attempt (should fail)
+    time.sleep(0.15)
+    assert session._consecutive_flush_failures == 1
+    assert len(session._buffer) == 1  # Still buffered
+
+    # Wait for second auto-flush attempt (should succeed)
+    time.sleep(0.15)
+    assert session._consecutive_flush_failures == 0
+    assert len(session._buffer) == 0  # Flushed successfully
+
+    session.finalize()
+
+
+def test_auto_flush_retries_stop_after_5_consecutive_failures(
+    tmpdir_path, session_metadata
+):
+    """Test that auto-flush stops after max consecutive failures."""
+
+    class AlwaysFailWriter(JSONLWriter):
+        def write_measurement(self, data):
+            raise RuntimeError("Simulated persistent failure")
+
+    writer = AlwaysFailWriter(tmpdir_path)
+    session = LoggerSession(
+        metadata=session_metadata,
+        writer_pool={"jsonl": writer},
+        writer_refs=["jsonl"],
+        base_dir=tmpdir_path,
+        auto_flush_interval=0.05,  # Very short interval
+        buffer_size=100,
+        max_auto_flush_failures=5,
+    )
+
+    session.initialize()
+    session.log_measurement("test", {"value": 1})
+
+    # Wait for enough time for all 5 failures to occur
+    time.sleep(0.4)
+
+    # Should have stopped after 5 failures
+    assert session._consecutive_flush_failures == 5
+
+    # Timer should no longer be scheduled
+    # Wait a bit more and verify failure count doesn't increase
+    time.sleep(0.2)
+    assert session._consecutive_flush_failures == 5  # Should still be 5, not 6+
+
+    # Buffer should still contain the data (never successfully flushed)
+    assert len(session._buffer) == 1
+
+    session._active = False  # Prevent finalize from trying to flush
