@@ -4,6 +4,7 @@ from unittest.mock import patch
 
 import numpy as np
 import pytest
+import logging
 
 from stanza.exceptions import LoggerSessionError
 from stanza.logger.datatypes import SessionMetadata
@@ -423,7 +424,6 @@ def test_no_auto_flush_within_interval(session_factory):
 
 def test_buffer_size_warning(tmpdir_path, session_factory, caplog):
     """Test that buffer size warning is logged when buffer grows too large."""
-    import logging
 
     class FailingWriter(JSONLWriter):
         def write_measurement(self, data):
