@@ -261,25 +261,40 @@ class RoutineRunner:
                 if parent_routine is None:
                     self._run_routine_tree(routine_config, results)
                 elif routine_config.name == parent_routine and routine_config.routines:
+                    parent_params = routine_config.parameters or {}
                     for nested_routine in routine_config.routines:
-                        self._run_routine_tree(nested_routine, results)
+                        self._run_routine_tree(nested_routine, results, parent_params)
 
         return results
 
-    def _run_routine_tree(self, routine_config: Any, results: dict[str, Any]) -> None:
+    def _run_routine_tree(
+        self,
+        routine_config: Any,
+        results: dict[str, Any],
+        parent_params: dict[str, Any] | None = None,
+    ) -> None:
         """Recursively run a routine and its nested routines.
 
         Args:
             routine_config: The routine configuration to execute
             results: Dictionary to store results
+            parent_params: Parameters from parent routine to inherit
         """
         if routine_config.name in _routine_registry:
-            result = self.run(routine_config.name)
+            if parent_params:
+                merged = {**parent_params, **(routine_config.parameters or {})}
+                result = self.run(routine_config.name, **merged)
+            else:
+                result = self.run(routine_config.name)
             results[routine_config.name] = result
 
         if routine_config.routines:
+            current_params = routine_config.parameters or {}
+            child_params = (
+                {**parent_params, **current_params} if parent_params else current_params
+            )
             for nested_routine in routine_config.routines:
-                self._run_routine_tree(nested_routine, results)
+                self._run_routine_tree(nested_routine, results, child_params)
 
     def get_result(self, routine_name: str) -> Any:
         """Get stored result from a routine."""

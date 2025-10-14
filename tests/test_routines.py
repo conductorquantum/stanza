@@ -435,7 +435,7 @@ class TestRoutineRunner:
         )
         extracted_configs = runner._extract_routine_configs([device_config])
 
-        assert extracted_configs["BATIS"] == {"parent_param": "value"}
+        assert extracted_configs["BATIS"] == {"parent_param": "value", "type": "holes"}
         assert extracted_configs["leakage_test"] == {
             "leakage_threshold_resistance": 50000000.0,
             "leakage_threshold_count": 0,
@@ -464,19 +464,19 @@ class TestRoutineRunner:
         execution_order = []
 
         @routine
-        def leakage_test(ctx, leakage_threshold_resistance, leakage_threshold_count):
+        def leakage_test(ctx, **params):
             execution_order.append("leakage_test")
-            return f"leakage_{leakage_threshold_resistance}"
+            return f"leakage_{params['leakage_threshold_resistance']}"
 
         @routine
-        def global_accumulation(ctx, step_size):
+        def global_accumulation(ctx, **params):
             execution_order.append("global_accumulation")
-            return f"accumulation_{step_size}"
+            return f"accumulation_{params['step_size']}"
 
         @routine
-        def reservoir_characterization(ctx, step_size):
+        def reservoir_characterization(ctx, **params):
             execution_order.append("reservoir_characterization")
-            return f"reservoir_{step_size}"
+            return f"reservoir_{params['step_size']}"
 
         device_config = DeviceConfig.model_validate(
             yaml.safe_load(nested_routines_yaml)
@@ -658,3 +658,133 @@ class TestRoutineRunnerLoggerIntegration:
                 mock_logger_class.assert_called_once_with(
                     name="logger", routine_name="device", base_dir="./data"
                 )
+
+
+class TestParentParameterInheritance:
+    """Test that parent routine parameters are inherited by subroutines."""
+
+    def test_parent_params_inherited_by_children(
+        self, registry_fixture, nested_routines_yaml
+    ):
+        """Test that child routines inherit parent parameters."""
+        received_params = {}
+
+        @routine
+        def leakage_test(
+            ctx,
+            parent_param,
+            type,
+            leakage_threshold_resistance,
+            leakage_threshold_count,
+        ):
+            received_params["parent_param"] = parent_param
+            received_params["type"] = type
+            received_params["leakage_threshold_resistance"] = (
+                leakage_threshold_resistance
+            )
+            received_params["leakage_threshold_count"] = leakage_threshold_count
+            return "leakage_result"
+
+        device_config = DeviceConfig.model_validate(
+            yaml.safe_load(nested_routines_yaml)
+        )
+        runner = RoutineRunner(resources=[MockResource("device")])
+        runner.configs = runner._extract_routine_configs([device_config])
+        runner._device_configs = [device_config]
+
+        results = runner.run_all(parent_routine="BATIS")
+
+        assert received_params["parent_param"] == "value"
+        assert received_params["type"] == "holes"
+        assert received_params["leakage_threshold_resistance"] == 50000000.0
+        assert received_params["leakage_threshold_count"] == 0
+        assert results["leakage_test"] == "leakage_result"
+
+    def test_child_params_override_parent_params(
+        self, registry_fixture, param_override_yaml
+    ):
+        """Test that child parameters override parent parameters with the same name."""
+        received_params = {}
+
+        @routine
+        def child_routine(ctx, shared_param, parent_only, child_only):
+            received_params["shared_param"] = shared_param
+            received_params["parent_only"] = parent_only
+            received_params["child_only"] = child_only
+            return "child_result"
+
+        device_config = DeviceConfig.model_validate(yaml.safe_load(param_override_yaml))
+        runner = RoutineRunner(resources=[MockResource("device")])
+        runner.configs = runner._extract_routine_configs([device_config])
+        runner._device_configs = [device_config]
+
+        results = runner.run_all(parent_routine="parent_routine")
+
+        assert received_params["shared_param"] == "child_value"
+        assert received_params["parent_only"] == "parent_data"
+        assert received_params["child_only"] == "child_data"
+        assert results["child_routine"] == "child_result"
+
+    def test_multiple_children_inherit_same_parent_params(
+        self, registry_fixture, nested_routines_yaml
+    ):
+        """Test that multiple child routines all inherit parent parameters."""
+        received_leakage_params = {}
+        received_accumulation_params = {}
+
+        @routine
+        def leakage_test(ctx, **params):
+            received_leakage_params["type"] = params["type"]
+            received_leakage_params["leakage_threshold_resistance"] = params[
+                "leakage_threshold_resistance"
+            ]
+            return "leakage_result"
+
+        @routine
+        def global_accumulation(ctx, **params):
+            received_accumulation_params["type"] = params["type"]
+            received_accumulation_params["step_size"] = params["step_size"]
+            return "accumulation_result"
+
+        device_config = DeviceConfig.model_validate(
+            yaml.safe_load(nested_routines_yaml)
+        )
+        runner = RoutineRunner(resources=[MockResource("device")])
+        runner.configs = runner._extract_routine_configs([device_config])
+        runner._device_configs = [device_config]
+
+        runner.run_all(parent_routine="BATIS")
+
+        assert received_leakage_params["type"] == "holes"
+        assert received_accumulation_params["type"] == "holes"
+        assert received_leakage_params["leakage_threshold_resistance"] == 50000000.0
+        assert received_accumulation_params["step_size"] == 0.01
+
+    def test_deeply_nested_param_inheritance(
+        self, registry_fixture, deeply_nested_routines_yaml
+    ):
+        """Test that parameters are inherited across multiple nesting levels."""
+        received_level2_params = {}
+        received_level3_params = {}
+
+        @routine
+        def level2(ctx, level):
+            received_level2_params["level"] = level
+            return "level2_result"
+
+        @routine
+        def level3(ctx, level):
+            received_level3_params["level"] = level
+            return "level3_result"
+
+        device_config = DeviceConfig.model_validate(
+            yaml.safe_load(deeply_nested_routines_yaml)
+        )
+        runner = RoutineRunner(resources=[MockResource("device")])
+        runner.configs = runner._extract_routine_configs([device_config])
+        runner._device_configs = [device_config]
+
+        runner.run_all(parent_routine="level1")
+
+        assert received_level2_params["level"] == 2
+        assert received_level3_params["level"] == 3
