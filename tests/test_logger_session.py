@@ -491,7 +491,9 @@ def test_buffer_size_warning(tmpdir_path, session_metadata, caplog):
                 pass
 
         # Check that warning was logged
-        assert any("Buffer size critical" in record.message for record in caplog.records)
+        assert any(
+            "Buffer size critical" in record.message for record in caplog.records
+        )
 
     # Verify warning flag was set
     assert session._buffer_size_warned is True
