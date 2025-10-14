@@ -144,7 +144,7 @@ class TestLeakageTest:
 
         result = leakage_test(
             routine_context,
-            leakage_threshold_resistance=1e6,
+            leakage_threshold_resistance=50e6,
             leakage_threshold_count=0,
             num_points=3,
         )
@@ -159,7 +159,7 @@ class TestLeakageTest:
 
         result = leakage_test(
             routine_context,
-            leakage_threshold_resistance=1e6,
+            leakage_threshold_resistance=50e6,
             leakage_threshold_count=0,
             num_points=2,
         )
@@ -169,7 +169,7 @@ class TestLeakageTest:
     def test_leakage_default_current_threshold(self, routine_context):
         result = leakage_test(
             routine_context,
-            leakage_threshold_resistance=1e6,
+            leakage_threshold_resistance=50e6,
             leakage_threshold_count=0,
             num_points=2,
         )
@@ -184,7 +184,7 @@ class TestLeakageTest:
 
         leakage_test(
             routine_context,
-            leakage_threshold_resistance=1e6,
+            leakage_threshold_resistance=50e6,
             leakage_threshold_count=0,
             num_points=2,
         )
@@ -198,7 +198,7 @@ class TestLeakageTest:
 
         result = leakage_test(
             routine_context,
-            leakage_threshold_resistance=1e6,
+            leakage_threshold_resistance=50e6,
             leakage_threshold_count=0,
             num_points=2,
             session=session,
@@ -425,7 +425,7 @@ class TestLeakageHelperFunctions:
 
         leaked = _check_leakage_threshold(
             leakage_matrix,
-            leakage_threshold_resistance=1e6,
+            leakage_threshold_resistance=50e6,
             leakage_threshold_count=0,
             control_gates=control_gates,
             delta_V=0.1,
@@ -441,7 +441,7 @@ class TestLeakageHelperFunctions:
 
         leaked = _check_leakage_threshold(
             leakage_matrix,
-            leakage_threshold_resistance=1e6,
+            leakage_threshold_resistance=50e6,
             leakage_threshold_count=0,
             control_gates=control_gates,
             delta_V=0.1,

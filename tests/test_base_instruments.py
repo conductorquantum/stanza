@@ -84,15 +84,6 @@ class TestBaseMeasurementInstrument:
         assert instrument.sample_time == 0.5
         assert instrument.instrument_config == measurement_config
 
-    def test_prepare_measurement_not_implemented(self, measurement_config):
-        instrument = BaseMeasurementInstrument(measurement_config)
-
-        with pytest.raises(
-            NotImplementedError,
-            match="Specific instrument must implement prepare_measurement",
-        ):
-            instrument.prepare_measurement()
-
     def test_instrument_info_with_channels(
         self, measurement_config, measurement_channel
     ):

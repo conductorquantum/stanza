@@ -1,6 +1,6 @@
 """Device health check routines for quantum dot devices.
 
-Health check tests adapted from:
+Health check tests are an improvement of:
     Kovach, T. et al. BATIS: Bootstrapping, Autonomous Testing, and
     Initialization System for Si/SiGe Multi-quantum Dot Devices. arXiv
     preprint arXiv:2412.07676 (2024). https://arxiv.org/abs/2412.07676
@@ -294,7 +294,7 @@ def reservoir_characterization(
     individually. For each reservoir under test, all other reservoirs are set to 120% of the global
     turn-on voltage (to ensure they're fully conducting), while the target reservoir is swept from
     minimum to maximum voltage. This isolates the behavior of each reservoir and identifies its
-    individual turn-on characteristics.
+    individual pinch-off characteristics.
 
     Args:
         ctx: Routine context containing device resources and previous results. Requires:
@@ -384,7 +384,7 @@ def finger_gate_characterization(
 
     This BATIS routine determines the turn-on voltage (pinch-off voltage) for each finger gate
     individually. For each finger gate under test, all other finger gates are set to 120% of the
-    global turn-on voltage (to ensure they're fully conducting), while the target gate is swept
+    global turn-on voltage (to ensure they're fully accumulated), while the target gate is swept
     from minimum to maximum voltage. This isolates the behavior of each finger gate and identifies
     its individual turn-on characteristics.
 
@@ -649,9 +649,9 @@ def analyze_single_gate_heuristic(
         raise ValueError("Curve fit quality is poor (low R² or high NRMSE)")
 
     return {
-        "vp": pinchoff_fit.vp,
-        "vt": pinchoff_fit.vt,
-        "vc": pinchoff_fit.vc,
+        "vp": pinchoff_fit.v_pinch_off,
+        "vt": pinchoff_fit.v_transition,
+        "vc": pinchoff_fit.v_cut_off,
         "popt": pinchoff_fit.popt,
         "pcov": pinchoff_fit.pcov,
     }

@@ -20,16 +20,6 @@ class BaseMeasurementInstrument(MeasurementInstrumentMixin):
         self.measurement_duration = instrument_config.measurement_duration
         self.sample_time = instrument_config.sample_time
 
-    def prepare_measurement(self) -> None:
-        """Prepare the measurement."""
-        raise NotImplementedError(
-            "Specific instrument must implement prepare_measurement() method"
-        )
-
-    def teardown_measurement(self) -> None:
-        """Teardown the measurement."""
-        ...
-
     @cached_property
     def instrument_info(self) -> dict[str, Any]:
         """Get the instrument information."""

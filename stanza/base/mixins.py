@@ -88,10 +88,8 @@ class MeasurementInstrumentMixin(InstrumentChannelMixin):
                 self.teardown_measurement()
 
     def prepare_measurement(self) -> None:
-        """Override in subclasses for actual preparation logic."""
-        raise NotImplementedError(
-            "Specific instrument must implement prepare_measurement() method"
-        )
+        """Optional override in subclasses for actual preparation logic."""
+        ...
 
     def teardown_measurement(self) -> None:
         """Optional override in subclasses for actual teardown logic."""

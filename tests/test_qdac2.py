@@ -188,7 +188,6 @@ class TestQDAC2:
 
         expected_calls = [
             ("sens:rang high,(@2,2)",),
-            ("sens:aper 0.001,(@2,2)",),
         ]
         actual_calls = [call.args for call in mock_driver.write.call_args_list]
         assert actual_calls == expected_calls
@@ -525,6 +524,78 @@ class TestQDAC2:
         currents = qdac.measure(["sense1", "sense2", "sense3"])
 
         assert currents == [0.001, 0.002, 0.003]
+
+    def test_initialization_with_aperature_s(
+        self, mock_driver_class, measurement_channel_config
+    ):
+        mock_driver = Mock()
+        mock_driver_class.return_value = mock_driver
+
+        instrument_config = BaseInstrumentConfig(
+            name="qdac2",
+            type=InstrumentType.GENERAL,
+            serial_addr="192.168.1.1",
+            port=5025,
+        )
+        instrument_config.aperature_s = 0.002
+
+        channel_configs = {
+            "sense1": measurement_channel_config,
+            "sense2": ChannelConfig(
+                name="sense2",
+                voltage_range=(-1.0, 1.0),
+                pad_type=PadType.CONTACT,
+                electrode_type=ContactType.DRAIN,
+                measure_channel=3,
+            ),
+        }
+
+        qdac = QDAC2(
+            instrument_config=instrument_config,
+            current_range=QDAC2CurrentRange.HIGH,
+            channel_configs=channel_configs,
+        )
+
+        write_calls = [call.args[0] for call in mock_driver.write.call_args_list]
+        assert "sens:aper 0.002,(@2)" in write_calls
+        assert "sens:aper 0.002,(@3)" in write_calls
+        assert qdac.measurement_aperature_s == 0.002
+
+    def test_initialization_with_nplc(
+        self, mock_driver_class, measurement_channel_config
+    ):
+        mock_driver = Mock()
+        mock_driver_class.return_value = mock_driver
+
+        instrument_config = BaseInstrumentConfig(
+            name="qdac2",
+            type=InstrumentType.GENERAL,
+            serial_addr="192.168.1.1",
+            port=5025,
+        )
+        instrument_config.nplc = 10
+
+        channel_configs = {
+            "sense1": measurement_channel_config,
+            "sense2": ChannelConfig(
+                name="sense2",
+                voltage_range=(-1.0, 1.0),
+                pad_type=PadType.CONTACT,
+                electrode_type=ContactType.DRAIN,
+                measure_channel=3,
+            ),
+        }
+
+        qdac = QDAC2(
+            instrument_config=instrument_config,
+            current_range=QDAC2CurrentRange.LOW,
+            channel_configs=channel_configs,
+        )
+
+        write_calls = [call.args[0] for call in mock_driver.write.call_args_list]
+        assert "sens:nplc 10,(@2)" in write_calls
+        assert "sens:nplc 10,(@3)" in write_calls
+        assert qdac.measurement_nplc == 10
 
 
 class TestQDAC2ControlChannel:

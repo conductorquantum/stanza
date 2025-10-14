@@ -173,9 +173,9 @@ class TestFitPinchoffParameters:
         currents = pinchoff_curve(voltages, 1.0, 1.0, 1.0)
         result = fit_pinchoff_parameters(voltages, currents)
         assert isinstance(result, PinchoffFitResult)
-        assert result.vp is not None
-        assert result.vt is not None
-        assert result.vc is not None
+        assert result.v_pinch_off is not None
+        assert result.v_transition is not None
+        assert result.v_cut_off is not None
         assert result.popt is not None
         assert result.pcov is not None
 
@@ -184,7 +184,7 @@ class TestFitPinchoffParameters:
         currents = pinchoff_curve(voltages, 1.0, 1.0, 1.0)
         noisy_currents = currents + np.random.normal(0, 0.01, len(currents))
         result = fit_pinchoff_parameters(voltages, noisy_currents)
-        assert result.vp is not None
+        assert result.v_pinch_off is not None
 
     def test_fit_parameter_shapes(self):
         voltages = np.linspace(-10, 10, 100)
@@ -197,15 +197,152 @@ class TestFitPinchoffParameters:
         voltages = np.linspace(-10, 10, 100)
         currents = pinchoff_curve(voltages, 1.0, 1.0, 1.0)
         result = fit_pinchoff_parameters(voltages, currents, sigma=0.05)
-        assert result.vp is not None
+        assert result.v_pinch_off is not None
 
     def test_edge_case_out_of_bounds_index(self):
         voltages = np.linspace(-10, 10, 10)
         currents = pinchoff_curve(voltages, 1.0, 1.0, 1.0)
         result = fit_pinchoff_parameters(voltages, currents)
-        assert hasattr(result, "vp")
-        assert hasattr(result, "vt")
-        assert hasattr(result, "vc")
+        assert hasattr(result, "v_pinch_off")
+        assert hasattr(result, "v_transition")
+        assert hasattr(result, "v_cut_off")
+
+    def test_very_flat_curve(self):
+        """Test fitting with very flat curve (minimal slope)."""
+        voltages = np.linspace(-10, 10, 100)
+        currents = pinchoff_curve(voltages, 0.01, 0.05, 0.0)
+        result = fit_pinchoff_parameters(voltages, currents)
+
+        fitted_currents = result.fit_curve(voltages)
+        rmse = np.sqrt(np.mean((currents - fitted_currents) ** 2))
+        assert rmse < 0.1
+
+    def test_extreme_amplitude_ratio_large(self):
+        """Test with very large current amplitude."""
+        voltages = np.linspace(-2, 2, 100)
+        currents = pinchoff_curve(voltages, 1000.0, 2.0, -1.0)
+        result = fit_pinchoff_parameters(voltages, currents)
+
+        fitted_currents = result.fit_curve(voltages)
+        relative_error = np.abs((currents - fitted_currents) / currents.max())
+        assert np.mean(relative_error) < 0.05
+
+    def test_extreme_amplitude_ratio_small(self):
+        """Test with very small current amplitude."""
+        voltages = np.linspace(-2, 2, 100)
+        currents = pinchoff_curve(voltages, 1e-9, 2.0, -1.0)
+        result = fit_pinchoff_parameters(voltages, currents)
+
+        assert result.v_pinch_off is not None
+        assert result.i_min < result.i_max
+        fitted_currents = result.fit_curve(voltages)
+        assert fitted_currents.min() >= 0
+
+    def test_very_small_voltage_range(self):
+        """Test with very narrow voltage range."""
+        voltages = np.linspace(0.0, 0.01, 100)
+        currents = pinchoff_curve(voltages * 100, 0.5, 2.0, -1.0)
+        result = fit_pinchoff_parameters(voltages, currents)
+
+        assert result.v_pinch_off is not None
+        assert result.v_min < result.v_max
+
+    def test_inverted_curve_comprehensive(self):
+        """Test inverted curve (current decreases with voltage)."""
+        voltages = np.linspace(-2, 2, 100)
+        currents = pinchoff_curve(voltages, 0.5, -2.0, 1.0)
+        result = fit_pinchoff_parameters(voltages, currents)
+
+        assert result.v_pinch_off is not None
+        assert result.v_transition is not None
+        assert result.v_cut_off is not None
+        assert result.v_pinch_off > result.v_cut_off
+
+    def test_very_steep_curve(self):
+        """Test with very steep transition."""
+        voltages = np.linspace(-2, 2, 200)
+        currents = pinchoff_curve(voltages, 1.0, 20.0, 0.0)
+        result = fit_pinchoff_parameters(voltages, currents, sigma=1.0)
+
+        assert result.v_pinch_off is not None
+        assert abs(result.v_cut_off - result.v_pinch_off) < 1.0
+
+    def test_poor_fit_detection(self):
+        """Test that a very poor fit can be detected via high residuals."""
+        voltages = np.linspace(-10, 10, 100)
+        currents = np.sin(voltages) + 2.0
+        result = fit_pinchoff_parameters(voltages, currents)
+
+        fitted_currents = result.fit_curve(voltages)
+        rmse = np.sqrt(np.mean((currents - fitted_currents) ** 2))
+        relative_rmse = rmse / (currents.max() - currents.min())
+
+        assert relative_rmse > 0.1, "Expected poor fit to have high RMSE"
+
+        param_uncertainties = np.sqrt(np.diag(result.pcov))
+        assert np.any(param_uncertainties > 0.5), (
+            "Expected high parameter uncertainties"
+        )
+
+    def test_constant_current(self):
+        """Test with completely flat current (no pinchoff behavior)."""
+        voltages = np.linspace(-10, 10, 100)
+        currents = np.ones_like(voltages) * 5.0
+        result = fit_pinchoff_parameters(voltages, currents)
+
+        assert result.v_pinch_off is not None
+        assert result.popt is not None
+
+    def test_non_monotonic_data(self):
+        """Test with oscillating/non-monotonic data."""
+        voltages = np.linspace(-5, 5, 100)
+        base_curve = pinchoff_curve(voltages, 1.0, 1.5, 0.0)
+        currents = base_curve + 0.1 * np.sin(voltages * 3)
+        result = fit_pinchoff_parameters(voltages, currents, sigma=3.0)
+
+        assert result.v_pinch_off is not None
+        fitted_currents = result.fit_curve(voltages)
+
+        fit_variation = np.std(np.diff(fitted_currents))
+        data_variation = np.std(np.diff(currents))
+        assert fit_variation < data_variation
+
+    def test_extreme_voltage_range(self):
+        """Test with very large voltage range."""
+        voltages = np.linspace(-1000, 1000, 200)
+        currents = pinchoff_curve(voltages / 1000, 0.5, 2.0, -1.0)
+        result = fit_pinchoff_parameters(voltages, currents)
+        assert result.v_pinch_off is not None
+        assert result.v_min == voltages.min()
+        assert result.v_max == voltages.max()
+
+    def test_asymmetric_voltage_range(self):
+        """Test with voltage range not centered at zero."""
+        voltages = np.linspace(10, 30, 100)
+        currents = pinchoff_curve((voltages - 20) / 10, 0.5, 2.0, -1.0)
+        result = fit_pinchoff_parameters(voltages, currents)
+
+        assert result.v_pinch_off is not None
+        assert voltages.min() <= result.v_pinch_off <= voltages.max()
+
+    def test_fit_quality_good_fit(self):
+        """Test that a good fit has low residuals and reasonable covariance."""
+        voltages = np.linspace(-2, 2, 100)
+        true_params = [0.5, 2.0, -1.0]
+        currents = pinchoff_curve(voltages, *true_params)
+        noisy_currents = currents + np.random.normal(0, 0.001, len(currents))
+        result = fit_pinchoff_parameters(voltages, noisy_currents)
+
+        fitted_currents = result.fit_curve(voltages)
+        rmse = np.sqrt(np.mean((noisy_currents - fitted_currents) ** 2))
+        relative_rmse = rmse / (noisy_currents.max() - noisy_currents.min())
+
+        assert relative_rmse < 0.01, (
+            f"Expected good fit but got relative RMSE: {relative_rmse}"
+        )
+
+        param_uncertainties = np.sqrt(np.diag(result.pcov))
+        assert np.all(param_uncertainties < 0.1), "Expected low parameter uncertainties"
 
 
 class TestNormalize:

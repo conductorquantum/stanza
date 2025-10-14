@@ -22,9 +22,9 @@ class PinchoffFitResult:
     """Result of pinchoff curve fitting.
 
     Attributes:
-        vp: Pinchoff voltage (where device turns off)
-        vt: Transition voltage (midpoint of transition)
-        vc: Conducting voltage (where device is fully on)
+        v_pinch_off: Pinchoff voltage (where device turns off)
+        v_transition: Transition voltage (midpoint of transition)
+        v_cut_off: Conducting voltage (where device is fully on)
         popt: Fitted parameters [a, b, c] for pinchoff_curve in normalized space
         pcov: Covariance matrix of fitted parameters
         v_min: Minimum voltage value used for normalization
@@ -38,9 +38,9 @@ class PinchoffFitResult:
         normalize voltages before applying pinchoff_curve().
     """
 
-    vp: float | None
-    vt: float | None
-    vc: float | None
+    v_pinch_off: float | None
+    v_transition: float | None
+    v_cut_off: float | None
     popt: np.ndarray
     pcov: np.ndarray
 
@@ -219,9 +219,9 @@ def fit_pinchoff_parameters(
     )
 
     return PinchoffFitResult(
-        vp=_map_index_to_voltage(pinchoff_v_ind, voltages),
-        vt=_map_index_to_voltage(transition_v_ind, voltages),
-        vc=_map_index_to_voltage(conducting_v_ind, voltages),
+        v_pinch_off=_map_index_to_voltage(pinchoff_v_ind, voltages),
+        v_transition=_map_index_to_voltage(transition_v_ind, voltages),
+        v_cut_off=_map_index_to_voltage(conducting_v_ind, voltages),
         popt=popt,
         pcov=pcov,
         v_min=voltages.min(),
