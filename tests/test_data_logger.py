@@ -119,7 +119,9 @@ class TestDataLogger:
             logger.close_session("test_session")
 
             # Verify data was written to file
-            measurement_file = logger.base_directory / "test_session" / "measurement.jsonl"
+            measurement_file = (
+                logger.base_directory / "test_session" / "measurement.jsonl"
+            )
             assert measurement_file.exists()
 
             with open(measurement_file) as f:

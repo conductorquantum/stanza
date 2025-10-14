@@ -44,16 +44,17 @@ def session_factory(tmpdir_path, session_metadata):
     _NOT_PROVIDED = object()
 
     def _create_session(
+        metadata=None,
         buffer_size=_NOT_PROVIDED,
         auto_flush_interval=_NOT_PROVIDED,
         writer=None,
-        **kwargs
+        **kwargs,
     ):
         if writer is None:
             writer = JSONLWriter(tmpdir_path)
 
         session_kwargs = {
-            "metadata": session_metadata,
+            "metadata": metadata if metadata is not None else session_metadata,
             "writer_pool": {"jsonl": writer},
             "writer_refs": ["jsonl"],
             "base_dir": tmpdir_path,
@@ -72,6 +73,7 @@ def session_factory(tmpdir_path, session_metadata):
 
 class TestLoggerSession:
     def test_initializes_and_finalizes_session(self, logger_session):
+        """Test session lifecycle: initialize sets active, finalize clears active."""
         logger_session.initialize()
         assert logger_session._active is True
 
@@ -79,6 +81,7 @@ class TestLoggerSession:
         assert logger_session._active is False
 
     def test_logs_measurement_and_flushes_to_writer(self, tmpdir_path, logger_session):
+        """Test that measurements are logged and written to file."""
         logger_session.initialize()
         logger_session.log_measurement(
             name="voltage",
@@ -91,6 +94,7 @@ class TestLoggerSession:
         assert measurement_file.exists()
 
     def test_logs_sweep_data(self, tmpdir_path, logger_session):
+        """Test that sweep data is logged and written to file."""
         logger_session.initialize()
         logger_session.log_sweep(
             name="iv_sweep",
@@ -105,6 +109,7 @@ class TestLoggerSession:
         assert sweep_file.exists()
 
     def test_logs_analysis_to_separate_file(self, tmpdir_path, logger_session):
+        """Test that analysis data is logged to a separate file."""
         logger_session.initialize()
         logger_session.log_analysis(
             name="fit_result",
@@ -116,15 +121,9 @@ class TestLoggerSession:
         analysis_file = tmpdir_path / "analysis.jsonl"
         assert analysis_file.exists()
 
-    def test_auto_flushes_when_buffer_full(self, tmpdir_path, session_metadata):
-        writer = JSONLWriter(tmpdir_path)
-        session = LoggerSession(
-            metadata=session_metadata,
-            writer_pool={"jsonl": writer},
-            writer_refs=["jsonl"],
-            base_dir=tmpdir_path,
-            buffer_size=3,
-        )
+    def test_auto_flushes_when_buffer_full(self, tmpdir_path, session_factory):
+        """Test that buffer automatically flushes when size limit is reached."""
+        session = session_factory(buffer_size=3)
 
         session.initialize()
 
@@ -141,6 +140,7 @@ class TestLoggerSession:
         session.finalize()
 
     def test_updates_session_parameters(self, logger_session):
+        """Test that session parameters can be updated after initialization."""
         logger_session.metadata.parameters = {"initial": "value"}
         logger_session.initialize()
         logger_session.log_parameters({"new_param": 42, "another": "test"})
@@ -152,6 +152,7 @@ class TestLoggerSession:
         logger_session.finalize()
 
     def test_initializes_parameters_when_none(self, logger_session):
+        """Test that parameters dict is created if initially None."""
         logger_session.metadata.parameters = None
         logger_session.initialize()
         logger_session.log_parameters({"param": "value"})
@@ -160,6 +161,7 @@ class TestLoggerSession:
         logger_session.finalize()
 
     def test_rejects_operations_before_initialization(self, logger_session):
+        """Test that logging operations raise error before session is initialized."""
         with pytest.raises(LoggerSessionError, match="not initialized"):
             logger_session.log_measurement("test", {"value": 1})
 
@@ -170,6 +172,7 @@ class TestLoggerSession:
             logger_session.log_parameters({"param": "value"})
 
     def test_rejects_double_initialization(self, logger_session):
+        """Test that initializing an already active session raises error."""
         logger_session.initialize()
 
         with pytest.raises(LoggerSessionError, match="already initialized"):
@@ -178,6 +181,7 @@ class TestLoggerSession:
         logger_session.finalize()
 
     def test_context_manager_auto_initializes_and_finalizes(self, logger_session):
+        """Test that context manager handles initialization and finalization."""
         with logger_session:
             assert logger_session._active is True
             logger_session.log_measurement("test", {"value": 1})
@@ -185,6 +189,7 @@ class TestLoggerSession:
         assert logger_session._active is False
 
     def test_validates_empty_measurement_name(self, logger_session):
+        """Test that empty or whitespace-only measurement names are rejected."""
         logger_session.initialize()
 
         with pytest.raises(LoggerSessionError, match="cannot be empty"):
@@ -196,6 +201,7 @@ class TestLoggerSession:
         logger_session.finalize()
 
     def test_validates_empty_sweep_data(self, logger_session):
+        """Test that empty sweep data arrays are rejected."""
         logger_session.initialize()
 
         with pytest.raises(LoggerSessionError, match="cannot be empty"):
@@ -204,6 +210,7 @@ class TestLoggerSession:
         logger_session.finalize()
 
     def test_rejects_nonexistent_base_directory(self, session_metadata):
+        """Test that session creation fails if base directory doesn't exist."""
         with tempfile.TemporaryDirectory() as tmpdir:
             base_dir = Path(tmpdir) / "nonexistent"
             writer = JSONLWriter(tmpdir)
@@ -216,7 +223,8 @@ class TestLoggerSession:
                     base_dir=base_dir,
                 )
 
-    def test_writes_to_multiple_writers(self, tmpdir_path, session_metadata):
+    def test_writes_to_multiple_writers(self, tmpdir_path, session_factory):
+        """Test that session can write to multiple writers simultaneously."""
         writer1_dir = tmpdir_path / "writer1"
         writer2_dir = tmpdir_path / "writer2"
         writer1_dir.mkdir()
@@ -225,11 +233,9 @@ class TestLoggerSession:
         writer1 = JSONLWriter(writer1_dir)
         writer2 = JSONLWriter(writer2_dir)
 
-        session = LoggerSession(
-            metadata=session_metadata,
+        session = session_factory(
             writer_pool={"jsonl1": writer1, "jsonl2": writer2},
             writer_refs=["jsonl1", "jsonl2"],
-            base_dir=tmpdir_path,
         )
 
         session.initialize()
@@ -239,38 +245,35 @@ class TestLoggerSession:
         assert (writer1_dir / "measurement.jsonl").exists()
         assert (writer2_dir / "measurement.jsonl").exists()
 
-    def test_initialize_session_error_propagates(self, tmpdir_path, session_metadata):
+    def test_initialize_session_error_propagates(self, tmpdir_path, session_factory):
+        """Test that writer initialization errors are wrapped and propagated."""
+
         class FailingWriter(JSONLWriter):
             def initialize_session(self, session):
                 raise RuntimeError("Simulated writer failure")
 
         writer = FailingWriter(tmpdir_path)
-        session = LoggerSession(
-            metadata=session_metadata,
-            writer_pool={"failing": writer},
-            writer_refs=["failing"],
-            base_dir=tmpdir_path,
-        )
+        session = session_factory(writer=writer)
 
         with pytest.raises(LoggerSessionError, match="Failed to initialize"):
             session.initialize()
 
         assert session._active is False
 
-    def test_finalize_session_error_sets_inactive(self, tmpdir_path, session_metadata):
+    def test_finalize_session_error_sets_inactive(self, tmpdir_path, session_factory):
+        """Test that session becomes inactive even if finalization fails."""
+
         class FailingWriter(JSONLWriter):
             def finalize_session(self, session=None):
                 raise RuntimeError("Simulated finalization failure")
 
         writer = FailingWriter(tmpdir_path)
-        session = LoggerSession(
-            metadata=session_metadata,
+        session = session_factory(
+            writer=writer,
             writer_pool={"failing": writer},
             writer_refs=["failing"],
-            base_dir=tmpdir_path,
         )
 
-        session._writer_pool = {"failing": writer}
         session._active = True
 
         with pytest.raises(LoggerSessionError, match="Failed to finalize"):
@@ -278,7 +281,9 @@ class TestLoggerSession:
 
         assert session._active is False
 
-    def test_flush_handles_write_errors(self, tmpdir_path, session_metadata):
+    def test_flush_handles_write_errors(self, tmpdir_path, session_factory):
+        """Test that flush errors are handled and buffer is preserved on failure."""
+
         class FailingWriter(JSONLWriter):
             def write_measurement(self, data):
                 raise RuntimeError("Write failure")
@@ -287,48 +292,43 @@ class TestLoggerSession:
                 raise RuntimeError("Flush failure")
 
         writer = FailingWriter(tmpdir_path)
-        session = LoggerSession(
-            metadata=session_metadata,
+        session = session_factory(
+            writer=writer,
+            buffer_size=10,
             writer_pool={"failing": writer},
             writer_refs=["failing"],
-            base_dir=tmpdir_path,
-            buffer_size=10,
         )
 
-        session._writer_pool = {"failing": writer}
         session._active = True
 
         session.log_measurement("test", {"value": 1})
 
-        # Flush should raise an exception when writers fail
         with pytest.raises(LoggerSessionError, match="Flush failed"):
             session.flush()
 
-        # Buffer should NOT be cleared when flush fails
         assert len(session._buffer) == 1
 
     def test_finalize_when_not_active_raises_error(self, logger_session):
+        """Test that finalizing an inactive session raises error."""
         with pytest.raises(LoggerSessionError, match="not initialized"):
             logger_session.finalize()
 
-    def test_context_manager_with_exception(self, tmpdir_path, session_metadata):
+    def test_context_manager_with_exception(self, tmpdir_path, session_factory):
+        """Test that context manager handles exceptions during finalization."""
+
         class FailingWriter(JSONLWriter):
             def finalize_session(self, session=None):
                 raise RuntimeError("Finalization failure")
 
         writer = FailingWriter(tmpdir_path)
-        session = LoggerSession(
-            metadata=session_metadata,
-            writer_pool={"failing": writer},
-            writer_refs=["failing"],
-            base_dir=tmpdir_path,
-        )
+        session = session_factory(writer=writer)
 
         with pytest.raises(LoggerSessionError):
             with session:
                 pass
 
     def test_validates_empty_measurement_data(self, logger_session):
+        """Test that empty measurement data is rejected."""
         logger_session.initialize()
 
         with pytest.raises(LoggerSessionError, match="cannot be empty"):
@@ -337,6 +337,7 @@ class TestLoggerSession:
         logger_session.finalize()
 
     def test_validates_empty_parameters(self, logger_session):
+        """Test that empty parameter dict is rejected."""
         logger_session.initialize()
 
         with pytest.raises(LoggerSessionError, match="cannot be empty"):
@@ -344,20 +345,15 @@ class TestLoggerSession:
 
         logger_session.finalize()
 
-    def test_routine_name_property_returns_empty_when_none(self, tmpdir_path):
+    def test_routine_name_property_returns_empty_when_none(self, session_factory):
+        """Test that routine_name property returns empty string when None."""
         metadata = SessionMetadata(
             session_id="test_session",
             start_time=100.0,
             user="test_user",
             routine_name=None,
         )
-        writer = JSONLWriter(tmpdir_path)
-        session = LoggerSession(
-            metadata=metadata,
-            writer_pool={"jsonl": writer},
-            writer_refs=["jsonl"],
-            base_dir=tmpdir_path,
-        )
+        session = session_factory(metadata=metadata)
 
         assert session.routine_name == ""
 
@@ -410,22 +406,16 @@ def test_time_based_auto_flush_triggers_on_sweep(tmpdir_path, session_factory):
 
 def test_no_auto_flush_within_interval(session_factory):
     """Test that multiple measurements within interval don't trigger auto-flush."""
-    session = session_factory(
-        auto_flush_interval=30.0,
-        buffer_size=100,  # Large buffer to prevent size-based flush
-    )
+    session = session_factory(auto_flush_interval=30.0, buffer_size=100)
 
     with patch("time.time") as mock_time:
-        # Set initial time
         mock_time.return_value = 1000.0
         session.initialize()
 
-        # Log multiple measurements with small time increments (within interval)
         for i in range(5):
-            mock_time.return_value = 1000.0 + i * 2.0  # Increment by 2s each time
+            mock_time.return_value = 1000.0 + i * 2.0
             session.log_measurement(f"m{i}", {"value": i})
 
-        # All measurements should still be in buffer (total elapsed: 8s < 30s)
         assert len(session._buffer) == 5
 
         session.finalize()
@@ -448,50 +438,37 @@ def test_buffer_size_warning(tmpdir_path, session_factory, caplog):
 
     session.initialize()
 
-    # Add items - flush will fail every 10 items, so buffer will grow
     with caplog.at_level(logging.WARNING):
         for i in range(101):
             try:
                 session.log_measurement(f"m{i}", {"value": i})
             except LoggerSessionError:
-                # Flush will fail, that's expected
                 pass
 
-        # Check that warning was logged
         assert any(
             "Buffer size critical" in record.message for record in caplog.records
         )
 
-    # Verify warning flag was set
     assert session._buffer_size_warned is True
 
-    session._active = False  # Prevent finalize from trying to flush
+    session._active = False
 
 
 def test_auto_flush_disabled_when_none(session_factory):
     """Test that auto-flush is disabled when interval is None."""
-    session = session_factory(
-        auto_flush_interval=None,  # Disabled
-        buffer_size=10,
-    )
+    session = session_factory(auto_flush_interval=None, buffer_size=10)
 
     with patch("time.time") as mock_time:
-        # Set initial time
         mock_time.return_value = 1000.0
         session.initialize()
 
-        # Log multiple measurements
         for i in range(5):
             mock_time.return_value = 1000.0 + i * 10.0
             session.log_measurement(f"m{i}", {"value": i})
 
-        # Advance time significantly
         mock_time.return_value = 2000.0
-
-        # Log another measurement
         session.log_measurement("m5", {"value": 5})
 
-        # All measurements should still be in buffer (no time-based flush)
         assert len(session._buffer) == 6
 
         session.finalize()
@@ -502,20 +479,16 @@ def test_last_flush_time_updated_on_flush(session_factory):
     session = session_factory(auto_flush_interval=30.0, buffer_size=100)
 
     with patch("time.time") as mock_time:
-        # Set initial time
         mock_time.return_value = 1000.0
         session.initialize()
         initial_flush_time = session._last_flush_time
 
-        # Advance time and log a measurement
         mock_time.return_value = 1010.0
         session.log_measurement("test", {"value": 1})
 
-        # Advance time and manually flush
         mock_time.return_value = 1020.0
         session.flush()
 
-        # _last_flush_time should be updated to 1020.0
         assert session._last_flush_time == 1020.0
         assert session._last_flush_time > initial_flush_time
 
