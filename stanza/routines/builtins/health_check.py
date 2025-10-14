@@ -214,7 +214,7 @@ def global_accumulation(
 ) -> dict[str, float]:
     """Determine the global turn-on voltage by sweeping all control gates simultaneously.
 
-    This BATIS routine sweeps all control gates together from minimum to maximum voltage
+    This health check routine sweeps all control gates together from minimum to maximum voltage
     while measuring current at a specified electrode. The sweep data is analyzed using
     a pinch-off heuristic to identify the voltage at which the device transitions from
     depletion to accumulation (turn-on). After finding this voltage, all gates are set
@@ -291,9 +291,9 @@ def reservoir_characterization(
 ) -> dict[str, dict[str, Any]]:
     """Characterize individual reservoir gates by sweeping each while holding others in accumulation.
 
-    This BATIS routine determines the turn-on voltage (pinch-off voltage) for each reservoir gate
+    This health check routine determines the pinch-off voltage (vp) for each reservoir gate
     individually. For each reservoir under test, all other reservoirs are set to 120% of the global
-    turn-on voltage (to ensure they're fully conducting), while the target reservoir is swept from
+    pinch-off voltage (to ensure they're fully conducting), while the target reservoir is swept from
     minimum to maximum voltage. This isolates the behavior of each reservoir and identifies its
     individual pinch-off characteristics.
 
@@ -310,7 +310,7 @@ def reservoir_characterization(
     Returns:
         dict: Contains:
             - reservoir_characterization: Dictionary mapping each reservoir name to its
-              turn-on voltage (vp) in volts.
+              pinch-off voltage (vp) in volts.
 
     Notes:
         - Each reservoir is tested sequentially
@@ -383,11 +383,11 @@ def finger_gate_characterization(
 ) -> dict[str, dict[str, Any]]:
     """Characterize individual finger gates by sweeping each while holding others in accumulation.
 
-    This BATIS routine determines the turn-on voltage (pinch-off voltage) for each finger gate
+    This health check routine determines the pinch-off voltage for each finger gate
     individually. For each finger gate under test, all other finger gates are set to 120% of the
-    global turn-on voltage (to ensure they're fully accumulated), while the target gate is swept
+    global pinch-off voltage (to ensure they're fully accumulated), while the target gate is swept
     from minimum to maximum voltage. This isolates the behavior of each finger gate and identifies
-    its individual turn-on characteristics.
+    its individual pinch-off characteristics.
 
     Args:
         ctx: Routine context containing device resources and previous results. Requires:
@@ -402,7 +402,7 @@ def finger_gate_characterization(
     Returns:
         dict: Contains:
             - finger_gate_characterization: Dictionary mapping each finger gate name to its
-              turn-on voltage (vp) in volts.
+              pinch-off voltage (vp) in volts.
 
     Notes:
         - Each finger gate is tested sequentially
