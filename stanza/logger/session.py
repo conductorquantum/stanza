@@ -26,7 +26,7 @@ class LoggerSession:
         base_dir: str | Path,
         buffer_size: int = 1000,
         auto_flush_interval: float | None = 30.0,
-        max_auto_flush_failures: int = 5,
+        max_auto_flush_failures: int = 3,
     ):
         if not writer_pool or not writer_refs:
             raise LoggerSessionError("Writer pool and references are required")
@@ -48,6 +48,8 @@ class LoggerSession:
         self._flush_lock = threading.Lock()
         self._flush_timer: threading.Timer | None = None
         self._consecutive_flush_failures = 0
+        self._buffer_size_warning_threshold = buffer_size * 10
+        self._buffer_size_warned = False
 
         logger.debug("Created session: %s", self.metadata.session_id)
 
@@ -58,6 +60,21 @@ class LoggerSession:
     @property
     def routine_name(self) -> str:
         return self.metadata.routine_name or ""
+
+    def _check_buffer_size_warning(self) -> None:
+        """Check if buffer has grown too large and log warning once."""
+        if (
+            not self._buffer_size_warned
+            and len(self._buffer) >= self._buffer_size_warning_threshold
+        ):
+            logger.warning(
+                "Buffer size critical for session %s: %d items (threshold: %d). "
+                "Auto-flush may have stopped or is failing.",
+                self.session_id,
+                len(self._buffer),
+                self._buffer_size_warning_threshold,
+            )
+            self._buffer_size_warned = True
 
     def _schedule_auto_flush(self) -> None:
         """Schedule the next auto-flush if enabled."""
@@ -74,6 +91,27 @@ class LoggerSession:
             self._flush_timer.cancel()
             self._flush_timer = None
 
+    def restart_auto_flush(self) -> None:
+        """Restart auto-flush after it has stopped due to failures.
+
+        This method can be used to recover auto-flush functionality after fixing
+        underlying issues that caused repeated flush failures. It resets the failure
+        counter and reschedules the auto-flush timer.
+
+        Raises:
+            LoggerSessionError: If session is not active or auto-flush is disabled
+        """
+        if not self._active:
+            raise LoggerSessionError("Session is not initialized")
+
+        if self._auto_flush_interval is None or self._auto_flush_interval <= 0:
+            raise LoggerSessionError("Auto-flush is disabled for this session")
+
+        logger.info("Restarting auto-flush for session %s", self.session_id)
+        self._consecutive_flush_failures = 0
+        self._cancel_auto_flush()
+        self._schedule_auto_flush()
+
     def _auto_flush_callback(self) -> None:
         """Callback for periodic auto-flush."""
         should_reschedule = True
@@ -86,7 +124,7 @@ class LoggerSession:
                 )
                 self.flush()
                 self._consecutive_flush_failures = 0  # Reset on success
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             self._consecutive_flush_failures += 1
             logger.error(
                 "Auto-flush failed for session %s (%d/%d): %s",
@@ -175,9 +213,13 @@ class LoggerSession:
             routine_name=routine_name,
         )
 
-        self._buffer.append(measurement)
+        # Thread-safe buffer append and size check
+        with self._flush_lock:
+            self._buffer.append(measurement)
+            should_flush = len(self._buffer) >= self._buffer_size
+            self._check_buffer_size_warning()
 
-        if len(self._buffer) >= self._buffer_size:
+        if should_flush:
             self.flush()
 
         logger.debug("Logged measurement '%s' to session %s", name, self.session_id)
@@ -227,9 +269,13 @@ class LoggerSession:
             session_id=self.session_id,
         )
 
-        self._buffer.append(sweep)
+        # Thread-safe buffer append and size check
+        with self._flush_lock:
+            self._buffer.append(sweep)
+            should_flush = len(self._buffer) >= self._buffer_size
+            self._check_buffer_size_warning()
 
-        if len(self._buffer) >= self._buffer_size:
+        if should_flush:
             self.flush()
 
         logger.debug("Logged sweep '%s' to session %s", name, self.session_id)
@@ -292,10 +338,11 @@ class LoggerSession:
                     f"Flush failed with {len(all_errors)} error(s): {all_errors[0]}"
                 )
 
+            # Clear buffer and mark success
             count = len(self._buffer)
             self._buffer.clear()
-            self._consecutive_flush_failures = 0  # Reset on successful manual flush
-
+            self._consecutive_flush_failures = 0  # Reset on successful flush
+            self._buffer_size_warned = False  # Reset warning flag when buffer clears
             logger.debug("Flushed %s items to session %s", count, self.session_id)
 
     def __enter__(self) -> LoggerSession:

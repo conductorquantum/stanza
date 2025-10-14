@@ -268,7 +268,7 @@ class TestLoggerSession:
 
         session.log_measurement("test", {"value": 1})
 
-        # Flush should now raise an exception when writers fail
+        # Flush should raise an exception when writers fail
         with pytest.raises(LoggerSessionError, match="Flush failed"):
             session.flush()
 
@@ -458,3 +458,145 @@ def test_auto_flush_retries_stop_after_5_consecutive_failures(
     assert len(session._buffer) == 1
 
     session._active = False  # Prevent finalize from trying to flush
+
+
+def test_buffer_size_warning(tmpdir_path, session_metadata, caplog):
+    """Test that buffer size warning is logged when buffer grows too large."""
+    import logging
+
+    # Use a failing writer so flush() fails and buffer grows
+    class FailingWriter(JSONLWriter):
+        def write_measurement(self, data):
+            raise RuntimeError("Simulated failure")
+
+    writer = FailingWriter(tmpdir_path)
+    session = LoggerSession(
+        metadata=session_metadata,
+        writer_pool={"jsonl": writer},
+        writer_refs=["jsonl"],
+        base_dir=tmpdir_path,
+        buffer_size=10,  # Small buffer, warning at 100
+        auto_flush_interval=None,  # Disable auto-flush
+    )
+
+    session.initialize()
+
+    # Add items - flush will fail every 10 items, so buffer will grow
+    with caplog.at_level(logging.WARNING):
+        for i in range(101):
+            try:
+                session.log_measurement(f"m{i}", {"value": i})
+            except LoggerSessionError:
+                # Flush will fail, that's expected
+                pass
+
+        # Check that warning was logged
+        assert any("Buffer size critical" in record.message for record in caplog.records)
+
+    # Verify warning flag was set
+    assert session._buffer_size_warned is True
+
+    session._active = False  # Prevent finalize from trying to flush
+
+
+def test_restart_auto_flush(tmpdir_path, session_metadata):
+    """Test that restart_auto_flush() resets failure counter and restarts timer."""
+
+    class FailTwiceThenSucceedWriter(JSONLWriter):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.call_count = 0
+
+        def write_measurement(self, data):
+            self.call_count += 1
+            if self.call_count <= 2:
+                raise RuntimeError("Simulated failure")
+            super().write_measurement(data)
+
+    writer = FailTwiceThenSucceedWriter(tmpdir_path)
+    session = LoggerSession(
+        metadata=session_metadata,
+        writer_pool={"jsonl": writer},
+        writer_refs=["jsonl"],
+        base_dir=tmpdir_path,
+        auto_flush_interval=0.05,
+        buffer_size=100,
+        max_auto_flush_failures=2,
+    )
+
+    session.initialize()
+    session.log_measurement("test", {"value": 1})
+
+    # Wait for auto-flush to fail twice and stop
+    time.sleep(0.2)
+    assert session._consecutive_flush_failures == 2
+
+    # Restart auto-flush
+    session.restart_auto_flush()
+    assert session._consecutive_flush_failures == 0
+    assert session._flush_timer is not None
+
+    # Wait for auto-flush to succeed
+    time.sleep(0.1)
+    assert len(session._buffer) == 0  # Should be flushed
+
+    session.finalize()
+
+
+def test_restart_auto_flush_when_disabled_raises_error(tmpdir_path, session_metadata):
+    """Test that restart_auto_flush() raises error when auto-flush is disabled."""
+    writer = JSONLWriter(tmpdir_path)
+    session = LoggerSession(
+        metadata=session_metadata,
+        writer_pool={"jsonl": writer},
+        writer_refs=["jsonl"],
+        base_dir=tmpdir_path,
+        auto_flush_interval=None,  # Disabled
+    )
+
+    session.initialize()
+
+    with pytest.raises(LoggerSessionError, match="Auto-flush is disabled"):
+        session.restart_auto_flush()
+
+    session.finalize()
+
+
+def test_thread_safe_buffer_operations(tmpdir_path, session_metadata):
+    """Test that concurrent log_measurement calls are thread-safe."""
+    writer = JSONLWriter(tmpdir_path)
+    session = LoggerSession(
+        metadata=session_metadata,
+        writer_pool={"jsonl": writer},
+        writer_refs=["jsonl"],
+        base_dir=tmpdir_path,
+        buffer_size=2000,  # Larger than total items to prevent auto-flush
+        auto_flush_interval=None,  # Disable auto-flush for this test
+    )
+
+    session.initialize()
+
+    # Use a thread barrier to ensure all threads start at the same time
+    num_threads = 10
+    num_measurements_per_thread = 100
+    barrier = threading.Barrier(num_threads)
+
+    def log_measurements(thread_id):
+        barrier.wait()  # Wait for all threads to be ready
+        for i in range(num_measurements_per_thread):
+            session.log_measurement(f"thread{thread_id}_m{i}", {"value": i})
+
+    threads = []
+    for i in range(num_threads):
+        t = threading.Thread(target=log_measurements, args=(i,))
+        threads.append(t)
+        t.start()
+
+    for t in threads:
+        t.join()
+
+    # Verify all measurements were logged
+    expected_total = num_threads * num_measurements_per_thread
+    assert len(session._buffer) == expected_total
+
+    session.finalize()
