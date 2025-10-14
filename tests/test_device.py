@@ -2,7 +2,7 @@ import pytest
 
 from stanza.device import Device
 from stanza.exceptions import DeviceError
-from stanza.models import Contact, ContactType, Gate, GateType
+from stanza.models import Contact, ContactType, Gate, GateType, PadType
 from stanza.utils import generate_channel_configs
 
 
@@ -184,3 +184,78 @@ class TestDevice:
         voltages, currents = device.sweep_nd(["gate1"], [[0.0], [1.0]], "contact1")
         assert len(voltages) == 2
         assert len(currents) == 2
+
+    def test_zero_default(self, device):
+        device.jump({"gate1": 1.5})
+        device.zero()
+        assert device.check("gate1") == 0.0
+
+    def test_zero_string_types(
+        self, device_config, control_instrument, measurement_instrument
+    ):
+        device_config.contacts["contact2"] = Contact(
+            name="contact2",
+            type=ContactType.DRAIN,
+            v_lower_bound=-1.0,
+            v_upper_bound=1.0,
+            control_channel=4,
+        )
+        channel_configs = generate_channel_configs(device_config)
+        device = Device(
+            "test",
+            device_config,
+            channel_configs,
+            control_instrument,
+            measurement_instrument,
+        )
+
+        device.jump({"gate1": 1.5, "contact2": 0.5})
+        device.zero("gate")
+        assert device.check("gate1") == 0.0
+        assert device.check("contact2") == 0.5
+
+        device.zero("contact")
+        assert device.check("contact2") == 0.0
+
+    def test_zero_enum_types(
+        self, device_config, control_instrument, measurement_instrument
+    ):
+        device_config.gates["gate2"] = Gate(
+            name="gate2",
+            type=GateType.BARRIER,
+            v_lower_bound=-2.0,
+            v_upper_bound=2.0,
+            control_channel=3,
+        )
+        device_config.contacts["contact2"] = Contact(
+            name="contact2",
+            type=ContactType.DRAIN,
+            v_lower_bound=-1.0,
+            v_upper_bound=1.0,
+            control_channel=4,
+        )
+        channel_configs = generate_channel_configs(device_config)
+        device = Device(
+            "test",
+            device_config,
+            channel_configs,
+            control_instrument,
+            measurement_instrument,
+        )
+
+        device.jump({"gate1": 1.0, "gate2": 2.0, "contact2": 0.5})
+        device.zero(PadType.ALL)
+        assert device.check(["gate1", "gate2", "contact2"]) == [0.0, 0.0, 0.0]
+
+    def test_zero_invalid_type(self, device):
+        with pytest.raises(DeviceError, match="Invalid pad type"):
+            device.zero("invalid")
+
+    def test_zero_no_control_instrument(self, device_no_instruments):
+        with pytest.raises(DeviceError, match="Control instrument not configured"):
+            device_no_instruments.zero()
+
+    def test_zero_verification_failure(self, device):
+        device.control_instrument.get_voltage = lambda _: 0.5
+        with pytest.raises(DeviceError, match="Failed to set all controllable"):
+            device.zero()

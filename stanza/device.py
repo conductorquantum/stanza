@@ -1,6 +1,8 @@
 import time
 from typing import Any, overload
 
+import numpy as np
+
 from stanza.base.channels import ChannelConfig
 from stanza.base.protocols import ControlInstrument, MeasurementInstrument
 from stanza.exceptions import DeviceError
@@ -355,3 +357,22 @@ class Device:
                 },
             )
         return voltage_measurements, current_measurements
+
+    def zero(self, type: str | PadType = PadType.ALL) -> None:
+        """Set all controllable gates and/or controllable contacts to 0V."""
+        pads: list[str] = []
+        if str(type).upper() == PadType.ALL:
+            pads = self.control_gates + self.control_contacts
+        elif str(type).upper() == PadType.GATE:
+            pads = self.control_gates
+        elif str(type).upper() == PadType.CONTACT:
+            pads = self.control_contacts
+        else:
+            raise DeviceError(f"Invalid pad type: {type}")
+
+        gate_voltages = dict.fromkeys(pads, 0.0)
+        self.jump(gate_voltages, wait_for_settling=True)
+
+        actual_voltages = self.check(pads)
+        if not np.allclose(actual_voltages, [0.0] * len(actual_voltages), atol=1e-6):
+            raise DeviceError("Failed to set all controllable pads to 0V")
