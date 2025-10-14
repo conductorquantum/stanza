@@ -1,7 +1,6 @@
 import tempfile
-import threading
-import time
 from pathlib import Path
+from unittest.mock import patch
 
 import numpy as np
 import pytest
@@ -330,134 +329,106 @@ class TestLoggerSession:
         assert session.routine_name == ""
 
 
-def test_time_based_auto_flush_creates_threading_timer(tmpdir_path, session_metadata):
-    """Test that auto-flush creates a threading timer when initialized."""
+def test_time_based_auto_flush_triggers_on_measurement(tmpdir_path, session_metadata):
+    """Test that auto-flush triggers based on elapsed time during log_measurement."""
     writer = JSONLWriter(tmpdir_path)
     session = LoggerSession(
         metadata=session_metadata,
         writer_pool={"jsonl": writer},
         writer_refs=["jsonl"],
         base_dir=tmpdir_path,
-        auto_flush_interval=1.0,
+        auto_flush_interval=30.0,
+        buffer_size=100,  # Large buffer to prevent size-based flush
     )
 
-    # Before initialization, no timer should exist
-    assert session._flush_timer is None
+    with patch("time.time") as mock_time:
+        # Set initial time
+        mock_time.return_value = 1000.0
+        session.initialize()
 
-    session.initialize()
+        # Log first measurement at t=1000
+        session.log_measurement("m1", {"value": 1})
+        assert len(session._buffer) == 1
 
-    # After initialization, timer should be created
-    assert session._flush_timer is not None
-    assert isinstance(session._flush_timer, threading.Timer)
-    assert session._flush_timer.is_alive()
+        # Advance time past auto-flush interval (30s + 1s)
+        mock_time.return_value = 1031.0
 
-    session.finalize()
+        # Log second measurement - should trigger time-based flush of both items
+        session.log_measurement("m2", {"value": 2})
+
+        # Buffer should be empty after time-based flush
+        assert len(session._buffer) == 0
+
+        # Verify data was written to file
+        measurement_file = tmpdir_path / "measurement.jsonl"
+        assert measurement_file.exists()
+
+        session.finalize()
 
 
-def test_time_based_auto_flush_thread_calls_callback(tmpdir_path, session_metadata):
-    """Test that the timer actually calls the auto-flush callback."""
+def test_time_based_auto_flush_triggers_on_sweep(tmpdir_path, session_metadata):
+    """Test that auto-flush triggers based on elapsed time during log_sweep."""
     writer = JSONLWriter(tmpdir_path)
     session = LoggerSession(
         metadata=session_metadata,
         writer_pool={"jsonl": writer},
         writer_refs=["jsonl"],
         base_dir=tmpdir_path,
-        auto_flush_interval=0.1,  # Short interval for testing
-        buffer_size=100,  # Large buffer to prevent manual flush
+        auto_flush_interval=30.0,
+        buffer_size=100,  # Large buffer to prevent size-based flush
     )
 
-    session.initialize()
+    with patch("time.time") as mock_time:
+        # Set initial time
+        mock_time.return_value = 1000.0
+        session.initialize()
 
-    # Add some data to buffer
-    session.log_measurement("test", {"value": 1})
-    assert len(session._buffer) == 1
+        # Log first sweep at t=1000
+        session.log_sweep("s1", [1.0, 2.0], [3.0, 4.0], "X", "Y")
+        assert len(session._buffer) == 1
 
-    # Wait for auto-flush to trigger
-    time.sleep(0.25)
+        # Advance time past auto-flush interval (30s + 1s)
+        mock_time.return_value = 1031.0
 
-    # Buffer should be flushed
-    assert len(session._buffer) == 0
+        # Log second sweep - should trigger time-based flush of both items
+        session.log_sweep("s2", [5.0, 6.0], [7.0, 8.0], "X", "Y")
 
-    session.finalize()
+        # Buffer should be empty after time-based flush
+        assert len(session._buffer) == 0
+
+        # Verify data was written to file
+        sweep_file = tmpdir_path / "sweep.jsonl"
+        assert sweep_file.exists()
+
+        session.finalize()
 
 
-def test_auto_flush_retries_on_failure(tmpdir_path, session_metadata):
-    """Test that auto-flush retries after a failure."""
-    call_count = [0]
-
-    class FailOnceThenSucceedWriter(JSONLWriter):
-        def write_measurement(self, data):
-            call_count[0] += 1
-            if call_count[0] == 1:
-                raise RuntimeError("Simulated failure")
-            # Succeed on subsequent calls
-            super().write_measurement(data)
-
-    writer = FailOnceThenSucceedWriter(tmpdir_path)
+def test_no_auto_flush_within_interval(tmpdir_path, session_metadata):
+    """Test that multiple measurements within interval don't trigger auto-flush."""
+    writer = JSONLWriter(tmpdir_path)
     session = LoggerSession(
         metadata=session_metadata,
         writer_pool={"jsonl": writer},
         writer_refs=["jsonl"],
         base_dir=tmpdir_path,
-        auto_flush_interval=0.1,
-        buffer_size=100,
-        max_auto_flush_failures=5,
+        auto_flush_interval=30.0,
+        buffer_size=100,  # Large buffer to prevent size-based flush
     )
 
-    session.initialize()
-    session.log_measurement("test", {"value": 1})
+    with patch("time.time") as mock_time:
+        # Set initial time
+        mock_time.return_value = 1000.0
+        session.initialize()
 
-    # Wait for first auto-flush attempt (should fail)
-    time.sleep(0.15)
-    assert session._consecutive_flush_failures == 1
-    assert len(session._buffer) == 1  # Still buffered
+        # Log multiple measurements with small time increments (within interval)
+        for i in range(5):
+            mock_time.return_value = 1000.0 + i * 2.0  # Increment by 2s each time
+            session.log_measurement(f"m{i}", {"value": i})
 
-    # Wait for second auto-flush attempt (should succeed)
-    time.sleep(0.15)
-    assert session._consecutive_flush_failures == 0
-    assert len(session._buffer) == 0  # Flushed successfully
+        # All measurements should still be in buffer (total elapsed: 8s < 30s)
+        assert len(session._buffer) == 5
 
-    session.finalize()
-
-
-def test_auto_flush_retries_stop_after_5_consecutive_failures(
-    tmpdir_path, session_metadata
-):
-    """Test that auto-flush stops after max consecutive failures."""
-
-    class AlwaysFailWriter(JSONLWriter):
-        def write_measurement(self, data):
-            raise RuntimeError("Simulated persistent failure")
-
-    writer = AlwaysFailWriter(tmpdir_path)
-    session = LoggerSession(
-        metadata=session_metadata,
-        writer_pool={"jsonl": writer},
-        writer_refs=["jsonl"],
-        base_dir=tmpdir_path,
-        auto_flush_interval=0.05,  # Very short interval
-        buffer_size=100,
-        max_auto_flush_failures=5,
-    )
-
-    session.initialize()
-    session.log_measurement("test", {"value": 1})
-
-    # Wait for enough time for all 5 failures to occur
-    time.sleep(0.4)
-
-    # Should have stopped after 5 failures
-    assert session._consecutive_flush_failures == 5
-
-    # Timer should no longer be scheduled
-    # Wait a bit more and verify failure count doesn't increase
-    time.sleep(0.2)
-    assert session._consecutive_flush_failures == 5  # Should still be 5, not 6+
-
-    # Buffer should still contain the data (never successfully flushed)
-    assert len(session._buffer) == 1
-
-    session._active = False  # Prevent finalize from trying to flush
+        session.finalize()
 
 
 def test_buffer_size_warning(tmpdir_path, session_metadata, caplog):
@@ -501,52 +472,8 @@ def test_buffer_size_warning(tmpdir_path, session_metadata, caplog):
     session._active = False  # Prevent finalize from trying to flush
 
 
-def test_restart_auto_flush(tmpdir_path, session_metadata):
-    """Test that restart_auto_flush() resets failure counter and restarts timer."""
-
-    class FailTwiceThenSucceedWriter(JSONLWriter):
-        def __init__(self, *args, **kwargs):
-            super().__init__(*args, **kwargs)
-            self.call_count = 0
-
-        def write_measurement(self, data):
-            self.call_count += 1
-            if self.call_count <= 2:
-                raise RuntimeError("Simulated failure")
-            super().write_measurement(data)
-
-    writer = FailTwiceThenSucceedWriter(tmpdir_path)
-    session = LoggerSession(
-        metadata=session_metadata,
-        writer_pool={"jsonl": writer},
-        writer_refs=["jsonl"],
-        base_dir=tmpdir_path,
-        auto_flush_interval=0.05,
-        buffer_size=100,
-        max_auto_flush_failures=2,
-    )
-
-    session.initialize()
-    session.log_measurement("test", {"value": 1})
-
-    # Wait for auto-flush to fail twice and stop
-    time.sleep(0.2)
-    assert session._consecutive_flush_failures == 2
-
-    # Restart auto-flush
-    session.restart_auto_flush()
-    assert session._consecutive_flush_failures == 0
-    assert session._flush_timer is not None
-
-    # Wait for auto-flush to succeed
-    time.sleep(0.1)
-    assert len(session._buffer) == 0  # Should be flushed
-
-    session.finalize()
-
-
-def test_restart_auto_flush_when_disabled_raises_error(tmpdir_path, session_metadata):
-    """Test that restart_auto_flush() raises error when auto-flush is disabled."""
+def test_auto_flush_disabled_when_none(tmpdir_path, session_metadata):
+    """Test that auto-flush is disabled when interval is None."""
     writer = JSONLWriter(tmpdir_path)
     session = LoggerSession(
         metadata=session_metadata,
@@ -554,51 +481,59 @@ def test_restart_auto_flush_when_disabled_raises_error(tmpdir_path, session_meta
         writer_refs=["jsonl"],
         base_dir=tmpdir_path,
         auto_flush_interval=None,  # Disabled
+        buffer_size=10,
     )
 
-    session.initialize()
+    with patch("time.time") as mock_time:
+        # Set initial time
+        mock_time.return_value = 1000.0
+        session.initialize()
 
-    with pytest.raises(LoggerSessionError, match="Auto-flush is disabled"):
-        session.restart_auto_flush()
+        # Log multiple measurements
+        for i in range(5):
+            mock_time.return_value = 1000.0 + i * 10.0
+            session.log_measurement(f"m{i}", {"value": i})
 
-    session.finalize()
+        # Advance time significantly
+        mock_time.return_value = 2000.0
+
+        # Log another measurement
+        session.log_measurement("m5", {"value": 5})
+
+        # All measurements should still be in buffer (no time-based flush)
+        assert len(session._buffer) == 6
+
+        session.finalize()
 
 
-def test_thread_safe_buffer_operations(tmpdir_path, session_metadata):
-    """Test that concurrent log_measurement calls are thread-safe."""
+def test_last_flush_time_updated_on_flush(tmpdir_path, session_metadata):
+    """Test that _last_flush_time is updated after successful flush."""
     writer = JSONLWriter(tmpdir_path)
     session = LoggerSession(
         metadata=session_metadata,
         writer_pool={"jsonl": writer},
         writer_refs=["jsonl"],
         base_dir=tmpdir_path,
-        buffer_size=2000,  # Larger than total items to prevent auto-flush
-        auto_flush_interval=None,  # Disable auto-flush for this test
+        auto_flush_interval=30.0,
+        buffer_size=100,
     )
 
-    session.initialize()
+    with patch("time.time") as mock_time:
+        # Set initial time
+        mock_time.return_value = 1000.0
+        session.initialize()
+        initial_flush_time = session._last_flush_time
 
-    # Use a thread barrier to ensure all threads start at the same time
-    num_threads = 10
-    num_measurements_per_thread = 100
-    barrier = threading.Barrier(num_threads)
+        # Advance time and log a measurement
+        mock_time.return_value = 1010.0
+        session.log_measurement("test", {"value": 1})
 
-    def log_measurements(thread_id):
-        barrier.wait()  # Wait for all threads to be ready
-        for i in range(num_measurements_per_thread):
-            session.log_measurement(f"thread{thread_id}_m{i}", {"value": i})
+        # Advance time and manually flush
+        mock_time.return_value = 1020.0
+        session.flush()
 
-    threads = []
-    for i in range(num_threads):
-        t = threading.Thread(target=log_measurements, args=(i,))
-        threads.append(t)
-        t.start()
+        # _last_flush_time should be updated to 1020.0
+        assert session._last_flush_time == 1020.0
+        assert session._last_flush_time > initial_flush_time
 
-    for t in threads:
-        t.join()
-
-    # Verify all measurements were logged
-    expected_total = num_threads * num_measurements_per_thread
-    assert len(session._buffer) == expected_total
-
-    session.finalize()
+        session.finalize()
