@@ -37,6 +37,39 @@ def logger_session(tmpdir_path, session_metadata):
     )
 
 
+@pytest.fixture
+def session_factory(tmpdir_path, session_metadata):
+    """Factory fixture for creating LoggerSession instances with custom parameters."""
+    # Sentinel value to distinguish between "not provided" and "explicitly None"
+    _NOT_PROVIDED = object()
+
+    def _create_session(
+        buffer_size=_NOT_PROVIDED,
+        auto_flush_interval=_NOT_PROVIDED,
+        writer=None,
+        **kwargs
+    ):
+        if writer is None:
+            writer = JSONLWriter(tmpdir_path)
+
+        session_kwargs = {
+            "metadata": session_metadata,
+            "writer_pool": {"jsonl": writer},
+            "writer_refs": ["jsonl"],
+            "base_dir": tmpdir_path,
+        }
+
+        if buffer_size is not _NOT_PROVIDED:
+            session_kwargs["buffer_size"] = buffer_size
+        if auto_flush_interval is not _NOT_PROVIDED:
+            session_kwargs["auto_flush_interval"] = auto_flush_interval
+
+        session_kwargs.update(kwargs)
+        return LoggerSession(**session_kwargs)
+
+    return _create_session
+
+
 class TestLoggerSession:
     def test_initializes_and_finalizes_session(self, logger_session):
         logger_session.initialize()
@@ -329,88 +362,55 @@ class TestLoggerSession:
         assert session.routine_name == ""
 
 
-def test_time_based_auto_flush_triggers_on_measurement(tmpdir_path, session_metadata):
+def test_time_based_auto_flush_triggers_on_measurement(tmpdir_path, session_factory):
     """Test that auto-flush triggers based on elapsed time during log_measurement."""
-    writer = JSONLWriter(tmpdir_path)
-    session = LoggerSession(
-        metadata=session_metadata,
-        writer_pool={"jsonl": writer},
-        writer_refs=["jsonl"],
-        base_dir=tmpdir_path,
-        auto_flush_interval=30.0,
-        buffer_size=100,  # Large buffer to prevent size-based flush
-    )
+    session = session_factory(auto_flush_interval=30.0, buffer_size=100)
 
     with patch("time.time") as mock_time:
-        # Set initial time
         mock_time.return_value = 1000.0
         session.initialize()
 
-        # Log first measurement at t=1000
         session.log_measurement("m1", {"value": 1})
         assert len(session._buffer) == 1
 
-        # Advance time past auto-flush interval (30s + 1s)
         mock_time.return_value = 1031.0
 
-        # Log second measurement - should trigger time-based flush of both items
         session.log_measurement("m2", {"value": 2})
 
-        # Buffer should be empty after time-based flush
         assert len(session._buffer) == 0
 
-        # Verify data was written to file
         measurement_file = tmpdir_path / "measurement.jsonl"
         assert measurement_file.exists()
 
         session.finalize()
 
 
-def test_time_based_auto_flush_triggers_on_sweep(tmpdir_path, session_metadata):
+def test_time_based_auto_flush_triggers_on_sweep(tmpdir_path, session_factory):
     """Test that auto-flush triggers based on elapsed time during log_sweep."""
-    writer = JSONLWriter(tmpdir_path)
-    session = LoggerSession(
-        metadata=session_metadata,
-        writer_pool={"jsonl": writer},
-        writer_refs=["jsonl"],
-        base_dir=tmpdir_path,
-        auto_flush_interval=30.0,
-        buffer_size=100,  # Large buffer to prevent size-based flush
-    )
+    session = session_factory(auto_flush_interval=30.0, buffer_size=100)
 
     with patch("time.time") as mock_time:
-        # Set initial time
         mock_time.return_value = 1000.0
         session.initialize()
 
-        # Log first sweep at t=1000
         session.log_sweep("s1", [1.0, 2.0], [3.0, 4.0], "X", "Y")
         assert len(session._buffer) == 1
 
-        # Advance time past auto-flush interval (30s + 1s)
         mock_time.return_value = 1031.0
 
-        # Log second sweep - should trigger time-based flush of both items
         session.log_sweep("s2", [5.0, 6.0], [7.0, 8.0], "X", "Y")
 
-        # Buffer should be empty after time-based flush
         assert len(session._buffer) == 0
 
-        # Verify data was written to file
         sweep_file = tmpdir_path / "sweep.jsonl"
         assert sweep_file.exists()
 
         session.finalize()
 
 
-def test_no_auto_flush_within_interval(tmpdir_path, session_metadata):
+def test_no_auto_flush_within_interval(session_factory):
     """Test that multiple measurements within interval don't trigger auto-flush."""
-    writer = JSONLWriter(tmpdir_path)
-    session = LoggerSession(
-        metadata=session_metadata,
-        writer_pool={"jsonl": writer},
-        writer_refs=["jsonl"],
-        base_dir=tmpdir_path,
+    session = session_factory(
         auto_flush_interval=30.0,
         buffer_size=100,  # Large buffer to prevent size-based flush
     )
@@ -431,23 +431,19 @@ def test_no_auto_flush_within_interval(tmpdir_path, session_metadata):
         session.finalize()
 
 
-def test_buffer_size_warning(tmpdir_path, session_metadata, caplog):
+def test_buffer_size_warning(tmpdir_path, session_factory, caplog):
     """Test that buffer size warning is logged when buffer grows too large."""
     import logging
 
-    # Use a failing writer so flush() fails and buffer grows
     class FailingWriter(JSONLWriter):
         def write_measurement(self, data):
             raise RuntimeError("Simulated failure")
 
     writer = FailingWriter(tmpdir_path)
-    session = LoggerSession(
-        metadata=session_metadata,
-        writer_pool={"jsonl": writer},
-        writer_refs=["jsonl"],
-        base_dir=tmpdir_path,
-        buffer_size=10,  # Small buffer, warning at 100
-        auto_flush_interval=None,  # Disable auto-flush
+    session = session_factory(
+        buffer_size=10,
+        auto_flush_interval=None,
+        writer=writer,
     )
 
     session.initialize()
@@ -472,14 +468,9 @@ def test_buffer_size_warning(tmpdir_path, session_metadata, caplog):
     session._active = False  # Prevent finalize from trying to flush
 
 
-def test_auto_flush_disabled_when_none(tmpdir_path, session_metadata):
+def test_auto_flush_disabled_when_none(session_factory):
     """Test that auto-flush is disabled when interval is None."""
-    writer = JSONLWriter(tmpdir_path)
-    session = LoggerSession(
-        metadata=session_metadata,
-        writer_pool={"jsonl": writer},
-        writer_refs=["jsonl"],
-        base_dir=tmpdir_path,
+    session = session_factory(
         auto_flush_interval=None,  # Disabled
         buffer_size=10,
     )
@@ -506,17 +497,9 @@ def test_auto_flush_disabled_when_none(tmpdir_path, session_metadata):
         session.finalize()
 
 
-def test_last_flush_time_updated_on_flush(tmpdir_path, session_metadata):
+def test_last_flush_time_updated_on_flush(session_factory):
     """Test that _last_flush_time is updated after successful flush."""
-    writer = JSONLWriter(tmpdir_path)
-    session = LoggerSession(
-        metadata=session_metadata,
-        writer_pool={"jsonl": writer},
-        writer_refs=["jsonl"],
-        base_dir=tmpdir_path,
-        auto_flush_interval=30.0,
-        buffer_size=100,
-    )
+    session = session_factory(auto_flush_interval=30.0, buffer_size=100)
 
     with patch("time.time") as mock_time:
         # Set initial time
