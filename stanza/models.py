@@ -56,8 +56,7 @@ class PadType(str, Enum):
 
     GATE = "GATE"
     CONTACT = "CONTACT"
-    GPIO = "GPIO"
-    ALL = "ALL"  # all contacts and gates
+    ALL = "ALL"
 
     def __str__(self) -> str:
         return self.value
@@ -75,11 +74,6 @@ class ContactType(str, Enum):
     DRAIN = "DRAIN"
 
 
-class GPIOType(str, Enum):
-    MUX = "MUX"
-    TRIGGER = "TRIGGER"
-
-
 class InstrumentType(str, Enum):
     CONTROL = "CONTROL"
     MEASUREMENT = "MEASUREMENT"
@@ -88,10 +82,6 @@ class InstrumentType(str, Enum):
 
 class Gate(Electrode):
     type: GateType
-
-
-class GPIO(Electrode):
-    type: GPIOType
 
 
 class Contact(Electrode):
@@ -200,7 +190,6 @@ class DeviceConfig(BaseModel):
     name: str
     gates: dict[str, Gate] = {}
     contacts: dict[str, Contact] = {}
-    gpios: dict[str, GPIO] = {}
     routines: list[RoutineConfig]
     instruments: list[InstrumentConfig]
 

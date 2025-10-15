@@ -3,7 +3,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from stanza.models import ContactType, GateType, GPIOType, PadType
+from stanza.models import ContactType, GateType, PadType
 
 
 @dataclass
@@ -25,7 +25,7 @@ class ChannelConfig:
     name: str
     voltage_range: tuple[float | None, float | None]
     pad_type: PadType
-    electrode_type: GateType | ContactType | GPIOType
+    electrode_type: GateType | ContactType
     control_channel: int | None = None
     measure_channel: int | None = None
     output_mode: str = "dc"

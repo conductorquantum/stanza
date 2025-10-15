@@ -71,11 +71,6 @@ class TestDevice:
         control_contacts = device.control_contacts
         assert isinstance(control_contacts, list)
 
-    def test_gpios_property(self, device):
-        gpios = device.gpios
-        assert isinstance(gpios, list)
-        assert "gpio_a0" in gpios
-
     def test_measurement_gates_property(self, device):
         """Test the measurement_gates property (renamed from measure_gates)."""
         measurement_gates = device.measurement_gates

@@ -4,14 +4,12 @@ import pytest
 
 from stanza.device import Device
 from stanza.models import (
-    GPIO,
     Contact,
     ContactType,
     ControlInstrumentConfig,
     DeviceConfig,
     Gate,
     GateType,
-    GPIOType,
     InstrumentType,
     MeasurementInstrumentConfig,
     RoutineConfig,
@@ -90,16 +88,6 @@ def device_config():
                 v_lower_bound=-1.0,
                 v_upper_bound=1.0,
                 measure_channel=2,
-            )
-        },
-        gpios={
-            "gpio_a0": GPIO(
-                name="gpio_a0",
-                type=GPIOType.MUX,
-                v_lower_bound=None,
-                v_upper_bound=None,
-                control_channel=None,
-                measure_channel=3,
             )
         },
         routines=[],

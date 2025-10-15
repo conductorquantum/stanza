@@ -60,14 +60,6 @@ class Device:
         ]
 
     @property
-    def gpios(self) -> list[str]:
-        return [
-            channel.name
-            for channel in self.channel_configs.values()
-            if channel.pad_type == PadType.GPIO
-        ]
-
-    @property
     def control_gates(self) -> list[str]:
         return [
             channel.name

@@ -1,7 +1,6 @@
 import pytest
 
 from stanza.models import (
-    GPIO,
     Contact,
     ContactType,
     ControlInstrumentConfig,
@@ -9,10 +8,8 @@ from stanza.models import (
     Electrode,
     Gate,
     GateType,
-    GPIOType,
     InstrumentType,
     MeasurementInstrumentConfig,
-    PadType,
     RoutineConfig,
 )
 
@@ -365,72 +362,3 @@ def test_routine_config_handles_scientific_notation_strings():
     # "1e3" becomes 1000.0, which has no fractional part, so it's converted to int
     assert routine.parameters["integer_scientific"] == 1000
     assert isinstance(routine.parameters["integer_scientific"], int)
-
-
-def test_gpio_pad_type_enum():
-    """Test that PadType.GPIO enum value exists."""
-    assert PadType.GPIO == "GPIO"
-    assert str(PadType.GPIO) == "GPIO"
-
-
-def test_gpio_types():
-    """Test that GPIOType enum has MUX and TRIGGER values."""
-    assert GPIOType.MUX == "MUX"
-    assert GPIOType.TRIGGER == "TRIGGER"
-    assert str(GPIOType.MUX) == "GPIOType.MUX"
-    assert str(GPIOType.TRIGGER) == "GPIOType.TRIGGER"
-
-
-def test_device_config_with_gpios():
-    """Test that DeviceConfig can include GPIO pads."""
-    gpio_mux = GPIO(
-        type=GPIOType.MUX,
-        control_channel=None,
-        measure_channel=10,
-        v_lower_bound=None,
-        v_upper_bound=None,
-    )
-    gpio_trigger = GPIO(
-        type=GPIOType.TRIGGER,
-        control_channel=None,
-        measure_channel=11,
-        v_lower_bound=None,
-        v_upper_bound=None,
-    )
-
-    gate = Gate(
-        type=GateType.PLUNGER,
-        control_channel=1,
-        measure_channel=1,
-        v_lower_bound=-2.0,
-        v_upper_bound=2.0,
-    )
-
-    control_instrument = ControlInstrumentConfig(
-        name="control",
-        type=InstrumentType.CONTROL,
-        ip_addr="192.168.1.1",
-        slew_rate=1.0,
-    )
-    measurement_instrument = MeasurementInstrumentConfig(
-        name="measurement",
-        type=InstrumentType.MEASUREMENT,
-        ip_addr="192.168.1.2",
-        measurement_duration=1.0,
-        sample_time=0.5,
-    )
-
-    device = DeviceConfig(
-        name="test_device",
-        gates={"gate1": gate},
-        contacts={},
-        gpios={"mux0": gpio_mux, "trigger0": gpio_trigger},
-        routines=[RoutineConfig(name="test_exp")],
-        instruments=[control_instrument, measurement_instrument],
-    )
-
-    assert device.name == "test_device"
-    assert len(device.gates) == 1
-    assert len(device.gpios) == 2
-    assert device.gpios["mux0"].type == GPIOType.MUX
-    assert device.gpios["trigger0"].type == GPIOType.TRIGGER
