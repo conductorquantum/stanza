@@ -41,6 +41,7 @@ def results_registry():
 
 class TestResourceRegistry:
     def test_initialization_with_named_resources(self):
+        """Test initializing ResourceRegistry with multiple named resources."""
         resource1 = MockResource("resource1")
         resource2 = MockResource("resource2")
         registry = ResourceRegistry(resource1, resource2)
@@ -49,6 +50,7 @@ class TestResourceRegistry:
         assert registry.resource2 is resource2
 
     def test_getattr_access(self):
+        """Test accessing resources via attribute notation."""
         resource = MockResource("test_resource")
         registry = ResourceRegistry(resource)
 
@@ -56,13 +58,16 @@ class TestResourceRegistry:
         assert registry.test_resource.data == "data_from_test_resource"
 
     def test_getitem_access(self, resource_registry):
+        """Test accessing resources via dictionary-style indexing."""
         assert resource_registry["resource1"].name == "resource1"
 
     def test_get_method(self, resource_registry):
+        """Test get method with default value fallback."""
         assert resource_registry.get("resource1").name == "resource1"
         assert resource_registry.get("nonexistent", "default") == "default"
 
     def test_add_resource(self):
+        """Test adding a resource to the registry dynamically."""
         registry = ResourceRegistry()
         resource = MockResource("new_resource")
         registry.add("new_resource", resource)
@@ -70,17 +75,20 @@ class TestResourceRegistry:
         assert registry.new_resource is resource
 
     def test_list_resources(self, resource_registry):
+        """Test listing all registered resources."""
         resources = resource_registry.list_resources()
         assert "resource1" in resources
         assert "resource2" in resources
         assert len(resources) == 2
 
     def test_nonexistent_resource_raises_attribute_error(self):
+        """Test that accessing nonexistent resource raises AttributeError."""
         registry = ResourceRegistry()
         with pytest.raises(AttributeError, match="Resource 'nonexistent' not found"):
             _ = registry.nonexistent
 
     def test_private_attribute_access(self):
+        """Test that accessing private attributes raises AttributeError."""
         registry = ResourceRegistry()
         with pytest.raises(AttributeError):
             _ = registry._private_attr
@@ -88,35 +96,42 @@ class TestResourceRegistry:
 
 class TestResultsRegistry:
     def test_initialization(self):
+        """Test initializing an empty ResultsRegistry."""
         registry = ResultsRegistry()
         assert registry.list_results() == []
 
     def test_store_and_get(self):
+        """Test storing and retrieving results from the registry."""
         registry = ResultsRegistry()
         registry.store("test_result", {"data": "test"})
 
         assert registry.get("test_result") == {"data": "test"}
 
     def test_getattr_access(self, results_registry):
+        """Test accessing results via attribute notation."""
         assert results_registry.result1 == "value1"
 
     def test_getitem_setitem_access(self):
+        """Test accessing and setting results via dictionary-style indexing."""
         registry = ResultsRegistry()
         registry["test_result"] = "test_value"
 
         assert registry["test_result"] == "test_value"
 
     def test_get_with_default(self):
+        """Test get method with default value for nonexistent results."""
         registry = ResultsRegistry()
         assert registry.get("nonexistent", "default") == "default"
 
     def test_list_results(self, results_registry):
+        """Test listing all stored results."""
         results = results_registry.list_results()
         assert "result1" in results
         assert "result2" in results
         assert len(results) == 2
 
     def test_clear(self):
+        """Test clearing all results from the registry."""
         registry = ResultsRegistry()
         registry.store("result1", "value1")
 
@@ -125,6 +140,7 @@ class TestResultsRegistry:
         assert len(registry.list_results()) == 0
 
     def test_nonexistent_result_raises_attribute_error(self):
+        """Test that accessing nonexistent result raises AttributeError."""
         registry = ResultsRegistry()
         with pytest.raises(AttributeError, match="Result 'nonexistent' not found"):
             _ = registry.nonexistent
@@ -132,6 +148,7 @@ class TestResultsRegistry:
 
 class TestRoutineContext:
     def test_initialization(self):
+        """Test initializing RoutineContext with resources and results registries."""
         resources = ResourceRegistry()
         results = ResultsRegistry()
         context = RoutineContext(resources, results)
@@ -142,6 +159,8 @@ class TestRoutineContext:
 
 class TestRoutineDecorator:
     def test_routine_decorator_registers_function(self, registry_fixture):
+        """Test that routine decorator registers function with its name."""
+
         @routine
         def test_routine(ctx):
             return "test_result"
@@ -151,6 +170,8 @@ class TestRoutineDecorator:
         assert registered["test_routine"] == test_routine
 
     def test_routine_decorator_with_custom_name(self, registry_fixture):
+        """Test that routine decorator can register function with custom name."""
+
         @routine(name="custom_name")
         def test_routine(ctx):
             return "test_result"
@@ -160,6 +181,8 @@ class TestRoutineDecorator:
         assert "test_routine" not in registered
 
     def test_routine_decorator_returns_original_function(self, registry_fixture):
+        """Test that routine decorator returns the original function unchanged."""
+
         def original_func(ctx):
             return "original"
 
@@ -167,6 +190,8 @@ class TestRoutineDecorator:
         assert decorated is original_func
 
     def test_multiple_routine_registrations(self, registry_fixture):
+        """Test registering multiple routines simultaneously."""
+
         @routine
         def routine1(ctx):
             pass
@@ -181,6 +206,8 @@ class TestRoutineDecorator:
         assert len(registered) == 2
 
     def test_clear_routine_registry(self, registry_fixture):
+        """Test clearing all registered routines from the registry."""
+
         @routine
         def test_routine(ctx):
             pass
@@ -190,6 +217,8 @@ class TestRoutineDecorator:
         assert len(get_registered_routines()) == 0
 
     def test_get_registered_routines_returns_copy(self, registry_fixture):
+        """Test that get_registered_routines returns a copy, not the original registry."""
+
         @routine
         def test_routine(ctx):
             pass
@@ -203,6 +232,7 @@ class TestRoutineDecorator:
 
 class TestRoutineRunner:
     def test_initialization_with_resources(self, registry_fixture):
+        """Test initializing RoutineRunner with resource list."""
         resource1 = MockResource("resource1")
         resource2 = MockResource("resource2")
 
@@ -214,6 +244,7 @@ class TestRoutineRunner:
         assert runner.configs == {}
 
     def test_initialization_requires_resources_or_configs(self, registry_fixture):
+        """Test that initialization requires either resources or configs parameter."""
         with pytest.raises(
             ValueError, match="Must provide either 'resources' or 'configs'"
         ):
@@ -222,6 +253,7 @@ class TestRoutineRunner:
     def test_initialization_cannot_provide_both(
         self, registry_fixture, simple_routines_yaml
     ):
+        """Test that initialization cannot accept both resources and configs."""
         with pytest.raises(
             ValueError, match="Cannot provide both 'resources' and 'configs'"
         ):
@@ -232,6 +264,7 @@ class TestRoutineRunner:
             RoutineRunner(resources=[device], configs=[device_config])
 
     def test_run_routine_not_registered(self, registry_fixture):
+        """Test that running unregistered routine raises ValueError."""
         resource = MockResource("resource")
         runner = RoutineRunner(resources=[resource])
 
@@ -239,6 +272,8 @@ class TestRoutineRunner:
             runner.run("nonexistent")
 
     def test_run_routine_basic(self, registry_fixture):
+        """Test running a basic routine and storing its result."""
+
         @routine
         def test_routine(ctx):
             return "success"
@@ -251,6 +286,8 @@ class TestRoutineRunner:
         assert runner.get_result("test_routine") == "success"
 
     def test_run_routine_with_context_access(self, registry_fixture):
+        """Test that routines can access resources through context."""
+
         @routine
         def test_routine(ctx):
             resource = ctx.resources.test_resource
@@ -263,6 +300,8 @@ class TestRoutineRunner:
         assert result == "data_data_from_test_resource"
 
     def test_run_routine_with_params(self, registry_fixture):
+        """Test running routine with custom parameters."""
+
         @routine
         def test_routine(ctx, param1, param2="default"):
             return f"{param1}-{param2}"
@@ -274,6 +313,8 @@ class TestRoutineRunner:
         assert result == "hello-world"
 
     def test_run_routine_with_config_params(self, registry_fixture):
+        """Test running routine with parameters from configuration."""
+
         @routine
         def test_routine(ctx, param1, param2="default"):
             return f"{param1}-{param2}"
@@ -288,6 +329,8 @@ class TestRoutineRunner:
         assert result == "value1-42"
 
     def test_run_routine_user_params_override_config(self, registry_fixture):
+        """Test that user-provided parameters override config parameters."""
+
         @routine
         def test_routine(ctx, param1, param2="default"):
             return f"{param1}-{param2}"
@@ -302,6 +345,8 @@ class TestRoutineRunner:
         assert result == "value1-overridden"
 
     def test_run_routine_access_previous_results(self, registry_fixture):
+        """Test that routines can access results from previously executed routines."""
+
         @routine
         def first_routine(ctx):
             return {"data": "first_result"}
@@ -320,6 +365,8 @@ class TestRoutineRunner:
         assert result == "processed_first_result"
 
     def test_run_routine_exception_handling(self, registry_fixture):
+        """Test that routine exceptions are wrapped in RuntimeError with context."""
+
         @routine
         def failing_routine(ctx):
             raise ValueError("Something went wrong")
@@ -331,6 +378,8 @@ class TestRoutineRunner:
             runner.run("failing_routine")
 
     def test_get_result(self, registry_fixture):
+        """Test retrieving stored routine results."""
+
         @routine
         def test_routine(ctx):
             return "test_result"
@@ -344,6 +393,8 @@ class TestRoutineRunner:
         assert runner.get_result("nonexistent") is None
 
     def test_list_routines(self, registry_fixture):
+        """Test listing all registered routines."""
+
         @routine
         def routine1(ctx):
             pass
@@ -361,6 +412,8 @@ class TestRoutineRunner:
         assert len(routines) == 2
 
     def test_list_results(self, registry_fixture):
+        """Test listing all routine execution results."""
+
         @routine
         def routine1(ctx):
             return "result1"
@@ -381,6 +434,8 @@ class TestRoutineRunner:
         assert len(results) == 2
 
     def test_sequential_routines_building_on_results(self, registry_fixture):
+        """Test sequential routines that build on each other's results."""
+
         @routine
         def collect_data(ctx, data_size=10):
             return list(range(data_size))
@@ -410,6 +465,8 @@ class TestRoutineRunner:
         assert analyze_result == {"sum": 30, "count": 5}
 
     def test_multiple_resources_in_runner(self, registry_fixture):
+        """Test accessing multiple resources within a routine."""
+
         @routine
         def use_multiple_resources(ctx):
             r1 = ctx.resources.resource1
@@ -427,6 +484,7 @@ class TestRoutineRunner:
     def test_nested_routine_config_extraction(
         self, registry_fixture, nested_routines_yaml
     ):
+        """Test extracting configuration from nested routine hierarchy."""
         device_config = DeviceConfig.model_validate(
             yaml.safe_load(nested_routines_yaml)
         )
@@ -450,6 +508,7 @@ class TestRoutineRunner:
     def test_deeply_nested_routine_config_extraction(
         self, registry_fixture, deeply_nested_routines_yaml
     ):
+        """Test extracting configuration from deeply nested routine structure."""
         device_config = DeviceConfig.model_validate(
             yaml.safe_load(deeply_nested_routines_yaml)
         )
@@ -464,6 +523,7 @@ class TestRoutineRunner:
         assert len(extracted_configs) == 3
 
     def test_run_all_nested_routines(self, registry_fixture, nested_routines_yaml):
+        """Test running all subroutines within a parent routine."""
         execution_order = []
 
         @routine
@@ -502,6 +562,7 @@ class TestRoutineRunner:
         ]
 
     def test_run_all_top_level_routines(self, registry_fixture, simple_routines_yaml):
+        """Test running all top-level routines when no parent specified."""
         execution_order = []
 
         @routine
@@ -532,6 +593,8 @@ class TestRoutineRunner:
 
 class TestRoutineRunnerLoggerIntegration:
     def test_run_routine_creates_and_passes_session(self, registry_fixture, tmp_path):
+        """Test that running a routine creates and passes a logging session."""
+
         @routine
         def test_routine(ctx, session=None):
             assert session is not None
@@ -552,6 +615,8 @@ class TestRoutineRunnerLoggerIntegration:
         assert "test_routine" not in logger._active_sessions
 
     def test_run_routine_closes_session_on_failure(self, registry_fixture, tmp_path):
+        """Test that logging session is properly closed even when routine fails."""
+
         @routine
         def failing_routine(ctx, session=None):
             assert session is not None
@@ -570,6 +635,8 @@ class TestRoutineRunnerLoggerIntegration:
         assert "failing_routine" not in logger._active_sessions
 
     def test_run_routine_without_logger(self, registry_fixture):
+        """Test that routines run normally when no logger is available."""
+
         @routine
         def test_routine(ctx, session=None):
             assert session is None
@@ -583,6 +650,7 @@ class TestRoutineRunnerLoggerIntegration:
         assert result == "success"
 
     def test_multiple_routines_get_separate_sessions(self, registry_fixture, tmp_path):
+        """Test that each routine execution gets its own separate logging session."""
         session_ids_seen = []
 
         @routine
@@ -608,6 +676,7 @@ class TestRoutineRunnerLoggerIntegration:
         assert logger.current_session is None
 
     def test_initialization_with_configs(self, registry_fixture):
+        """Test initializing RoutineRunner with device and logger resources."""
         device = MockResource("device")
         logger = MockResource("logger")
         runner = RoutineRunner(resources=[device, logger])
@@ -620,6 +689,7 @@ class TestRoutineRunnerLoggerIntegration:
     def test_run_routine_tree_with_unregistered_routine(
         self, registry_fixture, nested_routines_yaml
     ):
+        """Test that routine tree execution skips unregistered routines gracefully."""
         device_config = DeviceConfig.model_validate(
             yaml.safe_load(nested_routines_yaml)
         )
@@ -635,6 +705,7 @@ class TestRoutineRunnerLoggerIntegration:
     def test_initialization_with_configs_using_mock(
         self, registry_fixture, simple_routines_yaml, tmp_path
     ):
+        """Test initializing RoutineRunner from device config with mocked dependencies."""
         from unittest.mock import Mock, patch
 
         device_config = DeviceConfig.model_validate(

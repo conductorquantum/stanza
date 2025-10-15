@@ -15,6 +15,7 @@ def temp_dir():
 
 class TestSweep1DLogging:
     def test_returns_correct_measurement_lengths(self, device, temp_dir):
+        """Test that 1D sweep returns correct number of voltage and current measurements."""
         logger = DataLogger("test_routine", temp_dir)
         session = logger.create_session()
 
@@ -26,6 +27,7 @@ class TestSweep1DLogging:
         logger.close_session(session.session_id)
 
     def test_buffers_sweep_data_correctly(self, device, temp_dir):
+        """Test that 1D sweep data is correctly buffered in session."""
         logger = DataLogger("test_routine", temp_dir)
         session = logger.create_session()
 
@@ -39,6 +41,7 @@ class TestSweep1DLogging:
         logger.close_session(session.session_id)
 
     def test_writes_sweep_to_jsonl_file(self, device, temp_dir):
+        """Test that 1D sweep data is written to JSONL file on session close."""
         logger = DataLogger("test_routine", temp_dir)
         session = logger.create_session()
 
@@ -49,6 +52,7 @@ class TestSweep1DLogging:
         assert jsonl_file.exists()
 
     def test_jsonl_file_contains_correct_data(self, device, temp_dir):
+        """Test that 1D sweep JSONL file contains correctly formatted data."""
         logger = DataLogger("test_routine", temp_dir)
         session = logger.create_session()
 
@@ -69,6 +73,7 @@ class TestSweep1DLogging:
 
 class TestSweepAllLogging:
     def test_returns_correct_measurement_lengths(self, device, temp_dir):
+        """Test that sweep_all returns correct number of voltage and current measurements."""
         logger = DataLogger("test_routine", temp_dir)
         session = logger.create_session()
 
@@ -80,6 +85,7 @@ class TestSweepAllLogging:
         logger.close_session(session.session_id)
 
     def test_buffers_sweep_data_correctly(self, device, temp_dir):
+        """Test that sweep_all data is correctly buffered in session."""
         logger = DataLogger("test_routine", temp_dir)
         session = logger.create_session()
 
@@ -93,6 +99,7 @@ class TestSweepAllLogging:
         logger.close_session(session.session_id)
 
     def test_writes_sweep_to_jsonl_file(self, device, temp_dir):
+        """Test that sweep_all data is written to JSONL file on session close."""
         logger = DataLogger("test_routine", temp_dir)
         session = logger.create_session()
 
@@ -103,6 +110,7 @@ class TestSweepAllLogging:
         assert jsonl_file.exists()
 
     def test_jsonl_file_contains_correct_data(self, device, temp_dir):
+        """Test that sweep_all JSONL file contains correctly formatted data."""
         logger = DataLogger("test_routine", temp_dir)
         session = logger.create_session()
 
@@ -121,6 +129,7 @@ class TestSweepAllLogging:
 
 class TestSweepNDLogging:
     def test_returns_correct_measurement_lengths(self, device, temp_dir):
+        """Test that ND sweep returns correct number of voltage and current measurements."""
         logger = DataLogger("test_routine", temp_dir)
         session = logger.create_session()
 
@@ -134,6 +143,7 @@ class TestSweepNDLogging:
         logger.close_session(session.session_id)
 
     def test_buffers_sweep_data_correctly(self, device, temp_dir):
+        """Test that ND sweep data is correctly buffered in session."""
         logger = DataLogger("test_routine", temp_dir)
         session = logger.create_session()
 
@@ -147,6 +157,7 @@ class TestSweepNDLogging:
         logger.close_session(session.session_id)
 
     def test_writes_sweep_to_jsonl_file(self, device, temp_dir):
+        """Test that ND sweep data is written to JSONL file on session close."""
         logger = DataLogger("test_routine", temp_dir)
         session = logger.create_session()
 
@@ -157,6 +168,7 @@ class TestSweepNDLogging:
         assert jsonl_file.exists()
 
     def test_jsonl_file_contains_correct_data(self, device, temp_dir):
+        """Test that ND sweep JSONL file contains correctly formatted data."""
         logger = DataLogger("test_routine", temp_dir)
         session = logger.create_session()
 

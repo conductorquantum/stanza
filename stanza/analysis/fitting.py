@@ -142,7 +142,28 @@ def _compute_initial_params(v_norm: np.ndarray, i_norm: np.ndarray) -> np.ndarra
 def _compute_parameter_bounds(
     v_norm: np.ndarray, i_norm: np.ndarray
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Compute robust parameter bounds from normalized data."""
+    """Compute robust parameter bounds from normalized data.
+
+    Calculates appropriate lower and upper bounds for the three parameters
+    [a, b, c] of the pinchoff_curve function based on the characteristics
+    of the input data. The bounds are designed to constrain the optimization
+    while allowing for both normal and inverted pinchoff curves.
+
+    Args:
+        v_norm: Normalized voltage array (typically in [0, 1] range)
+        i_norm: Normalized current array (typically in [0, 1] range)
+
+    Returns:
+        Tuple of (lower_bounds, upper_bounds) where each is a numpy array
+        of shape (3,) containing bounds for parameters [a, b, c]:
+        - a (amplitude): Positive value, typically 0.01*i_range to 2.0*i_range
+        - b (slope): Can be negative for inverted curves, |b| <= 20.0/v_range
+        - c (offset): Computed to ensure curve spans the voltage range
+
+    Note:
+        If computed bounds are invalid (lower >= upper), falls back to
+        DEFAULT_BOUNDS for that parameter.
+    """
     i_range = max(np.ptp(i_norm), 1.0)
     v_range = max(np.ptp(v_norm), 1.0)
     v_min, v_max = v_norm.min(), v_norm.max()
