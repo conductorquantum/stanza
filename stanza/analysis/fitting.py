@@ -22,9 +22,9 @@ class PinchoffFitResult:
     """Result of pinchoff curve fitting.
 
     Attributes:
-        v_pinch_off: Pinchoff voltage (where device turns off)
-        v_transition: Transition voltage (midpoint of transition)
-        v_cut_off: Conducting voltage (where device is fully on)
+        v_cut_off: Cut-off voltage (where current flowing through the device approaches a near-zero value)
+        v_transition: Transition voltage (midpoint of transition from cut-off to saturation)
+        v_saturation: Conducting voltage (where current flowing through the device approaches a saturated state)
         popt: Fitted parameters [a, b, c] for pinchoff_curve in normalized space
         pcov: Covariance matrix of fitted parameters
         v_min: Minimum voltage value used for normalization
@@ -38,9 +38,9 @@ class PinchoffFitResult:
         normalize voltages before applying pinchoff_curve().
     """
 
-    v_pinch_off: float | None
-    v_transition: float | None
     v_cut_off: float | None
+    v_transition: float | None
+    v_saturation: float | None
     popt: np.ndarray
     pcov: np.ndarray
 
@@ -86,9 +86,9 @@ def derivative_extrema_indices(x: np.ndarray, y: np.ndarray) -> tuple[int, int, 
     """
     Return the indices of key voltages for pinchoff curves.
 
-    v_pinch_off corresponds to the pinchoff state (low current)
-    v_cut_off corresponds to the conducting state (high current)
-    v_transition corresponds to the transition (steepest slope)
+    v_cut_off corresponds to the cut-off state (low current)
+    v_saturation corresponds to the saturated state (high current)
+    v_transition corresponds to the transition from cut-off to saturation (steepest slope)
 
     Args:
         x (np.ndarray): Input x values
@@ -96,7 +96,7 @@ def derivative_extrema_indices(x: np.ndarray, y: np.ndarray) -> tuple[int, int, 
 
     Returns:
         Tuple[int, int, int]:
-            (transition_v_ind, conducting_v_ind, pinchoff_v_ind)
+            (transition_v_ind, saturation_v_ind, cut_off_v_ind)
     """
     grad = np.gradient(y, x)
     second = np.gradient(grad, x)
@@ -109,13 +109,13 @@ def derivative_extrema_indices(x: np.ndarray, y: np.ndarray) -> tuple[int, int, 
     imax_second = int(np.argmax(second))
 
     if y[imin_second] < y[imax_second]:
-        pinchoff_v_ind = imin_second
+        cut_off_v_ind = imin_second
         conducting_v_ind = imax_second
     else:
-        pinchoff_v_ind = imax_second
+        cut_off_v_ind = imax_second
         conducting_v_ind = imin_second
 
-    return transition_v_ind, conducting_v_ind, pinchoff_v_ind
+    return transition_v_ind, conducting_v_ind, cut_off_v_ind
 
 
 def _compute_initial_params(v_norm: np.ndarray, i_norm: np.ndarray) -> np.ndarray:
@@ -208,7 +208,7 @@ def fit_pinchoff_parameters(
     voltages: np.ndarray, currents: np.ndarray, sigma: float = 2.0
 ) -> PinchoffFitResult:
     """Fit the pinchoff parameters a, b, c of the pinchoff curve, and returns
-    the pinchoff, transition, and conducting voltages.
+    the cut-off, transition, and conducting voltages.
 
     Args:
         voltages (np.ndarray): Input voltages
@@ -235,14 +235,14 @@ def fit_pinchoff_parameters(
 
     i_fit = pinchoff_curve(v_norm, *popt)
 
-    transition_v_ind, conducting_v_ind, pinchoff_v_ind = derivative_extrema_indices(
+    transition_v_ind, saturation_v_ind, cut_off_v_ind = derivative_extrema_indices(
         v_norm, i_fit
     )
 
     return PinchoffFitResult(
-        v_pinch_off=_map_index_to_voltage(pinchoff_v_ind, voltages),
+        v_cut_off=_map_index_to_voltage(cut_off_v_ind, voltages),
         v_transition=_map_index_to_voltage(transition_v_ind, voltages),
-        v_cut_off=_map_index_to_voltage(conducting_v_ind, voltages),
+        v_saturation=_map_index_to_voltage(saturation_v_ind, voltages),
         popt=popt,
         pcov=pcov,
         v_min=voltages.min(),

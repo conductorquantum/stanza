@@ -377,14 +377,14 @@ class TestAnalyzeSingleGateHeuristic:
         currents_noisy = currents + noise
 
         result = analyze_single_gate_heuristic(voltages, currents_noisy)
-        assert "vp" in result
-        assert "vt" in result
-        assert "vc" in result
+        assert "cutoff_voltage" in result
+        assert "transition_voltage" in result
+        assert "saturation_voltage" in result
         assert "popt" in result
         assert "pcov" in result
-        assert isinstance(result["vp"], float)
-        assert isinstance(result["vt"], float)
-        assert isinstance(result["vc"], float)
+        assert isinstance(result["cutoff_voltage"], float)
+        assert isinstance(result["transition_voltage"], float)
+        assert isinstance(result["saturation_voltage"], float)
 
     def test_negative_amplitude_curve(self):
         voltages = np.linspace(-2, 2, 200)
@@ -396,10 +396,14 @@ class TestAnalyzeSingleGateHeuristic:
         currents_noisy = currents + noise
 
         result = analyze_single_gate_heuristic(voltages, currents_noisy)
-        assert "vp" in result
-        assert "vt" in result
-        assert "vc" in result
-        assert result["vc"] < result["vt"] < result["vp"]
+        assert "cutoff_voltage" in result
+        assert "transition_voltage" in result
+        assert "saturation_voltage" in result
+        assert (
+            result["saturation_voltage"]
+            < result["transition_voltage"]
+            < result["cutoff_voltage"]
+        )
 
 
 class TestLeakageHelperFunctions:
