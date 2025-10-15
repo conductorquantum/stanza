@@ -7,7 +7,7 @@ class InstrumentError(RuntimeError):
 
 
 class DeviceError(RuntimeError):
-    """Exception raised when an instrument operation fails."""
+    """Exception raised when a device operation fails."""
 
     def __init__(self, message: str):
         self.message = message
@@ -20,6 +20,13 @@ class LoggingError(Exception):
     def __init__(self, message: str, error_code: str | None = None):
         super().__init__(message)
         self.error_code = error_code
+
+
+class RoutineError(Exception):
+    """Exception raised when a routine operation fails."""
+
+    def __init__(self, message: str):
+        super().__init__(message)
 
 
 class LoggerSessionError(LoggingError):

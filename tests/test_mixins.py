@@ -98,14 +98,6 @@ class TestControlInstrumentMixin:
 
 
 class TestMeasurementInstrumentMixin:
-    def test_prepare_measurement_not_implemented(self):
-        mixin = MeasurementInstrumentMixin()
-        with pytest.raises(
-            NotImplementedError,
-            match="Specific instrument must implement prepare_measurement",
-        ):
-            mixin.prepare_measurement()
-
     def test_measure_basic_functionality(self, measurement_config):
         class TestMeasurementInstrument(MeasurementInstrumentMixin):
             @contextmanager

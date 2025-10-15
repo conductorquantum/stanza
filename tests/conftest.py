@@ -1,3 +1,5 @@
+from unittest.mock import patch
+
 import pytest
 
 from stanza.device import Device
@@ -43,6 +45,13 @@ class MockMeasurementInstrument:
 
     def measure(self, channel_name: str) -> float:
         return self.measurements.get(channel_name, 0.0)
+
+
+@pytest.fixture(autouse=True)
+def mock_time_sleep():
+    """Automatically patch time.sleep for all tests to avoid actual delays."""
+    with patch("time.sleep"):
+        yield
 
 
 @pytest.fixture

@@ -166,7 +166,7 @@ class LoggerSession:
     def log_sweep(
         self,
         name: str,
-        x_data: list[float] | np.ndarray,
+        x_data: list[float] | list[list[float]] | np.ndarray,
         y_data: list[float] | np.ndarray,
         x_label: str,
         y_label: str,

@@ -90,8 +90,24 @@ class Contact(Electrode):
 
 class RoutineConfig(BaseModelWithConfig):
     name: str
-    parameters: dict[str, Any | str] | None = None
+    parameters: dict[str, Any] | None = None
     routines: list["RoutineConfig"] | None = None
+
+    @model_validator(mode="after")
+    def convert_to_number(self) -> "RoutineConfig":
+        """Convert float values to int if they have no fractional part."""
+        if self.parameters:
+            for key, value in self.parameters.items():
+                if isinstance(value, str):
+                    try:
+                        numeric_value = float(value)
+                        if numeric_value.is_integer():
+                            self.parameters[key] = int(numeric_value)
+                        else:
+                            self.parameters[key] = numeric_value
+                    except ValueError:
+                        pass
+        return self
 
 
 class BaseInstrumentConfig(BaseModelWithConfig):
@@ -172,8 +188,8 @@ class DeviceConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", validate_assignment=True)
 
     name: str
-    gates: dict[str, Gate]
-    contacts: dict[str, Contact]
+    gates: dict[str, Gate] = {}
+    contacts: dict[str, Contact] = {}
     routines: list[RoutineConfig]
     instruments: list[InstrumentConfig]
 

@@ -125,9 +125,8 @@ class QDAC2(BaseInstrument):
         self.name = instrument_config.name
         self.address = instrument_config.ip_addr or instrument_config.serial_addr
         self.port = instrument_config.port
-        self.measurement_aperature_s = getattr(
-            instrument_config, "measurement_aperature_s", 0.001
-        )
+        self.measurement_aperature_s = getattr(instrument_config, "aperature_s", None)
+        self.measurement_nplc = getattr(instrument_config, "nplc", None)
         self.current_range = QDAC2CurrentRange(current_range)
 
         self.control_channels = [
@@ -151,6 +150,17 @@ class QDAC2(BaseInstrument):
         self.channel_configs = channel_configs
         super().__init__(instrument_config)
         self._initialize_channels(channel_configs)
+
+        # Set current measurement range
+        channels_str = ",".join(str(ch) for _, ch in self.measurement_channels)
+        self.driver.write(
+            f"sens:rang {str(self.current_range).lower()},(@{channels_str})"
+        )
+        # Set the integration time
+        if self.measurement_aperature_s:
+            self.set_measurement_aperatures_s(self.measurement_aperature_s)
+        if self.measurement_nplc:
+            self.set_all_nplc_cycles(self.measurement_nplc)
 
     def _initialize_channels(self, channel_configs: dict[str, ChannelConfig]) -> None:
         for channel_config in channel_configs.values():
@@ -182,16 +192,6 @@ class QDAC2(BaseInstrument):
                         self.driver,
                     ),
                 )
-
-    def prepare_measurement(self) -> None:
-        """Prepare the measurement."""
-        # Set current measurement range
-        channels_str = ",".join(str(ch) for _, ch in self.measurement_channels)
-        self.driver.write(
-            f"sens:rang {str(self.current_range).lower()},(@{channels_str})"
-        )
-        # Set the integration time
-        self.driver.write(f"sens:aper {self.measurement_aperature_s},(@{channels_str})")
 
     def set_voltage(self, channel_name: str, voltage: float) -> None:
         """Set the voltage on a specific channel."""
