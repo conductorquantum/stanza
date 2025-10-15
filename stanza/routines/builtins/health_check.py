@@ -221,7 +221,7 @@ def global_accumulation(
     while measuring current at a specified electrode. The sweep data is analyzed using
     a pinch-off heuristic to identify the voltage at which the device transitions from
     depletion to accumulation (turn-on). After finding this voltage, all gates are set
-    to the turn-on voltage (vp).
+    to the cut-off voltage.
 
     This global characterization establishes a baseline operating point before individual
     gate characterization in subsequent routines.
@@ -237,12 +237,12 @@ def global_accumulation(
 
     Returns:
         dict: Contains:
-            - global_turn_on_voltage: The pinch-off voltage (vp) where the device turns on (V)
+            - global_turn_on_voltage: The cut-off voltage (cutoff_voltage) where current begins to flow through the device (V)
 
     Notes:
         - All control gates are swept together (global sweep)
-        - Device is automatically set to vp after analysis
-        - The vp value is used by subsequent characterization routines (reservoir, finger gates)
+        - Device is automatically set to cutoff_voltage after analysis
+        - The cutoff_voltage value is used by subsequent characterization routines (reservoir, finger gates)
         - step_size is converted to num_points based on voltage range
     """
     leakage_test_results = ctx.results.get("leakage_test", {})
@@ -268,18 +268,20 @@ def global_accumulation(
         raise RoutineError(f"Error in global_accumulation: {str(e)}") from e
 
     ctx.resources.device.jump(
-        dict.fromkeys(ctx.resources.device.control_gates, turn_on_analysis["vp"]),
+        dict.fromkeys(
+            ctx.resources.device.control_gates, turn_on_analysis["cutoff_voltage"]
+        ),
         wait_for_settling=True,
     )
 
     if session:
         session.log_analysis(
-            name="global_cutoff_voltage",
+            name="global_turn_on_voltage",
             data=turn_on_analysis,
         )
 
     return {
-        "global_turn_on_voltage": turn_on_analysis["vp"],
+        "global_turn_on_voltage": turn_on_analysis["cutoff_voltage"],
     }
 
 
@@ -295,9 +297,9 @@ def reservoir_characterization(
 ) -> dict[str, dict[str, Any]]:
     """Characterize individual reservoir gates by sweeping each while holding others in accumulation.
 
-    This health check routine determines the pinch-off voltage (vp) for each reservoir gate
+    This health check routine determines the cut-off voltage (cutoff_voltage) for each reservoir gate
     individually. For each reservoir under test, all other reservoirs are set to 120% of the global
-    pinch-off voltage (to ensure they're fully conducting), while the target reservoir is swept from
+    turn-on voltage (to ensure they're fully conducting), while the target reservoir is swept from
     minimum to maximum voltage. This isolates the behavior of each reservoir and identifies its
     individual pinch-off characteristics.
 
@@ -314,7 +316,7 @@ def reservoir_characterization(
     Returns:
         dict: Contains:
             - reservoir_characterization: Dictionary mapping each reservoir name to its
-              pinch-off voltage (vp) in volts.
+              cut-off voltage (cutoff_voltage) in volts.
 
     Notes:
         - Each reservoir is tested sequentially
@@ -388,9 +390,9 @@ def finger_gate_characterization(
 ) -> dict[str, dict[str, Any]]:
     """Characterize individual finger gates by sweeping each while holding others in accumulation.
 
-    This health check routine determines the pinch-off voltage for each finger gate
+    This health check routine determines the cut-off voltage for each finger gate
     individually. For each finger gate under test, all other finger gates are set to 120% of the
-    global pinch-off voltage (to ensure they're fully accumulated), while the target gate is swept
+    global turn-on voltage (to ensure they're fully accumulated), while the target gate is swept
     from minimum to maximum voltage. This isolates the behavior of each finger gate and identifies
     its individual pinch-off characteristics.
 
@@ -407,7 +409,7 @@ def finger_gate_characterization(
     Returns:
         dict: Contains:
             - finger_gate_characterization: Dictionary mapping each finger gate name to its
-              pinch-off voltage (vp) in volts.
+              cut-off voltage (cutoff_voltage) in volts.
 
     Notes:
         - Each finger gate is tested sequentially
@@ -634,14 +636,14 @@ def _test_single_voltage_bound(
 def analyze_single_gate_heuristic(
     voltages: np.ndarray, currents: np.ndarray
 ) -> dict[str, Any]:
-    """Fit gate sweep data to extract pinch-off voltage using a heuristic model.
+    """Fit gate sweep data to extract cut-off voltage using a heuristic model.
 
     Args:
         voltages: Array of gate voltages (V) from the sweep.
         currents: Array of measured currents (A) corresponding to each voltage.
 
     Returns:
-        dict: Contains vp (pinch-off voltage) and other fit parameters.
+        dict: Contains cutoff_voltage (cut-off voltage) and other fit parameters.
 
     Raises:
         ValueError: If the curve fit quality is poor based on R² and NRMSE metrics.
@@ -655,9 +657,9 @@ def analyze_single_gate_heuristic(
         raise ValueError("Curve fit quality is poor (low R² or high NRMSE)")
 
     return {
-        "vp": pinchoff_fit.v_pinch_off,
-        "vt": pinchoff_fit.v_transition,
-        "vc": pinchoff_fit.v_cut_off,
+        "cutoff_voltage": pinchoff_fit.v_cut_off,
+        "transition_voltage": pinchoff_fit.v_transition,
+        "saturation_voltage": pinchoff_fit.v_saturation,
         "popt": pinchoff_fit.popt,
         "pcov": pinchoff_fit.pcov,
     }
