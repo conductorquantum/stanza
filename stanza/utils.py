@@ -107,6 +107,18 @@ def generate_channel_configs(device_config: DeviceConfig) -> dict[str, ChannelCo
             output_mode="dc",
             enabled=True,
         )
+
+    for gpio_name, gpio in device_config.gpios.items():
+        channel_configs[gpio_name] = ChannelConfig(
+            name=gpio_name,
+            control_channel=gpio.control_channel,
+            measure_channel=gpio.measure_channel,
+            voltage_range=(gpio.v_lower_bound, gpio.v_upper_bound),
+            pad_type=PadType.GPIO,
+            electrode_type=gpio.type,
+            output_mode="digital",
+            enabled=True,
+        )
     return channel_configs
 
 

@@ -204,6 +204,13 @@ contacts:
     measure_channel: 3
     v_lower_bound: 0.0
     v_upper_bound: 0.5
+gpios:
+  GPIO1:
+    type: OUTPUT
+    control_channel: 4
+    measure_channel: null
+    v_lower_bound: 0.0
+    v_upper_bound: 3.3
 routines: []
 instruments:
   - name: test_control

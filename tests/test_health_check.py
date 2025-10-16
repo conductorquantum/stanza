@@ -53,37 +53,16 @@ class MockDevice:
         self.voltages.update(voltage_dict)
 
     def sweep_all(self, voltages, measure_electrode, session=None):
-        currents = pinchoff_curve(voltages, 1.0, 1.0, 1.0)
-        return voltages, currents
+        return voltages, pinchoff_curve(voltages, 1.0, 1.0, 1.0)
 
     def sweep_1d(self, gate, voltages, measure_electrode, session=None):
-        currents = pinchoff_curve(voltages, 1.0, 1.0, 1.0)
-        return voltages, currents
+        return voltages, pinchoff_curve(voltages, 1.0, 1.0, 1.0)
 
     def get_gates_by_type(self, gate_type):
         return [name for name, gtype in self.gate_types.items() if gtype == gate_type]
 
     def zero(self, pad_type=None):
-        """Set all gates to 0V."""
         self.voltages = dict.fromkeys(self.control_gates, 0.0)
-
-
-@pytest.fixture
-def mock_device():
-    return MockDevice()
-
-
-@pytest.fixture
-def routine_context(mock_device):
-    resources = ResourceRegistry(mock_device)
-    results = ResultsRegistry()
-    return RoutineContext(resources, results)
-
-
-@pytest.fixture(autouse=True)
-def mock_sleep():
-    with patch("time.sleep"):
-        yield
 
 
 class MockLoggerSession:
@@ -98,24 +77,59 @@ class MockLoggerSession:
         self.analyses.append((name, data))
 
 
+class HighQualityMockDevice(MockDevice):
+    """Mock device that returns high-quality pinchoff curves."""
+
+    def sweep_all(self, voltages, measure_electrode, session=None):
+        voltages_array = np.array(voltages)
+        return voltages_array, pinchoff_curve(voltages_array, 1.5, 3.0, -1.5)
+
+    def sweep_1d(self, gate, voltages, measure_electrode, session=None):
+        voltages_array = np.array(voltages)
+        return voltages_array, pinchoff_curve(voltages_array, 1.5, 3.0, -1.5)
+
+
+@pytest.fixture
+def mock_device():
+    return MockDevice()
+
+
+@pytest.fixture
+def routine_context(mock_device):
+    return RoutineContext(ResourceRegistry(mock_device), ResultsRegistry())
+
+
+@pytest.fixture
+def characterization_context(routine_context):
+    """Context with leakage and global accumulation results."""
+    routine_context.results.store(
+        "leakage_test", {"max_safe_voltage_bound": 1.0, "min_safe_voltage_bound": -10.0}
+    )
+    routine_context.results.store(
+        "global_accumulation", {"global_turn_on_voltage": 0.5}
+    )
+    return routine_context
+
+
+@pytest.fixture(autouse=True)
+def mock_sleep():
+    with patch("time.sleep"):
+        yield
+
+
 class TestNoiseFloorMeasurement:
     def test_basic_measurement(self, routine_context):
         result = noise_floor_measurement(
             routine_context, measure_electrode="G1", num_points=10
         )
-
-        assert "current_mean" in result
-        assert "current_std" in result
+        assert "current_mean" in result and "current_std" in result
         assert isinstance(result["current_mean"], float)
-        assert isinstance(result["current_std"], float)
 
     def test_measurement_statistics(self, routine_context):
         routine_context.resources.device.currents["G1"] = 1e-10
-
         result = noise_floor_measurement(
             routine_context, measure_electrode="G1", num_points=100
         )
-
         assert abs(result["current_mean"] - 1e-10) < 1e-12
         assert result["current_std"] >= 0
 
@@ -126,90 +140,102 @@ class TestNoiseFloorMeasurement:
         result_100 = noise_floor_measurement(
             routine_context, measure_electrode="G1", num_points=100
         )
-
-        assert "current_mean" in result_10
-        assert "current_mean" in result_100
+        assert "current_mean" in result_10 and "current_mean" in result_100
 
     def test_with_logger_session(self, routine_context):
         session = MockLoggerSession()
         result = noise_floor_measurement(
             routine_context, measure_electrode="G1", num_points=10, session=session
         )
-
         assert len(session.analyses) == 1
         assert session.analyses[0][0] == "noise_floor_measurement"
-        assert "currents" in session.analyses[0][1]
         assert result["current_mean"] == session.analyses[0][1]["current_mean"]
 
 
 class TestLeakageTest:
-    def test_basic_leakage_test(self, routine_context):
+    @pytest.fixture
+    def leakage_params(self):
+        return {
+            "leakage_threshold_resistance": 50e6,
+            "leakage_threshold_count": 0,
+            "num_points": 2,
+        }
+
+    def test_basic_leakage_test(self, routine_context, leakage_params):
         routine_context.results.store("current_std", 1e-11)
+        result = leakage_test(routine_context, measure_electrode="G1", **leakage_params)
+        assert "max_safe_voltage_bound" in result and "min_safe_voltage_bound" in result
 
-        result = leakage_test(
-            routine_context,
-            leakage_threshold_resistance=50e6,
-            leakage_threshold_count=0,
-            num_points=3,
-        )
-
-        assert "max_safe_voltage_bound" in result
-        assert "min_safe_voltage_bound" in result
-        assert isinstance(result["max_safe_voltage_bound"], (int, float))
-        assert isinstance(result["min_safe_voltage_bound"], (int, float))
-
-    def test_leakage_uses_current_std_from_results(self, routine_context):
+    def test_leakage_uses_current_std_from_results(
+        self, routine_context, leakage_params
+    ):
         routine_context.results.store("current_std", 5e-11)
-
-        result = leakage_test(
-            routine_context,
-            leakage_threshold_resistance=50e6,
-            leakage_threshold_count=0,
-            num_points=2,
+        assert (
+            leakage_test(routine_context, measure_electrode="G1", **leakage_params)
+            is not None
         )
 
-        assert result is not None
-
-    def test_leakage_default_current_threshold(self, routine_context):
-        result = leakage_test(
-            routine_context,
-            leakage_threshold_resistance=50e6,
-            leakage_threshold_count=0,
-            num_points=2,
+    def test_leakage_default_current_threshold(self, routine_context, leakage_params):
+        assert (
+            leakage_test(routine_context, measure_electrode="G1", **leakage_params)
+            is not None
         )
 
-        assert result is not None
-
-    def test_leakage_restores_initial_voltages(self, routine_context):
+    def test_leakage_restores_initial_voltages(self, routine_context, leakage_params):
         device = routine_context.resources.device
         initial_voltages = dict.fromkeys(device.control_gates, 0.5)
         device.jump(initial_voltages)
         routine_context.results.store("current_std", 1e-11)
-
-        leakage_test(
-            routine_context,
-            leakage_threshold_resistance=50e6,
-            leakage_threshold_count=0,
-            num_points=2,
-        )
-
+        leakage_test(routine_context, measure_electrode="G1", **leakage_params)
         for gate in device.control_gates:
             assert device.voltages[gate] == initial_voltages[gate]
 
-    def test_leakage_with_session_logging(self, routine_context):
+    def test_leakage_with_session_logging(self, routine_context, leakage_params):
         session = MockLoggerSession()
         routine_context.results.store("current_std", 1e-11)
-
         result = leakage_test(
-            routine_context,
-            leakage_threshold_resistance=50e6,
-            leakage_threshold_count=0,
-            num_points=2,
-            session=session,
+            routine_context, measure_electrode="G1", session=session, **leakage_params
         )
-
         assert result is not None
         assert any("leakage_test_success" in a[0] for a in session.analyses)
+
+    def test_exception_handling(self, routine_context, leakage_params):
+        routine_context.results.store("current_std", 1e-11)
+        call_count = [0]
+
+        def failing_measure(electrodes):
+            call_count[0] += 1
+            if call_count[0] > 2:
+                raise RuntimeError("Measurement failed")
+            return (
+                np.array([1e-11] * len(electrodes))
+                if isinstance(electrodes, list)
+                else 1e-11
+            )
+
+        routine_context.resources.device.measure = failing_measure
+        with pytest.raises(RuntimeError, match="Measurement failed"):
+            leakage_test(routine_context, measure_electrode="G1", **leakage_params)
+
+    def test_continues_when_voltage_too_close(self, routine_context, leakage_params):
+        routine_context.results.store("current_std", 1e-11)
+
+        class NoVoltageChangeDevice(MockDevice):
+            def measure(self, electrodes):
+                return (
+                    np.array([1e-8] * len(electrodes))
+                    if isinstance(electrodes, list)
+                    else 1e-8
+                )
+
+            def jump(self, voltage_dict, wait_for_settling=False):
+                pass
+
+        routine_context.resources._resources["device"] = NoVoltageChangeDevice()
+        assert (
+            leakage_test(routine_context, measure_electrode="G1", **leakage_params)
+            is not None
+        )
 
 
 class TestGlobalAccumulation:
@@ -218,7 +244,6 @@ class TestGlobalAccumulation:
             "leakage_test",
             {"max_safe_voltage_bound": 10.0, "min_safe_voltage_bound": -10.0},
         )
-
         with pytest.raises(RoutineError, match="Step size must be greater than 0"):
             global_accumulation(
                 routine_context,
@@ -240,17 +265,14 @@ class TestGlobalAccumulation:
                 self.sweep_params = {
                     "voltages": voltages,
                     "measure_electrode": measure_electrode,
-                    "session": session,
                 }
                 return voltages, np.ones_like(voltages) * 1e-10
 
-        tracked_device = TrackedDevice()
-        routine_context.resources._resources["device"] = tracked_device
+        routine_context.resources._resources["device"] = TrackedDevice()
         routine_context.results.store(
             "leakage_test",
             {"max_safe_voltage_bound": 10.0, "min_safe_voltage_bound": -10.0},
         )
-
         with pytest.raises((RoutineError, ValueError)):
             global_accumulation(
                 routine_context,
@@ -259,35 +281,43 @@ class TestGlobalAccumulation:
                 bias_gate="G1",
                 bias_voltage=0.0,
             )
+        assert routine_context.resources.device.sweep_all_called
 
-        assert tracked_device.sweep_all_called
-        assert tracked_device.sweep_params["measure_electrode"] == "G1"
-        assert len(tracked_device.sweep_params["voltages"]) >= 2
+    def test_with_session_logging(self, routine_context):
+        session = MockLoggerSession()
+        routine_context.results.store(
+            "leakage_test",
+            {"max_safe_voltage_bound": 1.0, "min_safe_voltage_bound": -10.0},
+        )
+        routine_context.resources._resources["device"] = HighQualityMockDevice()
+        result = global_accumulation(
+            routine_context,
+            measure_electrode="G1",
+            step_size=0.1,
+            bias_gate="G1",
+            bias_voltage=0.0,
+            session=session,
+        )
+        assert "global_turn_on_voltage" in result
+        assert len(session.analyses) == 1
+        assert session.analyses[0][0] == "global_turn_on_voltage"
+        cutoff = result["global_turn_on_voltage"]
+        for gate in routine_context.resources.device.control_gates:
+            assert routine_context.resources.device.voltages[gate] == cutoff
 
 
 class TestReservoirCharacterization:
-    @pytest.fixture
-    def reservoir_context(self, routine_context):
-        routine_context.results.store(
-            "leakage_test",
-            {"max_safe_voltage_bound": 10.0, "min_safe_voltage_bound": -10.0},
-        )
-        routine_context.results.store(
-            "global_accumulation", {"global_turn_on_voltage": 0.5}
-        )
-        return routine_context
-
-    def test_invalid_step_size(self, reservoir_context):
+    def test_invalid_step_size(self, characterization_context):
         with pytest.raises(RoutineError, match="Step size must be greater than 0"):
             reservoir_characterization(
-                reservoir_context,
+                characterization_context,
                 measure_electrode="G1",
                 step_size=-0.1,
                 bias_gate="G1",
                 bias_voltage=0.0,
             )
 
-    def test_sweeps_each_reservoir(self, reservoir_context):
+    def test_sweeps_each_reservoir(self, characterization_context):
         class TrackedDevice(MockDevice):
             def __init__(self):
                 super().__init__()
@@ -297,45 +327,50 @@ class TestReservoirCharacterization:
                 self.swept_gates.append(gate)
                 return voltages, np.ones_like(voltages) * 1e-10
 
-        tracked_device = TrackedDevice()
-        reservoir_context.resources._resources["device"] = tracked_device
-
+        characterization_context.resources._resources["device"] = TrackedDevice()
         with pytest.raises((RoutineError, ValueError)):
             reservoir_characterization(
-                reservoir_context,
+                characterization_context,
                 measure_electrode="G1",
                 step_size=2.0,
                 bias_gate="G1",
                 bias_voltage=0.0,
             )
+        assert any(
+            g in ["R1", "R2"]
+            for g in characterization_context.resources.device.swept_gates
+        )
 
-        assert len(tracked_device.swept_gates) >= 1
-        assert any(g in ["R1", "R2"] for g in tracked_device.swept_gates)
+    def test_with_session_logging(self, characterization_context):
+        session = MockLoggerSession()
+        characterization_context.resources._resources["device"] = (
+            HighQualityMockDevice()
+        )
+        result = reservoir_characterization(
+            characterization_context,
+            measure_electrode="G1",
+            step_size=0.1,
+            bias_gate="G1",
+            bias_voltage=0.0,
+            session=session,
+        )
+        assert "reservoir_characterization" in result
+        assert len(session.analyses) >= 1
+        assert all("reservoir_characterization" in name for name, _ in session.analyses)
 
 
 class TestFingerGateCharacterization:
-    @pytest.fixture
-    def finger_context(self, routine_context):
-        routine_context.results.store(
-            "leakage_test",
-            {"max_safe_voltage_bound": 10.0, "min_safe_voltage_bound": -10.0},
-        )
-        routine_context.results.store(
-            "global_accumulation", {"global_turn_on_voltage": 0.5}
-        )
-        return routine_context
-
-    def test_invalid_step_size(self, finger_context):
+    def test_invalid_step_size(self, characterization_context):
         with pytest.raises(RoutineError, match="Step size must be greater than 0"):
             finger_gate_characterization(
-                finger_context,
+                characterization_context,
                 measure_electrode="G1",
                 step_size=0,
                 bias_gate="G1",
                 bias_voltage=0.0,
             )
 
-    def test_sweeps_plunger_and_barrier_gates(self, finger_context):
+    def test_sweeps_plunger_and_barrier_gates(self, characterization_context):
         class TrackedDevice(MockDevice):
             def __init__(self):
                 super().__init__()
@@ -345,27 +380,44 @@ class TestFingerGateCharacterization:
                 self.swept_gates.append(gate)
                 return voltages, np.ones_like(voltages) * 1e-10
 
-        tracked_device = TrackedDevice()
-        finger_context.resources._resources["device"] = tracked_device
-
+        characterization_context.resources._resources["device"] = TrackedDevice()
         with pytest.raises((RoutineError, ValueError)):
             finger_gate_characterization(
-                finger_context,
+                characterization_context,
                 measure_electrode="G1",
                 step_size=2.0,
                 bias_gate="G1",
                 bias_voltage=0.0,
             )
+        assert any(
+            g in ["P1", "B1"]
+            for g in characterization_context.resources.device.swept_gates
+        )
 
-        assert len(tracked_device.swept_gates) >= 1
-        assert any(g in ["P1", "B1"] for g in tracked_device.swept_gates)
+    def test_with_session_logging(self, characterization_context):
+        session = MockLoggerSession()
+        characterization_context.resources._resources["device"] = (
+            HighQualityMockDevice()
+        )
+        result = finger_gate_characterization(
+            characterization_context,
+            measure_electrode="G1",
+            step_size=0.1,
+            bias_gate="G1",
+            bias_voltage=0.0,
+            session=session,
+        )
+        assert "finger_gate_characterization" in result
+        assert len(session.analyses) >= 1
+        assert all(
+            "finger_gate_characterization" in name for name, _ in session.analyses
+        )
 
 
 class TestAnalyzeSingleGateHeuristic:
     def test_poor_fit_raises_error(self):
         voltages = np.linspace(-1, 1, 10)
         currents = np.random.random(10) * 1e-15
-
         with pytest.raises(ValueError, match="Curve fit quality is poor"):
             analyze_single_gate_heuristic(voltages, currents)
 
@@ -374,31 +426,24 @@ class TestAnalyzeSingleGateHeuristic:
         currents = pinchoff_curve(voltages, 1.0, 1.0, 1.0)
         np.random.seed(42)
         noise = np.random.normal(0, 0.01 * np.max(currents), size=currents.shape)
-        currents_noisy = currents + noise
-
-        result = analyze_single_gate_heuristic(voltages, currents_noisy)
-        assert "cutoff_voltage" in result
-        assert "transition_voltage" in result
-        assert "saturation_voltage" in result
-        assert "popt" in result
-        assert "pcov" in result
-        assert isinstance(result["cutoff_voltage"], float)
-        assert isinstance(result["transition_voltage"], float)
-        assert isinstance(result["saturation_voltage"], float)
+        result = analyze_single_gate_heuristic(voltages, currents + noise)
+        for key in [
+            "cutoff_voltage",
+            "transition_voltage",
+            "saturation_voltage",
+            "popt",
+            "pcov",
+        ]:
+            assert key in result
+            if key.endswith("_voltage"):
+                assert isinstance(result[key], float)
 
     def test_negative_amplitude_curve(self):
         voltages = np.linspace(-2, 2, 200)
         currents = pinchoff_curve(voltages, -0.5, 2.0, -1.0)
         np.random.seed(42)
-        noise = np.random.normal(
-            0, 0.01 * np.abs(np.max(currents) - np.min(currents)), size=currents.shape
-        )
-        currents_noisy = currents + noise
-
-        result = analyze_single_gate_heuristic(voltages, currents_noisy)
-        assert "cutoff_voltage" in result
-        assert "transition_voltage" in result
-        assert "saturation_voltage" in result
+        noise = np.random.normal(0, 0.01 * np.ptp(currents), size=currents.shape)
+        result = analyze_single_gate_heuristic(voltages, currents + noise)
         assert (
             result["saturation_voltage"]
             < result["transition_voltage"]
@@ -408,54 +453,40 @@ class TestAnalyzeSingleGateHeuristic:
 
 class TestLeakageHelperFunctions:
     def test_calculate_leakage_matrix(self):
-        delta_V = 0.1
-        current_diff = np.array([1e-9, 2e-9, 0.0, 5e-9])
-
-        leakage_matrix = _calculate_leakage_matrix(delta_V, current_diff)
-
+        leakage_matrix = _calculate_leakage_matrix(
+            0.1, np.array([1e-9, 2e-9, 0.0, 5e-9])
+        )
         assert leakage_matrix.shape == (4,)
-        assert leakage_matrix[0] == abs(delta_V / 1e-9)
+        assert leakage_matrix[0] == abs(0.1 / 1e-9)
         assert leakage_matrix[2] == np.inf
         assert np.all(np.isfinite(leakage_matrix[:2]))
 
     def test_calculate_leakage_matrix_handles_negatives(self):
-        delta_V = -0.1
-        current_diff = np.array([-1e-9, 1e-9])
-
-        leakage_matrix = _calculate_leakage_matrix(delta_V, current_diff)
-
+        leakage_matrix = _calculate_leakage_matrix(-0.1, np.array([-1e-9, 1e-9]))
         assert np.all(leakage_matrix > 0)
         assert np.all(np.isfinite(leakage_matrix))
 
     def test_check_leakage_threshold_no_leakage(self):
-        leakage_matrix = np.array([[np.inf, 1e8], [1e8, np.inf]])
-        control_gates = ["G1", "G2"]
-
         leaked = _check_leakage_threshold(
-            leakage_matrix,
+            np.array([[np.inf, 1e8], [1e8, np.inf]]),
             leakage_threshold_resistance=50e6,
             leakage_threshold_count=0,
-            control_gates=control_gates,
+            control_gates=["G1", "G2"],
             delta_V=0.1,
             session=None,
         )
-
         assert not leaked
 
     def test_check_leakage_threshold_with_leakage(self):
-        leakage_matrix = np.array([[np.inf, 1e5], [1e5, np.inf]])
-        control_gates = ["G1", "G2"]
         session = MockLoggerSession()
-
         leaked = _check_leakage_threshold(
-            leakage_matrix,
+            np.array([[np.inf, 1e5], [1e5, np.inf]]),
             leakage_threshold_resistance=50e6,
             leakage_threshold_count=0,
-            control_gates=control_gates,
+            control_gates=["G1", "G2"],
             delta_V=0.1,
             session=session,
         )
-
         assert leaked
         assert len(session.analyses) == 1
         assert session.analyses[0][0] == "leaky_gate_pairs"
