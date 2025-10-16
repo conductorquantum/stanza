@@ -109,6 +109,32 @@ def test_device_config_unique_channels():
             instruments=[control_instrument, measurement_instrument],
         )
 
+    gpio1 = GPIO(
+        type=GPIOType.OUTPUT,
+        control_channel=2,
+        v_lower_bound=0.0,
+        v_upper_bound=3.3,
+    )
+    gpio2 = GPIO(
+        type=GPIOType.INPUT,
+        control_channel=2,
+        v_lower_bound=0.0,
+        v_upper_bound=3.3,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="Duplicate channels found: gpio 'gpio1' control_channel 2, gpio 'gpio2' control_channel 2",
+    ):
+        DeviceConfig(
+            name="test_device",
+            gates={},
+            contacts={},
+            gpios={"gpio1": gpio1, "gpio2": gpio2},
+            routines=[RoutineConfig(name="test_exp")],
+            instruments=[control_instrument, measurement_instrument],
+        )
+
 
 def test_device_config_required_instruments():
     gate = Gate(

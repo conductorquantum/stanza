@@ -87,14 +87,20 @@ class InstrumentType(str, Enum):
 
 
 class Gate(Electrode):
+    """Gate pads for inductive channels on the device"""
+
     type: GateType
 
 
 class Contact(Electrode):
+    """Contact pads for conductive channels on the device"""
+
     type: ContactType
 
 
 class GPIO(Electrode):
+    """General Purpose Input/Output pins for digital signals"""
+
     type: GPIOType
 
 
@@ -195,6 +201,8 @@ InstrumentConfig = Annotated[
 
 
 class DeviceConfig(BaseModel):
+    """Configuration for a quantum device (Device Under Test)."""
+
     model_config = ConfigDict(extra="forbid", validate_assignment=True)
 
     name: str
@@ -217,6 +225,7 @@ class DeviceConfig(BaseModel):
                 f"contact '{name}'": electrode
                 for name, electrode in self.contacts.items()
             },
+            **{f"gpio '{name}'": electrode for name, electrode in self.gpios.items()},
         }
 
         # Track which electrodes use each channel
