@@ -148,6 +148,10 @@ Stanza devices support common operations:
 # Jump to voltages
 device.jump({"G1": -1.5, "G2": -0.8})
 
+# Zero specific pads or all pads
+device.zero(["G1", "G2"])  # Zero specific pads
+device.zero()              # Zero all pads
+
 # Measure current
 current = device.measure("DRAIN")
 
@@ -160,11 +164,31 @@ v_data, i_data = device.sweep_2d("G1", v1, "G2", v2, "DRAIN")
 v_data, i_data = device.sweep_nd(["G1", "G2"], voltages, "DRAIN")
 ```
 
+## Built-in Routines
+
+Stanza includes health check routines for device characterization:
+
+```python
+from stanza.routines.builtins import (
+    noise_floor_measurement,
+    leakage_test,
+    global_accumulation,
+)
+
+# Run health checks
+runner.run("noise_floor_measurement", measure_electrode="DRAIN", num_points=10)
+runner.run("leakage_test", leakage_threshold_resistance=50e6, num_points=10)
+runner.run("global_accumulation", measure_electrode="DRAIN", step_size=0.01, bias_gate="SOURCE", bias_voltage=0.005)
+```
+
+These routines include automatic analysis and fitting for device diagnostics.
+
 ## Examples
 
 See the [cookbooks](cookbooks/) directory for:
 - Basic device configuration
 - Writing custom routines
+- Running built-in routines
 - Jupyter notebook workflows
 
 ## Development
