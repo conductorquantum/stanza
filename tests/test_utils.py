@@ -3,7 +3,13 @@ from unittest.mock import patch
 
 import pytest
 
-from stanza.utils import get_config_resource, load_device_config, substitute_parameters
+from stanza.models import PadType
+from stanza.utils import (
+    generate_channel_configs,
+    get_config_resource,
+    load_device_config,
+    substitute_parameters,
+)
 
 
 @pytest.fixture
@@ -176,6 +182,8 @@ class TestLoadDeviceConfig:
         assert result.gates["G1"].control_channel == 1
         assert "C1" in result.contacts
         assert result.contacts["C1"].measure_channel == 3
+        assert "GPIO1" in result.gpios
+        assert result.gpios["GPIO1"].control_channel == 4
 
     def test_raises_error_for_nonexistent_stanza_config(self):
         with pytest.raises(ValueError, match="Failed to load device config"):
@@ -184,3 +192,17 @@ class TestLoadDeviceConfig:
     def test_raises_error_for_nonexistent_external_file(self):
         with pytest.raises(ValueError, match="Failed to load device config"):
             load_device_config("/nonexistent/path.yaml", is_stanza_config=False)
+
+
+class TestGenerateChannelConfigs:
+    def test_generates_gpio_channel_configs(self, valid_device_yaml, tmp_path):
+        config_file = tmp_path / "device.yaml"
+        config_file.write_text(valid_device_yaml)
+        device_config = load_device_config(str(config_file), is_stanza_config=False)
+
+        channel_configs = generate_channel_configs(device_config)
+
+        assert "GPIO1" in channel_configs
+        assert channel_configs["GPIO1"].pad_type == PadType.GPIO
+        assert channel_configs["GPIO1"].output_mode == "digital"
+        assert channel_configs["GPIO1"].control_channel == 4

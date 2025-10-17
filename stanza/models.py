@@ -56,6 +56,7 @@ class PadType(str, Enum):
 
     GATE = "GATE"
     CONTACT = "CONTACT"
+    GPIO = "GPIO"
     ALL = "ALL"
 
     def __str__(self) -> str:
@@ -74,6 +75,11 @@ class ContactType(str, Enum):
     DRAIN = "DRAIN"
 
 
+class GPIOType(str, Enum):
+    INPUT = "INPUT"
+    OUTPUT = "OUTPUT"
+
+
 class InstrumentType(str, Enum):
     CONTROL = "CONTROL"
     MEASUREMENT = "MEASUREMENT"
@@ -81,11 +87,21 @@ class InstrumentType(str, Enum):
 
 
 class Gate(Electrode):
+    """Gate pads for inductive channels on the device"""
+
     type: GateType
 
 
 class Contact(Electrode):
+    """Contact pads for conductive channels on the device"""
+
     type: ContactType
+
+
+class GPIO(Electrode):
+    """General Purpose Input/Output pins for digital signals"""
+
+    type: GPIOType
 
 
 class RoutineConfig(BaseModelWithConfig):
@@ -185,11 +201,14 @@ InstrumentConfig = Annotated[
 
 
 class DeviceConfig(BaseModel):
+    """Configuration for a quantum device (Device Under Test)."""
+
     model_config = ConfigDict(extra="forbid", validate_assignment=True)
 
     name: str
     gates: dict[str, Gate] = {}
     contacts: dict[str, Contact] = {}
+    gpios: dict[str, GPIO] = {}
     routines: list[RoutineConfig]
     instruments: list[InstrumentConfig]
 
@@ -206,6 +225,7 @@ class DeviceConfig(BaseModel):
                 f"contact '{name}'": electrode
                 for name, electrode in self.contacts.items()
             },
+            **{f"gpio '{name}'": electrode for name, electrode in self.gpios.items()},
         }
 
         # Track which electrodes use each channel

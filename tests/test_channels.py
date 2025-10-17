@@ -7,7 +7,7 @@ from stanza.base.channels import (
     Parameter,
     Validators,
 )
-from stanza.models import ContactType, GateType, PadType
+from stanza.models import ContactType, GateType, GPIOType, PadType
 
 
 @pytest.fixture
@@ -73,6 +73,20 @@ class TestChannelConfig:
         assert config.output_mode == "ac"
         assert config.enabled is False
         assert config.unit == "mV"
+
+    def test_gpio_initialization(self):
+        config = ChannelConfig(
+            name="gpio1",
+            voltage_range=(0.0, 3.3),
+            pad_type=PadType.GPIO,
+            electrode_type=GPIOType.OUTPUT,
+            control_channel=4,
+            output_mode="digital",
+        )
+        assert config.name == "gpio1"
+        assert config.pad_type == PadType.GPIO
+        assert config.electrode_type == GPIOType.OUTPUT
+        assert config.output_mode == "digital"
 
 
 class TestParameter:

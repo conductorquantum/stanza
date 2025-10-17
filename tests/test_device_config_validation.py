@@ -1,6 +1,7 @@
 import pytest
 
 from stanza.models import (
+    GPIO,
     Contact,
     ContactType,
     ControlInstrumentConfig,
@@ -8,6 +9,7 @@ from stanza.models import (
     Electrode,
     Gate,
     GateType,
+    GPIOType,
     InstrumentType,
     MeasurementInstrumentConfig,
     RoutineConfig,
@@ -107,6 +109,32 @@ def test_device_config_unique_channels():
             instruments=[control_instrument, measurement_instrument],
         )
 
+    gpio1 = GPIO(
+        type=GPIOType.OUTPUT,
+        control_channel=2,
+        v_lower_bound=0.0,
+        v_upper_bound=3.3,
+    )
+    gpio2 = GPIO(
+        type=GPIOType.INPUT,
+        control_channel=2,
+        v_lower_bound=0.0,
+        v_upper_bound=3.3,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="Duplicate channels found: gpio 'gpio1' control_channel 2, gpio 'gpio2' control_channel 2",
+    ):
+        DeviceConfig(
+            name="test_device",
+            gates={},
+            contacts={},
+            gpios={"gpio1": gpio1, "gpio2": gpio2},
+            routines=[RoutineConfig(name="test_exp")],
+            instruments=[control_instrument, measurement_instrument],
+        )
+
 
 def test_device_config_required_instruments():
     gate = Gate(
@@ -167,6 +195,12 @@ def test_valid_device_config():
         v_lower_bound=0.0,
         v_upper_bound=1.0,
     )
+    gpio = GPIO(
+        type=GPIOType.OUTPUT,
+        control_channel=3,
+        v_lower_bound=0.0,
+        v_upper_bound=3.3,
+    )
 
     control_instrument = ControlInstrumentConfig(
         name="control",
@@ -186,6 +220,7 @@ def test_valid_device_config():
         name="test_device",
         gates={"gate1": gate},
         contacts={"contact1": contact},
+        gpios={"gpio1": gpio},
         routines=[RoutineConfig(name="test_exp")],
         instruments=[control_instrument, measurement_instrument],
     )
@@ -193,6 +228,7 @@ def test_valid_device_config():
     assert device.name == "test_device"
     assert len(device.gates) == 1
     assert len(device.contacts) == 1
+    assert len(device.gpios) == 1
     assert len(device.instruments) == 2
 
 
