@@ -50,6 +50,10 @@ contacts:
   SOURCE: {type: SOURCE, control_channel: 3, measure_channel: 1, v_lower_bound: -3.0, v_upper_bound: 3.0}
   DRAIN: {type: DRAIN, control_channel: 4, measure_channel: 2, v_lower_bound: -3.0, v_upper_bound: 3.0}
 
+gpios:
+  VSS: {type: INPUT, control_channel: 5, v_lower_bound: 0, v_upper_bound: 5}
+  VDD: {type: INPUT, control_channel: 6, v_lower_bound: -5, v_upper_bound: 0}
+
 routines:
   - name: sweep_barrier
     parameters:
@@ -147,6 +151,9 @@ Stanza devices support common operations:
 ```python
 # Jump to voltages
 device.jump({"G1": -1.5, "G2": -0.8})
+
+# Set VSS and VDD for GPIO pins
+device.jump({"VSS": 1.5, "VDD": -1.5})
 
 # Zero specific pads or all pads
 device.zero(["G1", "G2"])  # Zero specific pads
