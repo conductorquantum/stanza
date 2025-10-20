@@ -90,6 +90,21 @@ def sweep_barrier(ctx, gate, v_start, v_stop, n_points, contact):
 
 ### Run It
 
+First, initialize a session directory for your experiment data:
+
+```bash
+# Initialize a new timestamped session directory
+stanza init
+
+# Or with a custom name
+stanza init --name my_experiment
+
+# Check current session
+stanza status
+```
+
+Then run your routines - all data will be logged to the active session directory:
+
 ```python
 from stanza.routines import RoutineRunner
 from stanza.models import DeviceConfig
@@ -109,6 +124,8 @@ print(result["currents"])
 ```
 
 ## Core Features
+
+**CLI Session Management**: Initialize timestamped experiment directories with `stanza init` to organize your data.
 
 **Device Abstraction**: Define quantum devices with gates, contacts, and instruments in YAML. Access them uniformly in code.
 

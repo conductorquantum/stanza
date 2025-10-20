@@ -31,6 +31,7 @@ classifiers = [
 ]
 keywords = ["stanza"]
 dependencies = [
+    "click>=8.0.0",
     "pydantic>=2.11.7",
     "pyyaml>=6.0.2",
     "numpy>=1.24.0",
@@ -69,6 +70,9 @@ qm = [
     "pyvisa-py>=0.7.1",
     "qm-qua>=1.2.0"
 ]
+
+[project.scripts]
+stanza = "stanza.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/conductorquantum/stanza"
