@@ -214,7 +214,7 @@ class DeviceConfig(BaseModel):
 
     @model_validator(mode="after")
     def validate_unique_channels(self) -> "DeviceConfig":
-        """Ensure that all channels are unique across gates and contacts"""
+        """Ensure that all channels are unique across gates, contacts, and gpios"""
         control_channel_users: dict[int, list[str]] = {}
         measure_channel_users: dict[int, list[str]] = {}
         duplicates = []

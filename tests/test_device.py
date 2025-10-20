@@ -2,7 +2,7 @@ import pytest
 
 from stanza.device import Device
 from stanza.exceptions import DeviceError
-from stanza.models import Contact, ContactType, Gate, GateType, PadType
+from stanza.models import GPIO, Contact, ContactType, Gate, GateType, GPIOType, PadType
 from stanza.utils import generate_channel_configs
 
 
@@ -259,3 +259,114 @@ class TestDevice:
         device.control_instrument.get_voltage = lambda _: 0.5
         with pytest.raises(DeviceError, match="Failed to set all controllable"):
             device.zero()
+
+    def test_gpios_property(
+        self, device_config, control_instrument, measurement_instrument
+    ):
+        """Test the gpios property returns list of all GPIO pad names."""
+        device_config.gpios = {
+            "gpio1": GPIO(
+                name="gpio1",
+                type=GPIOType.OUTPUT,
+                v_lower_bound=0.0,
+                v_upper_bound=3.3,
+                control_channel=5,
+            )
+        }
+        channel_configs = generate_channel_configs(device_config)
+        device = Device(
+            "test",
+            device_config,
+            channel_configs,
+            control_instrument,
+            measurement_instrument,
+        )
+        gpios = device.gpios
+        assert isinstance(gpios, list)
+        assert "gpio1" in gpios
+
+    def test_control_gpios_property(
+        self, device_config, control_instrument, measurement_instrument
+    ):
+        """Test the control_gpios property returns list of GPIO pads with control channels."""
+        device_config.gpios = {
+            "gpio1": GPIO(
+                name="gpio1",
+                type=GPIOType.OUTPUT,
+                v_lower_bound=0.0,
+                v_upper_bound=3.3,
+                control_channel=5,
+            )
+        }
+        channel_configs = generate_channel_configs(device_config)
+        device = Device(
+            "test",
+            device_config,
+            channel_configs,
+            control_instrument,
+            measurement_instrument,
+        )
+        control_gpios = device.control_gpios
+        assert isinstance(control_gpios, list)
+        assert "gpio1" in control_gpios
+
+    def test_zero_gpio_type(
+        self, device_config, control_instrument, measurement_instrument
+    ):
+        """Test zeroing GPIO pads specifically using PadType.GPIO."""
+        device_config.gpios = {
+            "gpio1": GPIO(
+                name="gpio1",
+                type=GPIOType.OUTPUT,
+                v_lower_bound=0.0,
+                v_upper_bound=3.3,
+                control_channel=5,
+            )
+        }
+        channel_configs = generate_channel_configs(device_config)
+        device = Device(
+            "test",
+            device_config,
+            channel_configs,
+            control_instrument,
+            measurement_instrument,
+        )
+
+        device.jump({"gpio1": 3.3})
+        assert device.check("gpio1") == 3.3
+
+        device.zero("gpio")
+        assert device.check("gpio1") == 0.0
+
+    def test_zero_all_includes_gpios(
+        self, device_config, control_instrument, measurement_instrument
+    ):
+        """Test zeroing all pads includes GPIO pads when using PadType.ALL."""
+        device_config.gpios = {
+            "gpio1": GPIO(
+                name="gpio1",
+                type=GPIOType.OUTPUT,
+                v_lower_bound=0.0,
+                v_upper_bound=3.3,
+                control_channel=5,
+            )
+        }
+        device_config.contacts["contact2"] = Contact(
+            name="contact2",
+            type=ContactType.DRAIN,
+            v_lower_bound=-1.0,
+            v_upper_bound=1.0,
+            control_channel=4,
+        )
+        channel_configs = generate_channel_configs(device_config)
+        device = Device(
+            "test",
+            device_config,
+            channel_configs,
+            control_instrument,
+            measurement_instrument,
+        )
+
+        device.jump({"gate1": 1.5, "contact2": 0.5, "gpio1": 3.3})
+        device.zero(PadType.ALL)
+        assert device.check(["gate1", "contact2", "gpio1"]) == [0.0, 0.0, 0.0]

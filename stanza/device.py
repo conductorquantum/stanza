@@ -78,6 +78,15 @@ class Device:
         ]
 
     @property
+    def gpios(self) -> list[str]:
+        """List of all gpio pad names in the device."""
+        return [
+            channel.name
+            for channel in self.channel_configs.values()
+            if channel.pad_type == PadType.GPIO
+        ]
+
+    @property
     def control_gates(self) -> list[str]:
         """List of gate pads that have a control channel configured."""
         return [
@@ -94,6 +103,15 @@ class Device:
             for channel in self.channel_configs.values()
             if channel.pad_type == PadType.CONTACT
             and channel.control_channel is not None
+        ]
+
+    @property
+    def control_gpios(self) -> list[str]:
+        """List of gpio pads that have a control channel configured."""
+        return [
+            channel.name
+            for channel in self.channel_configs.values()
+            if channel.pad_type == PadType.GPIO and channel.control_channel is not None
         ]
 
     @property
@@ -539,9 +557,10 @@ class Device:
 
         Args:
             type: Specifies which pads to zero. Options are:
-                - PadType.ALL or "ALL": Zero all control gates and contacts (default)
+                - PadType.ALL or "ALL": Zero all control gates, contacts, and gpios (default)
                 - PadType.GATE or "GATE": Zero only control gates
                 - PadType.CONTACT or "CONTACT": Zero only control contacts
+                - PadType.GPIO or "GPIO": Zero only control gpios
                 Can be provided as PadType enum or case-insensitive string.
 
         Raises:
@@ -550,11 +569,13 @@ class Device:
         """
         pads: list[str] = []
         if str(type).upper() == PadType.ALL:
-            pads = self.control_gates + self.control_contacts
+            pads = self.control_gates + self.control_contacts + self.control_gpios
         elif str(type).upper() == PadType.GATE:
             pads = self.control_gates
         elif str(type).upper() == PadType.CONTACT:
             pads = self.control_contacts
+        elif str(type).upper() == PadType.GPIO:
+            pads = self.control_gpios
         else:
             raise DeviceError(f"Invalid pad type: {type}")
 
