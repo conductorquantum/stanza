@@ -6,11 +6,12 @@ from pathlib import Path
 
 import click
 
+from stanza import __version__
 from stanza.context import StanzaSession
 
 
 @click.group()
-@click.version_option()
+@click.version_option(version=__version__, message="%(version)s (Stanza)")
 def cli() -> None:
     """Stanza - Build tune up sequences for quantum computers fast.
 
@@ -53,10 +54,8 @@ def init(path: Path | None, name: str) -> None:
             name=name,
         )
 
-        # Set as active session
         StanzaSession.set_active_session(session_dir)
 
-        # Success message
         click.echo(f"✓ Created session directory: {session_dir}")
         click.echo(f"  Active session set to: {session_dir.name}")
         click.echo()
@@ -82,7 +81,6 @@ def status() -> None:
         click.echo("Initialize a session with: stanza init")
         return
 
-    # Get metadata
     metadata = StanzaSession.get_session_metadata(active_session)
 
     click.echo(f"Active session: {active_session.name}")

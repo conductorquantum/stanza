@@ -717,21 +717,25 @@ class TestRoutineRunnerLoggerIntegration:
 
         with patch("stanza.routines.core.device_from_config", return_value=mock_device):
             with patch("stanza.routines.core.DataLogger") as mock_logger_class:
-                mock_logger = Mock()
-                mock_logger.name = "logger"
-                mock_logger_class.return_value = mock_logger
+                with patch(
+                    "stanza.routines.core.StanzaSession.get_active_session",
+                    return_value=None,
+                ):
+                    mock_logger = Mock()
+                    mock_logger.name = "logger"
+                    mock_logger_class.return_value = mock_logger
 
-                runner = RoutineRunner(configs=[device_config])
+                    runner = RoutineRunner(configs=[device_config])
 
-                assert "device" in runner.resources.list_resources()
-                assert "logger" in runner.resources.list_resources()
-                assert len(runner._device_configs) == 1
-                assert runner.configs["routine1"]["param1"] == "value1"
-                assert runner.configs["routine2"]["param2"] == "value2"
+                    assert "device" in runner.resources.list_resources()
+                    assert "logger" in runner.resources.list_resources()
+                    assert len(runner._device_configs) == 1
+                    assert runner.configs["routine1"]["param1"] == "value1"
+                    assert runner.configs["routine2"]["param2"] == "value2"
 
-                mock_logger_class.assert_called_once_with(
-                    name="logger", routine_name="device", base_dir="./data"
-                )
+                    mock_logger_class.assert_called_once_with(
+                        name="logger", routine_name="device", base_dir="./data"
+                    )
 
 
 class TestParentParameterInheritance:

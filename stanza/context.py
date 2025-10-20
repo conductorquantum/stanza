@@ -59,20 +59,16 @@ class StanzaSession:
         else:
             base_path = Path(base_path)
 
-        # Create timestamp: YYYYMMDDHHmmss
         timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
 
-        # Create directory name
         suffix = name if name else "data"
         dir_name = f"{timestamp}_{suffix}"
         session_dir = base_path / dir_name
 
-        # Create directory structure
         session_dir.mkdir(parents=True, exist_ok=False)
         config_dir = session_dir / StanzaSession.CONFIG_DIR
         config_dir.mkdir(exist_ok=True)
 
-        # Store metadata
         metadata = {
             "created_at": time.time(),
             "timestamp": timestamp,
@@ -133,7 +129,6 @@ class StanzaSession:
         config_dir = Path.cwd() / StanzaSession.CONFIG_DIR
         config_dir.mkdir(exist_ok=True)
 
-        # Store active session reference
         config_file = config_dir / "active_session.json"
         data = {
             "session_directory": str(session_dir.resolve()),

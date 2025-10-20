@@ -28,7 +28,8 @@ class TestCLI:
         result = runner.invoke(cli, ["--version"])
 
         assert result.exit_code == 0
-        assert "version" in result.output.lower() or "0.1" in result.output
+        assert "(Stanza)" in result.output
+        assert "0.1" in result.output
 
 
 class TestInitCommand:
