@@ -212,6 +212,7 @@ def global_accumulation(
     step_size: float,
     bias_gate: str,
     bias_voltage: float,
+    charge_carrier_type: str = "electron",
     session: LoggerSession | None = None,
     **kwargs: Any,
 ) -> dict[str, float]:
@@ -233,6 +234,7 @@ def global_accumulation(
         measure_electrode: Name of the electrode to measure current from during the sweep.
         step_size: Voltage increment (V) between sweep points. Smaller values provide
                   higher resolution but increase measurement time.
+        charge_carrier_type: The mobile charge particle type. Must be "electron" or "hole". Default is "electron".
         session: Optional logger session for recording sweep measurements and analysis results.
 
     Returns:
@@ -246,15 +248,19 @@ def global_accumulation(
         - step_size is converted to num_points based on voltage range
     """
     leakage_test_results = ctx.results.get("leakage_test", {})
-    max_voltage_bound = leakage_test_results["max_safe_voltage_bound"]
+    voltage_bound = leakage_test_results[
+        "max_safe_voltage_bound"
+        if charge_carrier_type.lower() == "electron"
+        else "min_safe_voltage_bound"
+    ]
 
     if step_size <= 0:
         raise RoutineError("Step size must be greater than 0")
 
     ctx.resources.device.jump({bias_gate: bias_voltage}, wait_for_settling=True)
 
-    num_points = max(2, int(max_voltage_bound / step_size))
-    sweep_voltages = np.linspace(0, max_voltage_bound, num_points)
+    num_points = max(2, int(voltage_bound / step_size))
+    sweep_voltages = np.linspace(0, voltage_bound, num_points)
     _, currents = ctx.resources.device.sweep_all(
         voltages=sweep_voltages,
         measure_electrode=measure_electrode,
@@ -292,6 +298,7 @@ def reservoir_characterization(
     step_size: float,
     bias_gate: str,
     bias_voltage: float,
+    charge_carrier_type: str = "electron",
     session: LoggerSession | None = None,
     **kwargs: Any,
 ) -> dict[str, dict[str, Any]]:
@@ -311,6 +318,7 @@ def reservoir_characterization(
         measure_electrode: Name of the electrode to measure current from during sweeps.
         step_size: Voltage increment (V) between sweep points. Smaller values provide
                   higher resolution but increase measurement time.
+        charge_carrier_type: The mobile charge particle type. Must be "electron" or "hole". Default is "electron".
         session: Optional logger session for recording sweep measurements and analysis results.
 
     Returns:
@@ -333,9 +341,24 @@ def reservoir_characterization(
     leakage_test_results = ctx.results.get("leakage_test", {})
     global_accumulation_results = ctx.results.get("global_accumulation", {})
 
-    max_voltage_bound = leakage_test_results["max_safe_voltage_bound"]
-    global_turn_on_voltage = min(
-        1.2 * global_accumulation_results["global_turn_on_voltage"], max_voltage_bound
+    voltage_left_bound = (
+        0.1
+        * leakage_test_results[
+            "min_safe_voltage_bound"
+            if charge_carrier_type.lower() == "electron"
+            else "max_safe_voltage_bound"
+        ]
+    )
+    voltage_right_bound = leakage_test_results[
+        "max_safe_voltage_bound"
+        if charge_carrier_type.lower() == "electron"
+        else "min_safe_voltage_bound"
+    ]
+    voltage_cut_off = 1.2 * global_accumulation_results["global_turn_on_voltage"]
+    global_turn_on_voltage = (
+        min(voltage_cut_off, voltage_left_bound)
+        if charge_carrier_type.lower() == "electron"
+        else max(voltage_cut_off, voltage_left_bound)
     )
 
     reservoir_characterization_results = {}
@@ -351,10 +374,10 @@ def reservoir_characterization(
         ctx.resources.device.jump({reservoir: 0.0}, wait_for_settling=True)
         time.sleep(DEFAULT_SETTLING_TIME_S)
 
-        num_points = max(2, int(max_voltage_bound / step_size))
+        num_points = max(2, int(abs(voltage_right_bound / step_size)))
         voltages, currents = ctx.resources.device.sweep_1d(
             reservoir,
-            np.linspace(0, max_voltage_bound, num_points),
+            np.linspace(voltage_left_bound, voltage_right_bound, num_points),
             measure_electrode,
             session,
         )
@@ -385,6 +408,7 @@ def finger_gate_characterization(
     step_size: float,
     bias_gate: str,
     bias_voltage: float,
+    charge_carrier_type: str = "electron",
     session: LoggerSession | None = None,
     **kwargs: Any,
 ) -> dict[str, dict[str, Any]]:
@@ -404,6 +428,7 @@ def finger_gate_characterization(
         measure_electrode: Name of the electrode to measure current from during sweeps.
         step_size: Voltage increment (V) between sweep points. Smaller values provide
                   higher resolution but increase measurement time.
+        charge_carrier_type: The mobile charge particle type. Must be "electron" or "hole". Default is "electron".
         session: Optional logger session for recording sweep measurements and analysis results.
 
     Returns:
@@ -425,10 +450,24 @@ def finger_gate_characterization(
 
     leakage_test_results = ctx.results.get("leakage_test", {})
     global_accumulation_results = ctx.results.get("global_accumulation", {})
-
-    max_voltage_bound = leakage_test_results["max_safe_voltage_bound"]
-    global_turn_on_voltage = min(
-        1.2 * global_accumulation_results["global_turn_on_voltage"], max_voltage_bound
+    voltage_left_bound = (
+        0.1
+        * leakage_test_results[
+            "min_safe_voltage_bound"
+            if charge_carrier_type.lower() == "electron"
+            else "max_safe_voltage_bound"
+        ]
+    )
+    voltage_right_bound = leakage_test_results[
+        "max_safe_voltage_bound"
+        if charge_carrier_type.lower() == "electron"
+        else "min_safe_voltage_bound"
+    ]
+    voltage_cut_off = 1.2 * global_accumulation_results["global_turn_on_voltage"]
+    global_turn_on_voltage = (
+        min(voltage_cut_off, voltage_left_bound)
+        if charge_carrier_type.lower() == "electron"
+        else max(voltage_cut_off, voltage_left_bound)
     )
 
     finger_gate_characterization_results = {}
@@ -444,10 +483,10 @@ def finger_gate_characterization(
         )
         ctx.resources.device.jump({gate: 0.0}, wait_for_settling=True)
         time.sleep(DEFAULT_SETTLING_TIME_S)
-        num_points = max(2, int(max_voltage_bound / step_size))
+        num_points = max(2, int(abs(voltage_right_bound / step_size)))
         voltages, currents = ctx.resources.device.sweep_1d(
             gate,
-            np.linspace(0, max_voltage_bound, num_points),
+            np.linspace(voltage_left_bound, voltage_right_bound, num_points),
             measure_electrode,
             session,
         )
