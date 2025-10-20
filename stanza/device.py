@@ -557,7 +557,7 @@ class Device:
 
         Args:
             type: Specifies which pads to zero. Options are:
-                - PadType.ALL or "ALL": Zero all control gates and contacts (default)
+                - PadType.ALL or "ALL": Zero all control gates, contacts, and gpios (default)
                 - PadType.GATE or "GATE": Zero only control gates
                 - PadType.CONTACT or "CONTACT": Zero only control contacts
                 - PadType.GPIO or "GPIO": Zero only control gpios
