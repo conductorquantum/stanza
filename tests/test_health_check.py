@@ -26,6 +26,7 @@ class MockDevice:
     def __init__(self):
         self.name = "device"
         self.control_gates = ["G1", "G2", "G3"]
+        self.control_contacts = []
         self.voltages = dict.fromkeys(self.control_gates, 0.0)
         self.currents = dict.fromkeys(self.control_gates, 1e-11)
         self.channel_configs = {

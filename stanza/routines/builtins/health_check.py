@@ -16,7 +16,7 @@ from stanza.analysis.criterion import fit_quality_criterion
 from stanza.analysis.fitting import fit_pinchoff_parameters
 from stanza.exceptions import RoutineError
 from stanza.logger.session import LoggerSession
-from stanza.models import GateType, PadType
+from stanza.models import GateType
 from stanza.routines import RoutineContext, routine
 
 logger = logging.getLogger(__name__)
@@ -56,7 +56,12 @@ def noise_floor_measurement(
         - The current_std value is commonly used in leakage_test as min_current_threshold
     """
     currents = []
-    ctx.resources.device.zero(PadType.ALL)
+    ctx.resources.device.jump(
+        dict.fromkeys(
+            ctx.resources.device.control_gates + ctx.resources.device.control_contacts,
+            0.0,
+        )
+    )
     for _ in range(num_points):
         current = ctx.resources.device.measure(measure_electrode)
         currents.append(current)
