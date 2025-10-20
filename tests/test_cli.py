@@ -1,5 +1,6 @@
 """Tests for Stanza CLI (stanza/cli.py)."""
 
+import json
 from pathlib import Path
 
 from click.testing import CliRunner
@@ -52,6 +53,10 @@ class TestInitCommand:
             assert sessions[0].exists()
             assert (sessions[0] / ".stanza" / "config.json").exists()
 
+            notebooks = list(sessions[0].glob("*_data.ipynb"))
+            assert len(notebooks) == 1
+            assert notebooks[0].exists()
+
     def test_init_creates_session_with_custom_name(self):
         """Test that init command accepts custom name parameter."""
         runner = CliRunner()
@@ -65,6 +70,10 @@ class TestInitCommand:
             sessions = list(Path.cwd().glob("*_my_experiment"))
             assert len(sessions) == 1
             assert sessions[0].exists()
+
+            notebooks = list(sessions[0].glob("*_my_experiment.ipynb"))
+            assert len(notebooks) == 1
+            assert notebooks[0].exists()
 
     def test_init_creates_session_with_custom_path(self):
         """Test that init command accepts custom path parameter."""
@@ -119,6 +128,39 @@ class TestInitCommand:
             exp2_sessions = list(Path.cwd().glob("*_exp2"))
             assert len(exp1_sessions) == 1
             assert len(exp2_sessions) == 1
+
+    def test_init_creates_valid_jupyter_notebook(self):
+        """Test that init creates a valid Jupyter notebook with proper structure."""
+        runner = CliRunner()
+
+        with runner.isolated_filesystem():
+            result = runner.invoke(cli, ["init", "--name", "test_notebook"])
+            assert result.exit_code == 0
+
+            sessions = list(Path.cwd().glob("*_test_notebook"))
+            assert len(sessions) == 1
+
+            notebooks = list(sessions[0].glob("*_test_notebook.ipynb"))
+            assert len(notebooks) == 1
+
+            with open(notebooks[0]) as f:
+                notebook_data = json.load(f)
+
+            assert "cells" in notebook_data
+            assert "metadata" in notebook_data
+            assert "nbformat" in notebook_data
+            assert notebook_data["nbformat"] == 4
+
+            cells = notebook_data["cells"]
+            assert len(cells) >= 2
+
+            assert cells[0]["cell_type"] == "markdown"
+            assert "Test Notebook" in "".join(cells[0]["source"])
+
+            assert cells[1]["cell_type"] == "code"
+            source = "".join(cells[1]["source"])
+            assert "from stanza.routines import RoutineRunner" in source
+            assert "from stanza.utils import load_device_config" in source
 
 
 class TestStatusCommand:

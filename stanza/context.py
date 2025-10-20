@@ -80,6 +80,53 @@ class StanzaSession:
         with open(config_file, "w") as f:
             json.dump(metadata, f, indent=2)
 
+        notebook_name = f"{timestamp}_{suffix}.ipynb"
+        notebook_path = session_dir / notebook_name
+        created_at_timestamp: float = metadata["created_at"]  # type: ignore[assignment]
+        notebook_content = {
+            "cells": [
+                {
+                    "cell_type": "markdown",
+                    "metadata": {},
+                    "source": [
+                        f"# {' '.join(word.capitalize() for word in suffix.split('_'))}\n",
+                        "\n",
+                        f"Session created: {datetime.fromtimestamp(created_at_timestamp).strftime('%Y-%m-%d %H:%M:%S')}\n",
+                    ],
+                },
+                {
+                    "cell_type": "code",
+                    "execution_count": None,
+                    "metadata": {},
+                    "outputs": [],
+                    "source": [
+                        "from stanza.utils import load_device_config\n",
+                        "from stanza.routines import RoutineRunner\n",
+                    ],
+                },
+            ],
+            "metadata": {
+                "kernelspec": {
+                    "display_name": "Python 3",
+                    "language": "python",
+                    "name": "python3",
+                },
+                "language_info": {
+                    "codemirror_mode": {"name": "ipython", "version": 3},
+                    "file_extension": ".py",
+                    "mimetype": "text/x-python",
+                    "name": "python",
+                    "nbconvert_exporter": "python",
+                    "pygments_lexer": "ipython3",
+                },
+            },
+            "nbformat": 4,
+            "nbformat_minor": 4,
+        }
+
+        with open(notebook_path, "w") as f:
+            json.dump(notebook_content, f, indent=1)
+
         return session_dir
 
     @staticmethod

@@ -103,6 +103,21 @@ stanza init --name my_experiment
 stanza status
 ```
 
+This creates a directory structure like:
+
+```
+your-project/
+├── .stanza/
+│   └── active_session.json              # Tracks the active session
+├── 20251020143022_data/                 # Timestamped session directory
+│   ├── 20251020143022_data.ipynb        # Jupyter notebook for the session
+│   └── .stanza/
+│       └── config.json                  # Session metadata
+└── device.yaml                          # Your device config
+```
+
+The Jupyter notebook is pre-configured with Stanza imports and ready for running your routines.
+
 Then run your routines - all data will be logged to the active session directory:
 
 ```python
