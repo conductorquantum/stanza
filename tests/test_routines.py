@@ -495,7 +495,7 @@ class TestRoutineRunner:
 
         assert extracted_configs["health_check"] == {
             "parent_param": "value",
-            "type": "holes",
+            "charge_carrier_type": "holes",
         }
         assert extracted_configs["leakage_test"] == {
             "leakage_threshold_resistance": 50000000,
@@ -751,12 +751,12 @@ class TestParentParameterInheritance:
         def leakage_test(
             ctx,
             parent_param,
-            type,
+            charge_carrier_type,
             leakage_threshold_resistance,
             leakage_threshold_count,
         ):
             received_params["parent_param"] = parent_param
-            received_params["type"] = type
+            received_params["charge_carrier_type"] = charge_carrier_type
             received_params["leakage_threshold_resistance"] = (
                 leakage_threshold_resistance
             )
@@ -773,7 +773,7 @@ class TestParentParameterInheritance:
         results = runner.run_all(parent_routine="health_check")
 
         assert received_params["parent_param"] == "value"
-        assert received_params["type"] == "holes"
+        assert received_params["charge_carrier_type"] == "holes"
         assert received_params["leakage_threshold_resistance"] == 50000000.0
         assert received_params["leakage_threshold_count"] == 0
         assert results["leakage_test"] == "leakage_result"
@@ -812,7 +812,9 @@ class TestParentParameterInheritance:
 
         @routine
         def leakage_test(ctx, **params):
-            received_leakage_params["type"] = params["type"]
+            received_leakage_params["charge_carrier_type"] = params[
+                "charge_carrier_type"
+            ]
             received_leakage_params["leakage_threshold_resistance"] = params[
                 "leakage_threshold_resistance"
             ]
@@ -820,7 +822,9 @@ class TestParentParameterInheritance:
 
         @routine
         def global_accumulation(ctx, **params):
-            received_accumulation_params["type"] = params["type"]
+            received_accumulation_params["charge_carrier_type"] = params[
+                "charge_carrier_type"
+            ]
             received_accumulation_params["step_size"] = params["step_size"]
             return "accumulation_result"
 
@@ -833,8 +837,8 @@ class TestParentParameterInheritance:
 
         runner.run_all(parent_routine="health_check")
 
-        assert received_leakage_params["type"] == "holes"
-        assert received_accumulation_params["type"] == "holes"
+        assert received_leakage_params["charge_carrier_type"] == "holes"
+        assert received_accumulation_params["charge_carrier_type"] == "holes"
         assert received_leakage_params["leakage_threshold_resistance"] == 50000000.0
         assert received_accumulation_params["step_size"] == 0.01
 
@@ -866,3 +870,30 @@ class TestParentParameterInheritance:
 
         assert received_level2_params["level"] == 2
         assert received_level3_params["level"] == 3
+
+    def test_direct_run_inherits_parent_params(
+        self, registry_fixture, nested_routines_yaml
+    ):
+        """Test that direct routine run inherits parent parameters."""
+        received_params = {}
+
+        @routine
+        def global_accumulation(ctx, **params):
+            received_params.update(params)
+            return "accumulation_result"
+
+        device_config = DeviceConfig.model_validate(
+            yaml.safe_load(nested_routines_yaml)
+        )
+        runner = RoutineRunner(resources=[MockResource("device")])
+        runner.configs = runner._extract_routine_configs([device_config])
+        runner._device_configs = [device_config]
+
+        for routine_config in device_config.routines:
+            runner._extract_from_routine_config(routine_config, runner.configs)
+
+        runner.run("global_accumulation")
+
+        assert "charge_carrier_type" in received_params
+        assert received_params["charge_carrier_type"] == "holes"
+        assert received_params["step_size"] == 0.01

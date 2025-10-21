@@ -248,7 +248,7 @@ routines:
   - name: health_check
     parameters:
       parent_param: value
-      type: holes
+      charge_carrier_type: holes
     routines:
       - name: leakage_test
         parameters:
