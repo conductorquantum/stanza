@@ -180,7 +180,8 @@ def leakage_test(
         control_gate_configs.values(), key=lambda x: x.voltage_range[0]
     ).voltage_range[0]
 
-    min_current_threshold = ctx.results.get("current_std", 1e-10)
+    noise_floor_measurement_results = ctx.results.get("noise_floor_measurement", {})
+    min_current_threshold = noise_floor_measurement_results.get("current_std", 1e-10)
     leakage_test_results = {}
 
     try:
@@ -386,6 +387,7 @@ def reservoir_characterization(
         - Pinch-off analysis may raise ValueError if curve fit fails
         - Sweep direction depends on carrier type: electrons sweep toward positive, holes toward negative
     """
+    charge_carrier_type = charge_carrier_type.lower()
     if charge_carrier_type not in ["electron", "hole"]:
         raise RoutineError(
             "Charge carrier type is required for reservoir characterization"
@@ -399,24 +401,25 @@ def reservoir_characterization(
     leakage_test_results = ctx.results.get("leakage_test", {})
     global_accumulation_results = ctx.results.get("global_accumulation", {})
 
+    max_safe_voltage_bound = leakage_test_results["max_safe_voltage_bound"]
+    min_safe_voltage_bound = leakage_test_results["min_safe_voltage_bound"]
+
     voltage_left_bound = (
-        0.1
-        * leakage_test_results[
-            "min_safe_voltage_bound"
-            if charge_carrier_type.lower() == "electron"
-            else "max_safe_voltage_bound"
-        ]
+        0.1 * min_safe_voltage_bound
+        if charge_carrier_type == "electron"
+        else max_safe_voltage_bound
     )
-    voltage_right_bound = leakage_test_results[
-        "max_safe_voltage_bound"
-        if charge_carrier_type.lower() == "electron"
-        else "min_safe_voltage_bound"
-    ]
+    voltage_right_bound = (
+        max_safe_voltage_bound
+        if charge_carrier_type == "electron"
+        else min_safe_voltage_bound
+    )
     voltage_cut_off = 1.2 * global_accumulation_results["global_turn_on_voltage"]
+
     global_turn_on_voltage = (
-        min(voltage_cut_off, voltage_left_bound)
-        if charge_carrier_type.lower() == "electron"
-        else max(voltage_cut_off, voltage_left_bound)
+        min(voltage_cut_off, max_safe_voltage_bound)
+        if charge_carrier_type == "electron"
+        else max(voltage_cut_off, min_safe_voltage_bound)
     )
 
     reservoir_characterization_results = {}
@@ -429,7 +432,9 @@ def reservoir_characterization(
             wait_for_settling=True,
         )
         time.sleep(DEFAULT_SETTLING_TIME_S)
-        ctx.resources.device.jump({reservoir: 0.0}, wait_for_settling=True)
+        ctx.resources.device.jump(
+            {reservoir: voltage_left_bound}, wait_for_settling=True
+        )
         time.sleep(DEFAULT_SETTLING_TIME_S)
 
         num_points = max(2, int(abs(voltage_right_bound / step_size)))
@@ -507,6 +512,7 @@ def finger_gate_characterization(
         - Pinch-off analysis may raise ValueError if curve fit fails
         - Sweep direction depends on carrier type: electrons sweep toward positive, holes toward negative
     """
+    charge_carrier_type = charge_carrier_type.lower()
     if charge_carrier_type not in ["electron", "hole"]:
         raise RoutineError(
             "Charge carrier type is required for finger gate characterization"
@@ -519,24 +525,26 @@ def finger_gate_characterization(
 
     leakage_test_results = ctx.results.get("leakage_test", {})
     global_accumulation_results = ctx.results.get("global_accumulation", {})
+
+    max_safe_voltage_bound = leakage_test_results["max_safe_voltage_bound"]
+    min_safe_voltage_bound = leakage_test_results["min_safe_voltage_bound"]
+
     voltage_left_bound = (
-        0.1
-        * leakage_test_results[
-            "min_safe_voltage_bound"
-            if charge_carrier_type.lower() == "electron"
-            else "max_safe_voltage_bound"
-        ]
+        0.1 * min_safe_voltage_bound
+        if charge_carrier_type == "electron"
+        else max_safe_voltage_bound
     )
-    voltage_right_bound = leakage_test_results[
-        "max_safe_voltage_bound"
-        if charge_carrier_type.lower() == "electron"
-        else "min_safe_voltage_bound"
-    ]
+    voltage_right_bound = (
+        max_safe_voltage_bound
+        if charge_carrier_type == "electron"
+        else min_safe_voltage_bound
+    )
     voltage_cut_off = 1.2 * global_accumulation_results["global_turn_on_voltage"]
+
     global_turn_on_voltage = (
-        min(voltage_cut_off, voltage_left_bound)
-        if charge_carrier_type.lower() == "electron"
-        else max(voltage_cut_off, voltage_left_bound)
+        min(voltage_cut_off, max_safe_voltage_bound)
+        if charge_carrier_type == "electron"
+        else max(voltage_cut_off, min_safe_voltage_bound)
     )
 
     finger_gate_characterization_results = {}
