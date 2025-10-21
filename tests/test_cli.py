@@ -45,10 +45,10 @@ class TestInitCommand:
 
             assert result.exit_code == 0
             assert "✓ Created session directory" in result.output
-            assert "_data" in result.output
+            assert "_untitled" in result.output
             assert "Session initialized successfully" in result.output
 
-            sessions = list(Path.cwd().glob("*_data"))
+            sessions = list(Path.cwd().glob("*_untitled"))
             assert len(sessions) == 1
             assert sessions[0].exists()
             assert (sessions[0] / ".stanza" / "config.json").exists()
@@ -88,7 +88,7 @@ class TestInitCommand:
             assert result.exit_code == 0
             assert "✓ Created session directory" in result.output
 
-            sessions = list(custom_path.glob("*_data"))
+            sessions = list(custom_path.glob("*_untitled"))
             assert len(sessions) == 1
 
     def test_init_sets_active_session(self):

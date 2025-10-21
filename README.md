@@ -108,9 +108,9 @@ This creates a directory structure like:
 ```
 your-project/
 ├── .stanza/
-│   └── active_session.json              # Tracks the active session
-├── 20251020143022_data/                 # Timestamped session directory
-│   ├── 20251020143022_untitled.ipynb    # Jupyter notebook for the session
+│   └── active_session.json                       # Tracks the active session
+├── 20251020143022_untitled/                      # Timestamped session directory
+│   ├── 20251020143022_untitled_notebook.ipynb    # Jupyter notebook for the session
 │   └── .stanza/
 │       └── config.json                  # Session metadata
 └── device.yaml                          # Your device config

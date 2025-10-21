@@ -19,7 +19,7 @@ class TestStanzaSession:
 
             assert session_dir.exists()
             assert session_dir.parent == Path(tmpdir)
-            assert "_data" in session_dir.name
+            assert "_untitled" in session_dir.name
             assert (session_dir / ".stanza").exists()
             assert (session_dir / ".stanza" / "config.json").exists()
 
@@ -32,7 +32,7 @@ class TestStanzaSession:
 
             assert session_dir.exists()
             assert "_experiment" in session_dir.name
-            assert "_data" not in session_dir.name
+            assert "_untitled" not in session_dir.name
 
     def test_create_session_directory_uses_cwd_when_no_base_path(self):
         """Test that create_session_directory uses current working directory by default."""

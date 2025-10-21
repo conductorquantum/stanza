@@ -42,7 +42,7 @@ class StanzaSession:
 
         Args:
             base_path: Base directory for session (default: current directory)
-            name: Optional suffix for directory name (default: "data")
+            name: Optional suffix for directory name (default: "untitled")
 
         Returns:
             Path to created session directory
@@ -61,7 +61,7 @@ class StanzaSession:
 
         timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
 
-        suffix = name if name else "data"
+        suffix = name if name else "untitled"
         dir_name = f"{timestamp}_{suffix}"
         session_dir = base_path / dir_name
 
