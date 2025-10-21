@@ -226,6 +226,30 @@ class RoutineRunner:
         """
         return self._routine_hierarchy.get(routine_name, routine_name)
 
+    def _get_parent_params(self, routine_name: str) -> dict[str, Any]:
+        """Get merged parameters from all parent routines in the hierarchy.
+
+        Args:
+            routine_name: Name of the routine
+
+        Returns:
+            Dictionary of merged parent parameters
+        """
+        full_path = self._get_routine_path(routine_name)
+
+        if "/" not in full_path:
+            return {}
+
+        path_substr = full_path.split("/")
+        parent_names = path_substr[:-1]
+
+        merged_params: dict[str, Any] = {}
+        for parent_name in parent_names:
+            parent_params = self.configs.get(parent_name, {})
+            merged_params.update(parent_params)
+
+        return merged_params
+
     def run(self, routine_name: str, **params: Any) -> Any:
         """Execute a registered routine.
 
@@ -242,9 +266,10 @@ class RoutineRunner:
                 f"Routine '{routine_name}' not registered. Available: {available}"
             )
 
-        # Get config for this routine and merge with user params
+        # Get config for this routine and merge with parent and user params
+        parent_params = self._get_parent_params(routine_name)
         config = self.configs.get(routine_name, {})
-        merged_params = {**config, **params}
+        merged_params = {**parent_params, **config, **params}
 
         # Get the routine function from global registry
         routine_func = _routine_registry[routine_name]
