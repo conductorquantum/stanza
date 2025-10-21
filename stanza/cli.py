@@ -30,10 +30,10 @@ def cli() -> None:
 @click.option(
     "--name",
     type=str,
-    default="data",
+    default=None,
     help="Name suffix for directory (default: 'data')",
 )
-def init(path: Path | None, name: str) -> None:
+def init(path: Path | None, name: str | None) -> None:
     """Initialize a new timestamped experiment session directory.
 
     Creates a directory like: 20251020100010_data/

@@ -110,13 +110,13 @@ your-project/
 ├── .stanza/
 │   └── active_session.json              # Tracks the active session
 ├── 20251020143022_data/                 # Timestamped session directory
-│   ├── 20251020143022_data.ipynb        # Jupyter notebook for the session
+│   ├── 20251020143022_untitled.ipynb    # Jupyter notebook for the session
 │   └── .stanza/
 │       └── config.json                  # Session metadata
 └── device.yaml                          # Your device config
 ```
 
-The Jupyter notebook is pre-configured with Stanza imports and ready for running your routines.
+The Jupyter notebook is pre-configured with Stanza imports and ready for running your routines. When you provide a custom name with `--name`, the notebook will be named `{timestamp}_{name}.ipynb` instead.
 
 Then run your routines - all data will be logged to the active session directory:
 

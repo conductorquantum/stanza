@@ -53,7 +53,7 @@ class TestInitCommand:
             assert sessions[0].exists()
             assert (sessions[0] / ".stanza" / "config.json").exists()
 
-            notebooks = list(sessions[0].glob("*_data.ipynb"))
+            notebooks = list(sessions[0].glob("*_untitled.ipynb"))
             assert len(notebooks) == 1
             assert notebooks[0].exists()
 

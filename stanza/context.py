@@ -80,18 +80,16 @@ class StanzaSession:
         with open(config_file, "w") as f:
             json.dump(metadata, f, indent=2)
 
-        notebook_name = f"{timestamp}_{suffix}.ipynb"
+        notebook_suffix = "untitled" if name is None else suffix
+        notebook_name = f"{timestamp}_{notebook_suffix}.ipynb"
         notebook_path = session_dir / notebook_name
-        created_at_timestamp: float = metadata["created_at"]  # type: ignore[assignment]
         notebook_content = {
             "cells": [
                 {
                     "cell_type": "markdown",
                     "metadata": {},
                     "source": [
-                        f"# {' '.join(word.capitalize() for word in suffix.split('_'))}\n",
-                        "\n",
-                        f"Session created: {datetime.fromtimestamp(created_at_timestamp).strftime('%Y-%m-%d %H:%M:%S')}\n",
+                        f"# {' '.join(word.capitalize() for word in notebook_suffix.split('_'))}\n",
                     ],
                 },
                 {
@@ -101,7 +99,7 @@ class StanzaSession:
                     "outputs": [],
                     "source": [
                         "from stanza.utils import load_device_config\n",
-                        "from stanza.routines import RoutineRunner\n",
+                        "from stanza.routines import RoutineRunner",
                     ],
                 },
             ],
