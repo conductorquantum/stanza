@@ -80,7 +80,7 @@ class StanzaSession:
         with open(config_file, "w") as f:
             json.dump(metadata, f, indent=2)
 
-        notebook_suffix = "untitled" if name is None else suffix
+        notebook_suffix = "untitled_notebook" if name is None else suffix
         notebook_name = f"{timestamp}_{notebook_suffix}.ipynb"
         notebook_path = session_dir / notebook_name
         notebook_content = {
