@@ -417,6 +417,7 @@ class TestFingerGateCharacterization:
 
 class TestAnalyzeSingleGateHeuristic:
     def test_poor_fit_raises_error(self):
+        np.random.seed(42)
         voltages = np.linspace(-1, 1, 10)
         currents = np.random.random(10) * 1e-15
         with pytest.raises(ValueError, match="Curve fit quality is poor"):

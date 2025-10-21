@@ -2,6 +2,7 @@
 .venv
 .ipynb_checkpoints
 .mypy_cache
+.stanza
 .vscode
 __pycache__
 .pytest_cache

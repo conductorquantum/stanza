@@ -2,6 +2,7 @@ import logging
 from collections.abc import Callable
 from typing import Any
 
+from stanza.context import StanzaSession
 from stanza.logger.data_logger import DataLogger
 from stanza.models import DeviceConfig
 from stanza.registry import ResourceRegistry, ResultsRegistry
@@ -153,10 +154,14 @@ class RoutineRunner:
                 resources.append(device)
                 device.name = "device"
 
+                # Get active Stanza session directory, fallback to ./data
+                session_dir = StanzaSession.get_active_session()
+                base_dir = str(session_dir) if session_dir else "./data"
+
                 data_logger = DataLogger(
                     name="logger",
                     routine_name=device.name,
-                    base_dir="./data",
+                    base_dir=base_dir,
                 )
                 resources.append(data_logger)
 
