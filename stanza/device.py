@@ -4,7 +4,11 @@ from typing import Any, overload
 import numpy as np
 
 from stanza.base.channels import ChannelConfig
-from stanza.base.protocols import ControlInstrument, MeasurementInstrument
+from stanza.base.protocols import (
+    BreakoutBoxInstrument,
+    ControlInstrument,
+    MeasurementInstrument,
+)
 from stanza.exceptions import DeviceError
 from stanza.logger.session import LoggerSession
 from stanza.models import ContactType, DeviceConfig, GateType, PadType
@@ -39,6 +43,7 @@ class Device:
         channel_configs: dict[str, ChannelConfig],
         control_instrument: Any | None,
         measurement_instrument: Any | None,
+        breakout_box_instrument: Any | None = None,
     ):
         self.name = name
         self.device_config = device_config
@@ -53,6 +58,13 @@ class Device:
         ):
             raise DeviceError(
                 "Measurement instrument must implement the `MeasurementInstrument` protocol"
+            )
+
+        if breakout_box_instrument and not isinstance(
+            breakout_box_instrument, BreakoutBoxInstrument
+        ):
+            raise DeviceError(
+                "Breakout instrument must implement the `BreakoutInstrument` protocol"
             )
 
         self.control_instrument = control_instrument

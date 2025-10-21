@@ -84,6 +84,7 @@ class InstrumentType(str, Enum):
     CONTROL = "CONTROL"
     MEASUREMENT = "MEASUREMENT"
     GENERAL = "GENERAL"
+    BREAKOUT_BOX = "BREAKOUT_BOX"
 
 
 class Gate(Electrode):

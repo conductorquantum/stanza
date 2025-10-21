@@ -2,7 +2,7 @@ from typing import Protocol, overload, runtime_checkable
 
 
 @runtime_checkable
-class BreakoutBox(Protocol):
+class BreakoutBoxInstrument(Protocol):
     """Protocol for a digital breakout box."""
 
     def get_grounded(self, channel_name: str) -> bool:

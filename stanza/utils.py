@@ -142,6 +142,7 @@ def device_from_config(
 
     control_instrument = None
     measurement_instrument = None
+    breakout_box_instrument = None
 
     for instrument_config in device_config.instruments:
         if instrument_config.driver is None:
@@ -152,16 +153,22 @@ def device_from_config(
         driver_class = load_driver_class(instrument_config.driver)
         instrument = driver_class(instrument_config, channel_configs, **driver_kwargs)
 
-        if instrument_config.type in (InstrumentType.CONTROL, InstrumentType.GENERAL):
-            if control_instrument is None:
+        match instrument_config.type:
+            case InstrumentType.BREAKOUT_BOX if breakout_box_instrument is None:
+                breakout_box_instrument = instrument
+            case InstrumentType.CONTROL if control_instrument is None:
                 control_instrument = instrument
-
-        if instrument_config.type in (
-            InstrumentType.MEASUREMENT,
-            InstrumentType.GENERAL,
-        ):
-            if measurement_instrument is None:
+            case InstrumentType.MEASUREMENT if measurement_instrument is None:
                 measurement_instrument = instrument
+            case InstrumentType.GENERAL if (
+                control_instrument is None and measurement_instrument is None
+            ):
+                control_instrument = instrument
+                measurement_instrument = instrument
+            case _:
+                raise ValueError(
+                    f"Instrument '{instrument_config.name}' is not a valid instrument type"
+                )
 
     return Device(
         name=device_config.name,
@@ -169,6 +176,7 @@ def device_from_config(
         channel_configs=channel_configs,
         control_instrument=control_instrument,
         measurement_instrument=measurement_instrument,
+        breakout_box_instrument=breakout_box_instrument,
     )
 
 
