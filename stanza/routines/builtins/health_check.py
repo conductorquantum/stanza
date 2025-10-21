@@ -1,4 +1,33 @@
-"""Device health check routines for quantum dot devices.
+"""Device health check routines for quantum dot devices operating in accumulation mode.
+
+These routines are specifically designed for accumulation mode devices, where gates are
+swept from depletion to accumulation to establish conductive channels. The algorithms
+identify turn-on voltages where current begins to flow as gates transition from depleted
+to accumulated states.
+
+Voltage Bounds and Carrier Type Conventions
+--------------------------------------------
+The safe voltage bounds (max_safe_voltage_bound and min_safe_voltage_bound) represent the
+extreme voltages that can be safely applied to gates without causing device damage or
+unwanted leakage. The interpretation of these bounds depends on the charge carrier type:
+
+For electron-based devices (n-channel, charge_carrier_type="electron"):
+    - Accumulation occurs at POSITIVE gate voltages, which attract electrons to form
+      a conductive channel
+    - max_safe_voltage_bound is POSITIVE and represents the maximum safe positive voltage
+    - min_safe_voltage_bound is NEGATIVE and represents the most negative voltage (depletion)
+    - Current INCREASES as gate voltage sweeps from negative (depleted) to positive (accumulated)
+
+For hole-based devices (p-channel, charge_carrier_type="hole"):
+    - Accumulation occurs at NEGATIVE gate voltages, which attract holes to form
+      a conductive channel
+    - max_safe_voltage_bound is POSITIVE and represents the most positive voltage (depletion)
+    - min_safe_voltage_bound is NEGATIVE and represents the maximum safe negative voltage
+    - Current INCREASES as gate voltage sweeps from positive (depleted) to negative (accumulated)
+
+In both cases, the routines sweep from depletion (low current) toward accumulation (high current),
+but the voltage polarity is reversed between electron and hole devices. The charge_carrier_type
+parameter determines which voltage bound is used for accumulation sweeps.
 
 Health check tests are an improvement of:
     Kovach, T. et al. BATIS: Bootstrapping, Autonomous Testing, and
@@ -96,6 +125,11 @@ def leakage_test(
     The test sweeps both positive (max_voltage_bound) and negative (min_voltage_bound) directions
     from the initial voltages to detect asymmetric leakage behavior. Both bounds are tested
     independently, so failure at one bound does not prevent testing the other.
+
+    Note on voltage bounds: max_safe_voltage_bound is typically positive and min_safe_voltage_bound
+    is typically negative, representing the extreme safe operating voltages. For electron devices,
+    max (positive) is used for accumulation sweeps; for hole devices, min (negative) is used for
+    accumulation sweeps. See module-level docstring for detailed explanation.
 
     Args:
         ctx: Routine context containing device resources. Uses ctx.results.get("current_std")
@@ -212,17 +246,17 @@ def global_accumulation(
     step_size: float,
     bias_gate: str,
     bias_voltage: float,
-    charge_carrier_type: str = "electron",
+    charge_carrier_type: str,
     session: LoggerSession | None = None,
     **kwargs: Any,
 ) -> dict[str, float]:
     """Determine the global turn-on voltage by sweeping all control gates simultaneously.
 
-    This health check routine sweeps all control gates together from minimum to maximum voltage
-    while measuring current at a specified electrode. The sweep data is analyzed using
-    a pinch-off heuristic to identify the voltage at which the device transitions from
-    depletion to accumulation (turn-on). After finding this voltage, all gates are set
-    to the cut-off voltage.
+    This health check routine is specifically designed for accumulation mode devices.
+    It sweeps all control gates together from minimum to maximum voltage while measuring
+    current at a specified electrode. The sweep data is analyzed using a pinch-off heuristic
+    to identify the voltage at which the device transitions from depletion to accumulation
+    (turn-on). After finding this voltage, all gates are set to the cut-off voltage.
 
     This global characterization establishes a baseline operating point before individual
     gate characterization in subsequent routines.
@@ -234,7 +268,9 @@ def global_accumulation(
         measure_electrode: Name of the electrode to measure current from during the sweep.
         step_size: Voltage increment (V) between sweep points. Smaller values provide
                   higher resolution but increase measurement time.
-        charge_carrier_type: The mobile charge particle type. Must be "electron" or "hole". Default is "electron".
+        charge_carrier_type: The mobile charge particle type. Must be "electron" or "hole".
+                           For electrons: sweeps from 0V toward max_safe_voltage_bound (positive).
+                           For holes: sweeps from 0V toward min_safe_voltage_bound (negative).
         session: Optional logger session for recording sweep measurements and analysis results.
 
     Returns:
@@ -246,16 +282,22 @@ def global_accumulation(
         - Device is automatically set to cutoff_voltage after analysis
         - The cutoff_voltage value is used by subsequent characterization routines (reservoir, finger gates)
         - step_size is converted to num_points based on voltage range
+        - For electron devices: sweeps toward positive voltages (accumulation at positive V)
+        - For hole devices: sweeps toward negative voltages (accumulation at negative V)
     """
+
+    if charge_carrier_type not in ["electron", "hole"]:
+        raise RoutineError("Charge carrier type is required for global accumulation")
+
+    if step_size <= 0:
+        raise RoutineError("Step size must be greater than 0")
+
     leakage_test_results = ctx.results.get("leakage_test", {})
     voltage_bound = leakage_test_results[
         "max_safe_voltage_bound"
         if charge_carrier_type.lower() == "electron"
         else "min_safe_voltage_bound"
     ]
-
-    if step_size <= 0:
-        raise RoutineError("Step size must be greater than 0")
 
     ctx.resources.device.jump({bias_gate: bias_voltage}, wait_for_settling=True)
 
@@ -304,9 +346,10 @@ def reservoir_characterization(
 ) -> dict[str, dict[str, Any]]:
     """Characterize individual reservoir gates by sweeping each while holding others in accumulation.
 
-    This health check routine determines the cut-off voltage (cutoff_voltage) for each reservoir gate
-    individually. For each reservoir under test, all other reservoirs are set to 120% of the global
-    turn-on voltage (to ensure they're fully conducting), while the target reservoir is swept from
+    This health check routine is specifically designed for accumulation mode devices.
+    It determines the cut-off voltage (cutoff_voltage) for each reservoir gate individually.
+    For each reservoir under test, all other reservoirs are set to 120% of the global turn-on
+    voltage (to ensure they're fully conducting), while the target reservoir is swept from
     minimum to maximum voltage. This isolates the behavior of each reservoir and identifies its
     individual pinch-off characteristics.
 
@@ -319,6 +362,10 @@ def reservoir_characterization(
         step_size: Voltage increment (V) between sweep points. Smaller values provide
                   higher resolution but increase measurement time.
         charge_carrier_type: The mobile charge particle type. Must be "electron" or "hole". Default is "electron".
+                           For electrons: sweeps from depletion (10% of min_safe_voltage_bound, negative)
+                                        toward accumulation (max_safe_voltage_bound, positive).
+                           For holes: sweeps from depletion (10% of max_safe_voltage_bound, positive)
+                                    toward accumulation (min_safe_voltage_bound, negative).
         session: Optional logger session for recording sweep measurements and analysis results.
 
     Returns:
@@ -332,7 +379,13 @@ def reservoir_characterization(
         - Target reservoir starts at 0V before sweeping
         - 10 second settling time is used between voltage changes
         - Pinch-off analysis may raise ValueError if curve fit fails
+        - Sweep direction depends on carrier type: electrons sweep toward positive, holes toward negative
     """
+    if charge_carrier_type not in ["electron", "hole"]:
+        raise RoutineError(
+            "Charge carrier type is required for reservoir characterization"
+        )
+
     if step_size <= 0:
         raise RoutineError("Step size must be greater than 0")
 
@@ -414,11 +467,12 @@ def finger_gate_characterization(
 ) -> dict[str, dict[str, Any]]:
     """Characterize individual finger gates by sweeping each while holding others in accumulation.
 
-    This health check routine determines the cut-off voltage for each finger gate
-    individually. For each finger gate under test, all other finger gates are set to 120% of the
-    global turn-on voltage (to ensure they're fully accumulated), while the target gate is swept
-    from minimum to maximum voltage. This isolates the behavior of each finger gate and identifies
-    its individual pinch-off characteristics.
+    This health check routine is specifically designed for accumulation mode devices.
+    It determines the cut-off voltage for each finger gate individually. For each finger gate
+    under test, all other finger gates are set to 120% of the global turn-on voltage (to ensure
+    they're fully accumulated), while the target gate is swept from minimum to maximum voltage.
+    This isolates the behavior of each finger gate and identifies its individual pinch-off
+    characteristics.
 
     Args:
         ctx: Routine context containing device resources and previous results. Requires:
@@ -429,6 +483,10 @@ def finger_gate_characterization(
         step_size: Voltage increment (V) between sweep points. Smaller values provide
                   higher resolution but increase measurement time.
         charge_carrier_type: The mobile charge particle type. Must be "electron" or "hole". Default is "electron".
+                           For electrons: sweeps from depletion (10% of min_safe_voltage_bound, negative)
+                                        toward accumulation (max_safe_voltage_bound, positive).
+                           For holes: sweeps from depletion (10% of max_safe_voltage_bound, positive)
+                                    toward accumulation (min_safe_voltage_bound, negative).
         session: Optional logger session for recording sweep measurements and analysis results.
 
     Returns:
@@ -442,7 +500,13 @@ def finger_gate_characterization(
         - Target gate starts at 0V before sweeping
         - 10 second settling time is used after setting target gate to 0V
         - Pinch-off analysis may raise ValueError if curve fit fails
+        - Sweep direction depends on carrier type: electrons sweep toward positive, holes toward negative
     """
+    if charge_carrier_type not in ["electron", "hole"]:
+        raise RoutineError(
+            "Charge carrier type is required for finger gate characterization"
+        )
+
     if step_size <= 0:
         raise RoutineError("Step size must be greater than 0")
 
@@ -676,6 +740,10 @@ def analyze_single_gate_heuristic(
     voltages: np.ndarray, currents: np.ndarray
 ) -> dict[str, Any]:
     """Fit gate sweep data to extract cut-off voltage using a heuristic model.
+
+    This analysis function is specifically designed for accumulation mode devices,
+    where the sweep progresses from depletion to accumulation and the algorithm
+    identifies the cut-off voltage at which current begins to flow.
 
     Args:
         voltages: Array of gate voltages (V) from the sweep.

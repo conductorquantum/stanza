@@ -251,6 +251,7 @@ class TestGlobalAccumulation:
                 step_size=0,
                 bias_gate="G1",
                 bias_voltage=0.0,
+                charge_carrier_type="electron",
             )
 
     def test_calls_sweep_all(self, routine_context):
@@ -280,6 +281,7 @@ class TestGlobalAccumulation:
                 step_size=2.0,
                 bias_gate="G1",
                 bias_voltage=0.0,
+                charge_carrier_type="electron",
             )
         assert routine_context.resources.device.sweep_all_called
 
@@ -296,6 +298,7 @@ class TestGlobalAccumulation:
             step_size=0.1,
             bias_gate="G1",
             bias_voltage=0.0,
+            charge_carrier_type="electron",
             session=session,
         )
         assert "global_turn_on_voltage" in result
