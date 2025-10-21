@@ -64,7 +64,7 @@ class Device:
             breakout_box_instrument, BreakoutBoxInstrument
         ):
             raise DeviceError(
-                "Breakout instrument must implement the `BreakoutInstrument` protocol"
+                "Breakout Box instrument must implement the `BreakoutBoxInstrument` protocol"
             )
 
         self.control_instrument = control_instrument

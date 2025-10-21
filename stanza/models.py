@@ -25,6 +25,9 @@ class Electrode(BaseModel):
     measure_channel: int | None = Field(
         None, ge=0, le=1024, description="Measurement channel for measurement signals"
     )
+    breakout_channel: int | None = Field(
+        None, ge=0, le=1024, description="Breakout channel for breakout box lines"
+    )
     v_lower_bound: float | None
     v_upper_bound: float | None
 

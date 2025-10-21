@@ -10,23 +10,23 @@ from stanza.pyvisa import PyVisaDriver
 logger = logging.getLogger(__name__)
 
 
-class QSwitchControlChannel(InstrumentChannel):
+class QSwitchChannel(InstrumentChannel):
     def __init__(
         self, name: str, channel_id: int, config: ChannelConfig, driver: PyVisaDriver
     ):
         self.name = name
-        self.channel_id = channel_id
         self.driver = driver
         super().__init__(config)
+        self.channel_id = channel_id
 
     def _setup_parameters(self) -> None:
-        """Setup QSwitch-specific control parameters with hardware integration."""
+        """Setup parameters after channel_id is properly set."""
         connect_param = Parameter(
             name="connect",
             value=None,
             unit="bool",
             getter=lambda: [
-                self.driver.query(f"close? (@{self.channel_id}!{i})")
+                int(self.driver.query(f"close? (@{self.channel_id}!{i})"))
                 for i in range(0, 10)
             ],
             setter=lambda r: self.driver.write(f"close (@{self.channel_id}!{r})"),
@@ -38,7 +38,7 @@ class QSwitchControlChannel(InstrumentChannel):
             value=None,
             unit="bool",
             getter=lambda: [
-                self.driver.query(f"open? (@{self.channel_id}!{i})")
+                int(self.driver.query(f"open? (@{self.channel_id}!{i})"))
                 for i in range(0, 10)
             ],
             setter=lambda r: self.driver.write(f"open (@{self.channel_id}!{r})"),
@@ -71,16 +71,14 @@ class QSwitch(BaseControlInstrument):
 
     def _initialize_channels(self, channel_configs: dict[str, ChannelConfig]) -> None:
         for channel_config in channel_configs.values():
-            if channel_config.control_channel is not None:
-                self.add_channel(
+            if channel_config.breakout_channel is not None:
+                channel = QSwitchChannel(
                     channel_config.name,
-                    QSwitchControlChannel(
-                        channel_config.name,
-                        channel_config.control_channel,
-                        channel_config,
-                        self.driver,
-                    ),
+                    channel_config.breakout_channel,
+                    channel_config,
+                    self.driver,
                 )
+                self.add_channel(channel_config.name, channel)
 
     def get_grounded(self, channel_name: str) -> bool:
         """Get if the channel is grounded."""
