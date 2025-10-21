@@ -290,7 +290,7 @@ def global_accumulation(
         - For electron devices: sweeps toward positive voltages (accumulation at positive V)
         - For hole devices: sweeps toward negative voltages (accumulation at negative V)
     """
-
+    charge_carrier_type = charge_carrier_type.lower()
     if charge_carrier_type not in ["electron", "hole"]:
         raise RoutineError("Charge carrier type is required for global accumulation")
 
@@ -300,7 +300,7 @@ def global_accumulation(
     leakage_test_results = ctx.results.get("leakage_test", {})
     voltage_bound = leakage_test_results[
         "max_safe_voltage_bound"
-        if charge_carrier_type.lower() == "electron"
+        if charge_carrier_type == "electron"
         else "min_safe_voltage_bound"
     ]
 
