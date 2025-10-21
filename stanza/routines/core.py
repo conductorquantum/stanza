@@ -114,6 +114,8 @@ class RoutineRunner:
         if resources is not None and configs is not None:
             raise ValueError("Cannot provide both 'resources' and 'configs'")
 
+        self._routine_hierarchy: dict[str, str] = {}
+
         if resources is not None:
             self.resources = ResourceRegistry(*resources)
             self.configs: dict[str, dict[str, Any]] = {}
@@ -126,7 +128,6 @@ class RoutineRunner:
             self.configs = self._extract_routine_configs(configs)
             self._device_configs = [c for c in configs if isinstance(c, DeviceConfig)]
 
-        self._routine_hierarchy: dict[str, str] = {}
         self.results = ResultsRegistry()
         self.context = RoutineContext(self.resources, self.results)
 

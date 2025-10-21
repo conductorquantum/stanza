@@ -5,7 +5,7 @@ This is distinct from LoggerSession which handles per-routine data logging.
 
 Architecture:
     StanzaSession (this module):
-        - Creates timestamped directories like: 20251020100010_data/
+        - Creates timestamped directories like: 20251020100010_untitled/
         - Manages session-level metadata and active session tracking
         - Scope: Global/session-wide, persists across routine runs
 
@@ -27,7 +27,7 @@ class StanzaSession:
     """Manages the active Stanza session directory.
 
     This class handles the top-level timestamped session directory
-    (e.g., 20251020100010_data/) and tracks which session is currently active.
+    (e.g., 20251020100010_untitled/) and tracks which session is currently active.
     """
 
     CONFIG_DIR = ".stanza"
@@ -49,7 +49,7 @@ class StanzaSession:
 
         Example:
             >>> StanzaSession.create_session_directory()
-            PosixPath('20251020100010_data')
+            PosixPath('20251020100010_untitled')
 
             >>> StanzaSession.create_session_directory(name="experiment")
             PosixPath('20251020100010_experiment')
@@ -136,7 +136,7 @@ class StanzaSession:
 
         Example:
             >>> StanzaSession.get_active_session()
-            PosixPath('20251020100010_data')
+            PosixPath('20251020100010_untitled')
         """
         config_file = Path.cwd() / StanzaSession.CONFIG_DIR / "active_session.json"
 
@@ -164,7 +164,7 @@ class StanzaSession:
             session_dir: Path to session directory
 
         Example:
-            >>> StanzaSession.set_active_session("20251020100010_data")
+            >>> StanzaSession.set_active_session("20251020100010_untitled")
         """
         session_dir = Path(session_dir)
 

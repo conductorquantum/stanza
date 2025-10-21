@@ -112,8 +112,8 @@ your-project/
 ├── 20251020143022_untitled/                      # Timestamped session directory
 │   ├── 20251020143022_untitled_notebook.ipynb    # Jupyter notebook for the session
 │   └── .stanza/
-│       └── config.json                  # Session metadata
-└── device.yaml                          # Your device config
+│       └── config.json                           # Session metadata
+└── device.yaml                                   # Your device config
 ```
 
 The Jupyter notebook is pre-configured with Stanza imports and ready for running your routines. When you provide a custom name with `--name`, the notebook will be named `{timestamp}_{name}.ipynb` instead.
