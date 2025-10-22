@@ -1,7 +1,11 @@
 import importlib
 
 from stanza.base.mixins import InstrumentChannelMixin
-from stanza.base.protocols import ControlInstrument, MeasurementInstrument
+from stanza.base.protocols import (
+    BreakoutBoxInstrument,
+    ControlInstrument,
+    MeasurementInstrument,
+)
 from stanza.models import InstrumentType
 
 
@@ -25,12 +29,28 @@ def validate_driver_protocols(
 ) -> None:
     dummy: object = object.__new__(driver_class)
 
-    if instrument_type in (InstrumentType.CONTROL, InstrumentType.GENERAL):
-        if not isinstance(dummy, ControlInstrument):
-            raise TypeError(f"{driver_class.__name__} must implement ControlInstrument")
-
-    if instrument_type in (InstrumentType.MEASUREMENT, InstrumentType.GENERAL):
-        if not isinstance(dummy, MeasurementInstrument):
-            raise TypeError(
-                f"{driver_class.__name__} must implement MeasurementInstrument"
-            )
+    match instrument_type:
+        case InstrumentType.CONTROL:
+            if not isinstance(dummy, ControlInstrument):
+                raise TypeError(
+                    f"{driver_class.__name__} must implement ControlInstrument"
+                )
+        case InstrumentType.MEASUREMENT:
+            if not isinstance(dummy, MeasurementInstrument):
+                raise TypeError(
+                    f"{driver_class.__name__} must implement MeasurementInstrument"
+                )
+        case InstrumentType.GENERAL:
+            if not isinstance(dummy, ControlInstrument):
+                raise TypeError(
+                    f"{driver_class.__name__} must implement ControlInstrument"
+                )
+            if not isinstance(dummy, MeasurementInstrument):
+                raise TypeError(
+                    f"{driver_class.__name__} must implement MeasurementInstrument"
+                )
+        case InstrumentType.BREAKOUT_BOX:
+            if not isinstance(dummy, BreakoutBoxInstrument):
+                raise TypeError(
+                    f"{driver_class.__name__} must implement BreakoutBoxInstrument"
+                )

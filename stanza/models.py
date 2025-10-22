@@ -199,8 +199,18 @@ class GeneralInstrumentConfig(ControlInstrumentConfig, MeasurementInstrumentConf
     type: Literal[InstrumentType.GENERAL] = InstrumentType.GENERAL  # type: ignore[assignment]
 
 
+class BreakoutBoxInstrumentConfig(BaseInstrumentConfig):
+    """Instrument configuration for breakout box instruments."""
+
+    model_config = ConfigDict(extra="allow")
+    type: Literal[InstrumentType.BREAKOUT_BOX] = InstrumentType.BREAKOUT_BOX
+
+
 InstrumentConfig = Annotated[
-    ControlInstrumentConfig | MeasurementInstrumentConfig | GeneralInstrumentConfig,
+    ControlInstrumentConfig
+    | MeasurementInstrumentConfig
+    | GeneralInstrumentConfig
+    | BreakoutBoxInstrumentConfig,
     Discriminator("type"),
 ]
 
@@ -214,7 +224,7 @@ class DeviceConfig(BaseModel):
     gates: dict[str, Gate] = {}
     contacts: dict[str, Contact] = {}
     gpios: dict[str, GPIO] = {}
-    routines: list[RoutineConfig]
+    routines: list[RoutineConfig] = []
     instruments: list[InstrumentConfig]
 
     @model_validator(mode="after")

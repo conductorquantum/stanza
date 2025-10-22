@@ -276,6 +276,36 @@ instruments:
 
 
 @pytest.fixture
+def device_yaml_with_qswitch():
+    """Fixture providing device YAML configuration with qswitch breakout box."""
+    return """
+name: test_device
+gates:
+  G1: {type: PLUNGER, control_channel: 1, measure_channel: 1, breakout_channel: 1, v_lower_bound: -1.0, v_upper_bound: 1.0}
+contacts:
+  C1: {type: SOURCE, control_channel: 2, measure_channel: 2, breakout_channel: 2, v_lower_bound: -1.0, v_upper_bound: 1.0}
+routines: []
+instruments:
+  - name: ctrl
+    type: CONTROL
+    driver: qdac2
+    ip_addr: "127.0.0.1"
+    slew_rate: 1.0
+  - name: meas
+    type: MEASUREMENT
+    driver: qdac2
+    ip_addr: "127.0.0.1"
+    measurement_duration: 0.001
+    sample_time: 0.0001
+  - name: qswitch
+    type: BREAKOUT_BOX
+    driver: qswitch
+    ip_addr: "192.168.1.100"
+    port: 5025
+"""
+
+
+@pytest.fixture
 def deeply_nested_routines_yaml():
     """Fixture providing device YAML configuration with deeply nested routines (3+ levels)."""
     return """

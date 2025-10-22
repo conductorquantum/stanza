@@ -163,13 +163,15 @@ class TestLoadDeviceConfig:
         assert result.name == "Sample Device"
         assert len(result.gates) == 3
         assert len(result.contacts) == 2
-        assert len(result.instruments) == 2
+        assert len(result.instruments) == 3
         assert "G1" in result.gates
         assert "IN" in result.contacts
         assert result.gates["G1"].control_channel == 3
         assert result.gates["G1"].measure_channel == 3
+        assert result.gates["G1"].breakout_channel == 3
         assert result.contacts["IN"].control_channel == 1
         assert result.contacts["IN"].measure_channel == 1
+        assert result.contacts["IN"].breakout_channel == 1
 
     def test_loads_external_yaml_config(self, valid_device_yaml, tmp_path):
         config_file = tmp_path / "device.yaml"

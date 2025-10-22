@@ -1,13 +1,13 @@
 name: "Sample Device"
 
 contacts:
-  IN: {type: SOURCE, control_channel: 1, measure_channel: 1, v_lower_bound: -3.0, v_upper_bound: 3.0}
-  OUT: {type: DRAIN, control_channel: 2, measure_channel: 2, v_lower_bound: -3.0, v_upper_bound: 3.0}
+  IN: {type: SOURCE, control_channel: 1, measure_channel: 1, breakout_channel: 1, v_lower_bound: -3.0, v_upper_bound: 3.0}
+  OUT: {type: DRAIN, control_channel: 2, measure_channel: 2, breakout_channel: 2, v_lower_bound: -3.0, v_upper_bound: 3.0}
 
 gates:
-  G1: {type: BARRIER, control_channel: 3, measure_channel: 3, v_lower_bound: -3.0, v_upper_bound: 3.0}
-  G2: {type: PLUNGER, control_channel: 4, measure_channel: 4, v_lower_bound: -3.0, v_upper_bound: 3.0}
-  G3: {type: BARRIER, control_channel: 5, measure_channel: 5, v_lower_bound: -3.0, v_upper_bound: 3.0}
+  G1: {type: BARRIER, control_channel: 3, measure_channel: 3, breakout_channel: 3, v_lower_bound: -3.0, v_upper_bound: 3.0}
+  G2: {type: PLUNGER, control_channel: 4, measure_channel: 4, breakout_channel: 4, v_lower_bound: -3.0, v_upper_bound: 3.0}
+  G3: {type: BARRIER, control_channel: 5, measure_channel: 5, breakout_channel: 5, v_lower_bound: -3.0, v_upper_bound: 3.0}
 
 routines:
   - name: health_check
@@ -42,3 +42,9 @@ instruments:
     ip_addr: 127.0.0.1
     measurement_duration: 1e-3
     sample_time: 10e-6
+
+  - name: qswitch-breakout
+    type: BREAKOUT_BOX
+    driver: qswitch
+    ip_addr: 192.168.1.100
+    port: 5025
