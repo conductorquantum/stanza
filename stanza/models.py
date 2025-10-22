@@ -151,10 +151,9 @@ class BaseInstrumentConfig(BaseModelWithConfig):
         return self
 
 
-class MeasurementInstrumentConfig(BaseInstrumentConfig):
-    """Instrument configuration for measurement instruments with required timing parameters."""
+class MeasurementInstrumentConfigMixin(BaseModel):
+    """Mixin for instruments with measurement capabilities."""
 
-    type: Literal[InstrumentType.MEASUREMENT] = InstrumentType.MEASUREMENT
     measurement_duration: float = Field(
         gt=0, description="Total measurement duration per point in seconds"
     )
@@ -175,7 +174,7 @@ class MeasurementInstrumentConfig(BaseInstrumentConfig):
     octave: str | None = Field(None, description="OPX octave configuration")
 
     @model_validator(mode="after")
-    def validate_timing_constraints(self) -> "MeasurementInstrumentConfig":
+    def validate_timing_constraints(self) -> "MeasurementInstrumentConfigMixin":
         """Validate logical constraints between timing parameters."""
         if self.sample_time > self.measurement_duration:
             raise ValueError(
@@ -185,18 +184,33 @@ class MeasurementInstrumentConfig(BaseInstrumentConfig):
         return self
 
 
-class ControlInstrumentConfig(BaseInstrumentConfig):
-    """Instrument configuration for control instruments."""
+class ControlInstrumentConfigMixin(BaseModel):
+    """Mixin for instruments with control capabilities."""
 
-    type: Literal[InstrumentType.CONTROL] = InstrumentType.CONTROL
     slew_rate: float = Field(gt=0, description="Slew rate in V/s")
 
 
-class GeneralInstrumentConfig(ControlInstrumentConfig, MeasurementInstrumentConfig):
+class MeasurementInstrumentConfig(
+    MeasurementInstrumentConfigMixin, BaseInstrumentConfig
+):
+    """Instrument configuration for measurement instruments with required timing parameters."""
+
+    type: Literal[InstrumentType.MEASUREMENT] = InstrumentType.MEASUREMENT
+
+
+class ControlInstrumentConfig(ControlInstrumentConfigMixin, BaseInstrumentConfig):
+    """Instrument configuration for control instruments."""
+
+    type: Literal[InstrumentType.CONTROL] = InstrumentType.CONTROL
+
+
+class GeneralInstrumentConfig(
+    ControlInstrumentConfigMixin, MeasurementInstrumentConfigMixin, BaseInstrumentConfig
+):
     """Instrument configuration for general instruments with both control and measurement capabilities."""
 
     model_config = ConfigDict(extra="allow")
-    type: Literal[InstrumentType.GENERAL] = InstrumentType.GENERAL  # type: ignore[assignment]
+    type: Literal[InstrumentType.GENERAL] = InstrumentType.GENERAL
 
 
 class BreakoutBoxInstrumentConfig(BaseInstrumentConfig):
