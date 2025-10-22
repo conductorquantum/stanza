@@ -1,9 +1,11 @@
 import time
-from typing import Any, overload
+from collections.abc import Callable
+from typing import Any, cast, overload
 
 import numpy as np
 
 from stanza.base.channels import ChannelConfig
+from stanza.base.instruments import BaseControlInstrument, BaseMeasurementInstrument
 from stanza.base.protocols import (
     BreakoutBoxInstrument,
     ControlInstrument,
@@ -67,9 +69,23 @@ class Device:
                 "Breakout Box instrument must implement the `BreakoutBoxInstrument` protocol"
             )
 
-        self.control_instrument = control_instrument
-        self.measurement_instrument = measurement_instrument
+        self.control_instrument = cast(ControlInstrument | None, control_instrument)
+        self.measurement_instrument = cast(
+            MeasurementInstrument | None, measurement_instrument
+        )
+        self.breakout_box_instrument = cast(
+            BreakoutBoxInstrument | None, breakout_box_instrument
+        )
         self.channel_configs = channel_configs
+
+    @property
+    def breakout_box_lines(self) -> list[str]:
+        """List of all breakout box line names in the device."""
+        return [
+            channel.name
+            for channel in self.channel_configs.values()
+            if channel.breakout_channel is not None
+        ]
 
     @property
     def gates(self) -> list[str]:
@@ -598,3 +614,66 @@ class Device:
         actual_voltages = self.check(pads)
         if not np.allclose(actual_voltages, [0.0] * len(actual_voltages), atol=1e-6):
             raise DeviceError("Failed to set all controllable pads to 0V")
+
+    def ground(self) -> None:
+        """Ground all breakout box lines."""
+        if not self.breakout_box_instrument:
+            raise DeviceError("Breakout box instrument not configured")
+        for line in self.breakout_box_lines:
+            self.breakout_box_instrument.set_grounded(line)
+
+    def unground(self) -> None:
+        """Unground all breakout box lines."""
+        if not self.breakout_box_instrument:
+            raise DeviceError("Breakout box instrument not configured")
+        for line in self.breakout_box_lines:
+            self.breakout_box_instrument.set_ungrounded(line)
+
+    def connect(self) -> None:
+        """Connect all breakout box lines."""
+        if not self.breakout_box_instrument:
+            raise DeviceError("Breakout box instrument not configured")
+
+        for line in self.breakout_box_lines:
+            self._set_breakout_connection(
+                line, self.breakout_box_instrument.set_connected
+            )
+
+    def disconnect(self) -> None:
+        """Disconnect all breakout box lines."""
+        if not self.breakout_box_instrument:
+            raise DeviceError("Breakout box instrument not configured")
+
+        for line in self.breakout_box_lines:
+            self._set_breakout_connection(
+                line, self.breakout_box_instrument.set_disconnected
+            )
+
+    def _set_breakout_connection(
+        self, line: str, connection_method: Callable[[str, int], None]
+    ) -> None:
+        """Helper method to set breakout box connection state."""
+        channel_config = self.channel_configs[line]
+
+        instrument: MeasurementInstrument | ControlInstrument | None
+        if channel_config.measure_channel is not None:
+            instrument, instrument_type = self.measurement_instrument, "Measurement"
+        elif channel_config.control_channel is not None:
+            instrument, instrument_type = self.control_instrument, "Control"
+        else:
+            raise DeviceError(
+                f"Breakout box line {line} has no associated instrument channel"
+            )
+
+        if not instrument:
+            raise DeviceError(f"{instrument_type} instrument not configured")
+
+        breakout_line = cast(
+            BaseMeasurementInstrument | BaseControlInstrument, instrument
+        ).instrument_config.breakout_line
+        if breakout_line is None:
+            raise DeviceError(
+                f"{instrument_type} instrument breakout line not configured"
+            )
+
+        connection_method(line, breakout_line)

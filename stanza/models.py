@@ -138,6 +138,7 @@ class BaseInstrumentConfig(BaseModelWithConfig):
     serial_addr: str | None = None
     port: int | None = None
     type: InstrumentType
+    breakout_line: int | None = None
     driver: str | None = Field(
         None,
         description="Driver file name (e.g., 'qdac2' maps to stanza.drivers.qdac2.QDAC2)",
