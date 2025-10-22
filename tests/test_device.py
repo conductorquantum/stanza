@@ -1,9 +1,23 @@
 import pytest
 
+from stanza.base.channels import ChannelConfig
+from stanza.base.instruments import BaseControlInstrument, BaseMeasurementInstrument
 from stanza.device import Device
 from stanza.exceptions import DeviceError
-from stanza.models import GPIO, Contact, ContactType, Gate, GateType, GPIOType, PadType
+from stanza.models import (
+    GPIO,
+    Contact,
+    ContactType,
+    ControlInstrumentConfig,
+    Gate,
+    GateType,
+    GPIOType,
+    InstrumentType,
+    MeasurementInstrumentConfig,
+    PadType,
+)
 from stanza.utils import generate_channel_configs
+from tests.conftest import MockBreakoutBoxInstrument
 
 
 class TestDevice:
@@ -370,3 +384,334 @@ class TestDevice:
         device.jump({"gate1": 1.5, "contact2": 0.5, "gpio1": 3.3})
         device.zero(PadType.ALL)
         assert device.check(["gate1", "contact2", "gpio1"]) == [0.0, 0.0, 0.0]
+
+
+class TestDeviceBreakoutBox:
+    """Test breakout box functionality in Device."""
+
+    def test_invalid_breakout_box_instrument(self, device_config):
+        """Test that invalid breakout box instrument raises error."""
+        channel_configs = generate_channel_configs(device_config)
+        with pytest.raises(DeviceError, match="Breakout Box instrument must implement"):
+            Device("test", device_config, channel_configs, None, None, "invalid")
+
+    def test_breakout_box_lines_property(
+        self, device_config, control_instrument, measurement_instrument
+    ):
+        """Test breakout_box_lines property returns channels with breakout_channel set."""
+        device_config.gates["gate1"].breakout_channel = 1
+        device_config.gates["gate2"] = Gate(
+            name="gate2",
+            type=GateType.BARRIER,
+            v_lower_bound=-2.0,
+            v_upper_bound=2.0,
+            control_channel=3,
+            breakout_channel=2,
+        )
+        channel_configs = generate_channel_configs(device_config)
+        device = Device(
+            "test",
+            device_config,
+            channel_configs,
+            control_instrument,
+            measurement_instrument,
+        )
+        breakout_lines = device.breakout_box_lines
+        assert isinstance(breakout_lines, list)
+        assert "gate1" in breakout_lines
+        assert "gate2" in breakout_lines
+
+    def test_ground_no_breakout_box(self, device):
+        """Test ground() raises error when breakout box not configured."""
+        with pytest.raises(DeviceError, match="Breakout box instrument not configured"):
+            device.ground()
+
+    def test_unground_no_breakout_box(self, device):
+        """Test unground() raises error when breakout box not configured."""
+        with pytest.raises(DeviceError, match="Breakout box instrument not configured"):
+            device.unground()
+
+    def test_connect_no_breakout_box(self, device):
+        """Test connect() raises error when breakout box not configured."""
+        with pytest.raises(DeviceError, match="Breakout box instrument not configured"):
+            device.connect()
+
+    def test_disconnect_no_breakout_box(self, device):
+        """Test disconnect() raises error when breakout box not configured."""
+        with pytest.raises(DeviceError, match="Breakout box instrument not configured"):
+            device.disconnect()
+
+    def test_ground_with_breakout_box(
+        self, device_config, control_instrument, measurement_instrument
+    ):
+        """Test ground() calls set_grounded for all breakout lines."""
+        device_config.gates["gate1"].breakout_channel = 1
+        device_config.gates["gate2"] = Gate(
+            name="gate2",
+            type=GateType.BARRIER,
+            v_lower_bound=-2.0,
+            v_upper_bound=2.0,
+            control_channel=3,
+            breakout_channel=2,
+        )
+        channel_configs = generate_channel_configs(device_config)
+        breakout_box = MockBreakoutBoxInstrument()
+        device = Device(
+            "test",
+            device_config,
+            channel_configs,
+            control_instrument,
+            measurement_instrument,
+            breakout_box,
+        )
+
+        device.ground()
+        assert "gate1" in breakout_box.grounded_lines
+        assert "gate2" in breakout_box.grounded_lines
+
+    def test_unground_with_breakout_box(
+        self, device_config, control_instrument, measurement_instrument
+    ):
+        """Test unground() calls set_ungrounded for all breakout lines."""
+
+        device_config.gates["gate1"].breakout_channel = 1
+        channel_configs = generate_channel_configs(device_config)
+        breakout_box = MockBreakoutBoxInstrument()
+        device = Device(
+            "test",
+            device_config,
+            channel_configs,
+            control_instrument,
+            measurement_instrument,
+            breakout_box,
+        )
+
+        device.unground()
+        assert "gate1" in breakout_box.ungrounded_lines
+
+    def test_connect_with_measure_channel(self, device_config, control_instrument):
+        class MockMeasurementInst(BaseMeasurementInstrument):
+            def __init__(self, instrument_config):
+                self.instrument_config = instrument_config
+                self.measurements = {}
+
+            def measure(self, channel_name: str) -> float:
+                return self.measurements.get(channel_name, 0.0)
+
+        device_config.gates["gate1"].breakout_channel = 1
+        channel_configs = generate_channel_configs(device_config)
+        breakout_box = MockBreakoutBoxInstrument()
+
+        meas_config = MeasurementInstrumentConfig(
+            name="mock_meas",
+            type=InstrumentType.MEASUREMENT,
+            ip_addr="127.0.0.1",
+            measurement_duration=1.0,
+            sample_time=0.1,
+            breakout_line=5,
+        )
+        mock_meas = MockMeasurementInst(meas_config)
+
+        device = Device(
+            "test",
+            device_config,
+            channel_configs,
+            control_instrument,
+            mock_meas,
+            breakout_box,
+        )
+
+        device.connect()
+        assert ("gate1", 5) in breakout_box.connected_calls
+
+    def test_connect_with_control_channel(self, device_config, measurement_instrument):
+        class MockControlInst(BaseControlInstrument):
+            def __init__(self, instrument_config):
+                self.instrument_config = instrument_config
+                self.voltages = {}
+
+            def set_voltage(self, channel_name: str, voltage: float) -> None:
+                self.voltages[channel_name] = voltage
+
+            def get_voltage(self, channel_name: str) -> float:
+                return self.voltages.get(channel_name, 0.0)
+
+            def get_slew_rate(self, channel_name: str) -> float:
+                return 1.0
+
+        device_config.contacts["contact2"] = Contact(
+            name="contact2",
+            type=ContactType.DRAIN,
+            v_lower_bound=-1.0,
+            v_upper_bound=1.0,
+            control_channel=4,
+            breakout_channel=3,
+        )
+
+        channel_configs = generate_channel_configs(device_config)
+        breakout_box = MockBreakoutBoxInstrument()
+
+        ctrl_config = ControlInstrumentConfig(
+            name="mock_ctrl",
+            type=InstrumentType.CONTROL,
+            ip_addr="127.0.0.1",
+            slew_rate=1.0,
+            breakout_line=7,
+        )
+        mock_ctrl = MockControlInst(ctrl_config)
+
+        device = Device(
+            "test",
+            device_config,
+            channel_configs,
+            mock_ctrl,
+            measurement_instrument,
+            breakout_box,
+        )
+
+        device.connect()
+        assert ("contact2", 7) in breakout_box.connected_calls
+
+    def test_disconnect_with_measure_channel(self, device_config, control_instrument):
+        class MockMeasurementInst(BaseMeasurementInstrument):
+            def __init__(self, instrument_config):
+                self.instrument_config = instrument_config
+                self.measurements = {}
+
+            def measure(self, channel_name: str) -> float:
+                return self.measurements.get(channel_name, 0.0)
+
+        device_config.gates["gate1"].breakout_channel = 1
+        channel_configs = generate_channel_configs(device_config)
+        breakout_box = MockBreakoutBoxInstrument()
+
+        meas_config = MeasurementInstrumentConfig(
+            name="mock_meas",
+            type=InstrumentType.MEASUREMENT,
+            ip_addr="127.0.0.1",
+            measurement_duration=1.0,
+            sample_time=0.1,
+            breakout_line=5,
+        )
+        mock_meas = MockMeasurementInst(meas_config)
+
+        device = Device(
+            "test",
+            device_config,
+            channel_configs,
+            control_instrument,
+            mock_meas,
+            breakout_box,
+        )
+
+        device.disconnect()
+        assert ("gate1", 5) in breakout_box.disconnected_calls
+
+    def test_connection_no_instrument_channel(
+        self, device_config, control_instrument, measurement_instrument
+    ):
+        channel_configs = generate_channel_configs(device_config)
+        channel_configs["orphan"] = ChannelConfig(
+            name="orphan",
+            voltage_range=(0.0, 1.0),
+            pad_type=PadType.GATE,
+            electrode_type=GateType.PLUNGER,
+            breakout_channel=1,
+        )
+
+        breakout_box = MockBreakoutBoxInstrument()
+        device = Device(
+            "test",
+            device_config,
+            channel_configs,
+            control_instrument,
+            measurement_instrument,
+            breakout_box,
+        )
+
+        with pytest.raises(DeviceError, match="has no associated instrument channel"):
+            device.connect()
+
+    def test_connection_no_measurement_instrument(
+        self, device_config, control_instrument
+    ):
+        device_config.gates["gate1"].breakout_channel = 1
+        channel_configs = generate_channel_configs(device_config)
+        breakout_box = MockBreakoutBoxInstrument()
+
+        device = Device(
+            "test",
+            device_config,
+            channel_configs,
+            control_instrument,
+            None,
+            breakout_box,
+        )
+
+        with pytest.raises(DeviceError, match="Measurement instrument not configured"):
+            device.connect()
+
+    def test_connection_no_control_instrument(
+        self, device_config, measurement_instrument
+    ):
+        device_config.contacts["contact2"] = Contact(
+            name="contact2",
+            type=ContactType.DRAIN,
+            v_lower_bound=-1.0,
+            v_upper_bound=1.0,
+            control_channel=4,
+            breakout_channel=3,
+        )
+
+        channel_configs = generate_channel_configs(device_config)
+        breakout_box = MockBreakoutBoxInstrument()
+
+        device = Device(
+            "test",
+            device_config,
+            channel_configs,
+            None,
+            measurement_instrument,
+            breakout_box,
+        )
+
+        with pytest.raises(DeviceError, match="Control instrument not configured"):
+            device.connect()
+
+    def test_connection_no_breakout_line_configured(
+        self, device_config, control_instrument
+    ):
+        class MockMeasurementInst(BaseMeasurementInstrument):
+            def __init__(self, instrument_config):
+                self.instrument_config = instrument_config
+                self.measurements = {}
+
+            def measure(self, channel_name: str) -> float:
+                return self.measurements.get(channel_name, 0.0)
+
+        device_config.gates["gate1"].breakout_channel = 1
+        channel_configs = generate_channel_configs(device_config)
+        breakout_box = MockBreakoutBoxInstrument()
+
+        meas_config = MeasurementInstrumentConfig(
+            name="mock_meas",
+            type=InstrumentType.MEASUREMENT,
+            ip_addr="127.0.0.1",
+            measurement_duration=1.0,
+            sample_time=0.1,
+        )
+        mock_meas = MockMeasurementInst(meas_config)
+
+        device = Device(
+            "test",
+            device_config,
+            channel_configs,
+            control_instrument,
+            mock_meas,
+            breakout_box,
+        )
+
+        with pytest.raises(
+            DeviceError, match="instrument breakout line not configured"
+        ):
+            device.connect()

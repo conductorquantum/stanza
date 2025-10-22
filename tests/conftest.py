@@ -47,6 +47,41 @@ class MockMeasurementInstrument:
         return self.measurements.get(channel_name, 0.0)
 
 
+class MockBreakoutBoxInstrument:
+    """Mock implementation of BreakoutBoxInstrument protocol."""
+
+    def __init__(self):
+        self.grounded_lines = set()
+        self.connected_calls = []
+        self.disconnected_calls = []
+        self.ungrounded_lines = []
+
+    def get_grounded(self, channel_name: str) -> bool:
+        return channel_name in self.grounded_lines
+
+    def set_grounded(self, channel_name: str) -> None:
+        self.grounded_lines.add(channel_name)
+
+    def get_ungrounded(self, channel_name: str) -> bool:
+        return channel_name not in self.grounded_lines
+
+    def set_ungrounded(self, channel_name: str) -> None:
+        self.grounded_lines.discard(channel_name)
+        self.ungrounded_lines.append(channel_name)
+
+    def get_connected(self, channel_name: str, line_number: int) -> bool:
+        return (channel_name, line_number) in self.connected_calls
+
+    def set_connected(self, channel_name: str, line_number: int) -> None:
+        self.connected_calls.append((channel_name, line_number))
+
+    def get_disconnected(self, channel_name: str, line_number: int) -> bool:
+        return (channel_name, line_number) not in self.connected_calls
+
+    def set_disconnected(self, channel_name: str, line_number: int) -> None:
+        self.disconnected_calls.append((channel_name, line_number))
+
+
 @pytest.fixture(autouse=True)
 def mock_time_sleep():
     """Automatically patch time.sleep for all tests to avoid actual delays."""
