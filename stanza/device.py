@@ -580,16 +580,17 @@ class Device:
                 to reach 0V within tolerance (1e-6V) after the operation.
         """
         pads: list[str] = []
-        if str(type).upper() == PadType.ALL:
-            pads = self.control_gates + self.control_contacts + self.control_gpios
-        elif str(type).upper() == PadType.GATE:
-            pads = self.control_gates
-        elif str(type).upper() == PadType.CONTACT:
-            pads = self.control_contacts
-        elif str(type).upper() == PadType.GPIO:
-            pads = self.control_gpios
-        else:
-            raise DeviceError(f"Invalid pad type: {type}")
+        match str(type).upper():
+            case PadType.ALL:
+                pads = self.control_gates + self.control_contacts + self.control_gpios
+            case PadType.GATE:
+                pads = self.control_gates
+            case PadType.CONTACT:
+                pads = self.control_contacts
+            case PadType.GPIO:
+                pads = self.control_gpios
+            case _:
+                raise DeviceError(f"Invalid pad type: {type}")
 
         gate_voltages = dict.fromkeys(pads, 0.0)
         self.jump(gate_voltages, wait_for_settling=True)
