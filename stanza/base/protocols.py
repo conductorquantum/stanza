@@ -5,35 +5,91 @@ from typing import Protocol, overload, runtime_checkable
 class BreakoutBoxInstrument(Protocol):
     """Protocol for a digital breakout box."""
 
-    def get_grounded(self, channel_name: str) -> bool:
+    @overload
+    def get_grounded(self, channel_name: list[str]) -> list[bool]: ...
+
+    @overload
+    def get_grounded(self, channel_name: str) -> bool: ...
+
+    def get_grounded(self, channel_name: str | list[str]) -> bool | list[bool]:
         """Get if the channel is grounded."""
         ...
 
-    def set_grounded(self, channel_name: str) -> None:
+    @overload
+    def set_grounded(self, channel_name: list[str]) -> None: ...
+
+    @overload
+    def set_grounded(self, channel_name: str) -> None: ...
+
+    def set_grounded(self, channel_name: str | list[str]) -> None:
         """Set the channel to grounded."""
         ...
 
-    def get_ungrounded(self, channel_name: str) -> bool:
+    @overload
+    def get_ungrounded(self, channel_name: list[str]) -> list[bool]: ...
+
+    @overload
+    def get_ungrounded(self, channel_name: str) -> bool: ...
+
+    def get_ungrounded(self, channel_name: str | list[str]) -> bool | list[bool]:
         """Get if the channel is ungrounded."""
         ...
 
-    def set_ungrounded(self, channel_name: str) -> None:
+    @overload
+    def set_ungrounded(self, channel_name: list[str]) -> None: ...
+
+    @overload
+    def set_ungrounded(self, channel_name: str) -> None: ...
+
+    def set_ungrounded(self, channel_name: str | list[str]) -> None:
         """Set the channel to ungrounded."""
         ...
 
-    def get_connected(self, channel_name: str, line_number: int) -> bool:
+    @overload
+    def get_connected(
+        self, channel_name: list[str], line_number: int
+    ) -> list[bool]: ...
+
+    @overload
+    def get_connected(self, channel_name: str, line_number: int) -> bool: ...
+
+    def get_connected(
+        self, channel_name: str | list[str], line_number: int
+    ) -> bool | list[bool]:
         """Get if the channel is connected to the line number."""
         ...
 
-    def set_connected(self, channel_name: str, line_number: int) -> None:
+    @overload
+    def set_connected(self, channel_name: list[str], line_number: int) -> None: ...
+
+    @overload
+    def set_connected(self, channel_name: str, line_number: int) -> None: ...
+
+    def set_connected(self, channel_name: str | list[str], line_number: int) -> None:
         """Set the channel to connected to the line number."""
         ...
 
-    def get_disconnected(self, channel_name: str, line_number: int) -> bool:
+    @overload
+    def get_disconnected(
+        self, channel_name: list[str], line_number: int
+    ) -> list[bool]: ...
+
+    @overload
+    def get_disconnected(self, channel_name: str, line_number: int) -> bool: ...
+
+    def get_disconnected(
+        self, channel_name: str | list[str], line_number: int
+    ) -> bool | list[bool]:
         """Get if the channel is disconnected from the line number."""
         ...
 
-    def set_disconnected(self, channel_name: str, line_number: int) -> None:
+    @overload
+    def set_disconnected(self, channel_name: list[str], line_number: int) -> None: ...
+
+    @overload
+    def set_disconnected(self, channel_name: str, line_number: int) -> None: ...
+
+    def set_disconnected(self, channel_name: str | list[str], line_number: int) -> None:
         """Set the channel to disconnected from the line number."""
         ...
 

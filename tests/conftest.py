@@ -17,13 +17,21 @@ from stanza.models import (
 from stanza.utils import generate_channel_configs
 
 
+class MockInstrumentConfig:
+    """Mock instrument config with breakout_line."""
+
+    def __init__(self, breakout_line: int | None = 1):
+        self.breakout_line = breakout_line
+
+
 class MockControlInstrument:
     """Mock implementation of ControlInstrument protocol."""
 
-    def __init__(self):
+    def __init__(self, breakout_line: int | None = 1):
         self.voltages = {}
         self.slew_rates = {}
         self.should_fail = False
+        self.instrument_config = MockInstrumentConfig(breakout_line)
 
     def set_voltage(self, channel_name: str, voltage: float) -> None:
         if self.should_fail:
@@ -40,8 +48,9 @@ class MockControlInstrument:
 class MockMeasurementInstrument:
     """Mock implementation of MeasurementInstrument protocol."""
 
-    def __init__(self):
+    def __init__(self, breakout_line: int | None = 2):
         self.measurements = {}
+        self.instrument_config = MockInstrumentConfig(breakout_line)
 
     def measure(self, channel_name: str) -> float:
         return self.measurements.get(channel_name, 0.0)
@@ -56,30 +65,60 @@ class MockBreakoutBoxInstrument:
         self.disconnected_calls = []
         self.ungrounded_lines = []
 
-    def get_grounded(self, channel_name: str) -> bool:
-        return channel_name in self.grounded_lines
+    def get_grounded(self, channel_name: str | list[str]) -> bool | list[bool]:
+        if isinstance(channel_name, str):
+            return channel_name in self.grounded_lines
+        return [name in self.grounded_lines for name in channel_name]
 
-    def set_grounded(self, channel_name: str) -> None:
-        self.grounded_lines.add(channel_name)
+    def set_grounded(self, channel_name: str | list[str]) -> None:
+        if isinstance(channel_name, str):
+            self.grounded_lines.add(channel_name)
+        else:
+            self.grounded_lines.update(channel_name)
 
-    def get_ungrounded(self, channel_name: str) -> bool:
-        return channel_name not in self.grounded_lines
+    def get_ungrounded(self, channel_name: str | list[str]) -> bool | list[bool]:
+        if isinstance(channel_name, str):
+            return channel_name not in self.grounded_lines
+        return [name not in self.grounded_lines for name in channel_name]
 
-    def set_ungrounded(self, channel_name: str) -> None:
-        self.grounded_lines.discard(channel_name)
-        self.ungrounded_lines.append(channel_name)
+    def set_ungrounded(self, channel_name: str | list[str]) -> None:
+        if isinstance(channel_name, str):
+            self.grounded_lines.discard(channel_name)
+            self.ungrounded_lines.append(channel_name)
+        else:
+            for name in channel_name:
+                self.grounded_lines.discard(name)
+                self.ungrounded_lines.append(name)
 
-    def get_connected(self, channel_name: str, line_number: int) -> bool:
-        return (channel_name, line_number) in self.connected_calls
+    def get_connected(
+        self, channel_name: str | list[str], line_number: int
+    ) -> bool | list[bool]:
+        if isinstance(channel_name, str):
+            return (channel_name, line_number) in self.connected_calls
+        return [(name, line_number) in self.connected_calls for name in channel_name]
 
-    def set_connected(self, channel_name: str, line_number: int) -> None:
-        self.connected_calls.append((channel_name, line_number))
+    def set_connected(self, channel_name: str | list[str], line_number: int) -> None:
+        if isinstance(channel_name, str):
+            self.connected_calls.append((channel_name, line_number))
+        else:
+            for name in channel_name:
+                self.connected_calls.append((name, line_number))
 
-    def get_disconnected(self, channel_name: str, line_number: int) -> bool:
-        return (channel_name, line_number) not in self.connected_calls
+    def get_disconnected(
+        self, channel_name: str | list[str], line_number: int
+    ) -> bool | list[bool]:
+        if isinstance(channel_name, str):
+            return (channel_name, line_number) not in self.connected_calls
+        return [
+            (name, line_number) not in self.connected_calls for name in channel_name
+        ]
 
-    def set_disconnected(self, channel_name: str, line_number: int) -> None:
-        self.disconnected_calls.append((channel_name, line_number))
+    def set_disconnected(self, channel_name: str | list[str], line_number: int) -> None:
+        if isinstance(channel_name, str):
+            self.disconnected_calls.append((channel_name, line_number))
+        else:
+            for name in channel_name:
+                self.disconnected_calls.append((name, line_number))
 
 
 @pytest.fixture(autouse=True)

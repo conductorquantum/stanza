@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from typing import overload
 
 from stanza.base.channels import ChannelConfig, InstrumentChannel, Parameter
 from stanza.base.instruments import BaseControlInstrument
@@ -80,42 +81,132 @@ class QSwitch(BaseControlInstrument):
                 )
                 self.add_channel(channel_config.name, channel)
 
-    def get_grounded(self, channel_name: str) -> bool:
+    def _channels_suffix(self, channel_names: list[str], tap: int | str) -> str:
+        """Get the channels suffix for the driver."""
+        channel_numbers = [
+            self.channel_configs[ch].breakout_channel for ch in channel_names
+        ]
+        channel_str = ",".join([f"{line}!{tap}" for line in channel_numbers])
+        return f"(@{channel_str})"
+
+    @overload
+    def get_grounded(self, channel_name: list[str]) -> list[bool]: ...
+
+    @overload
+    def get_grounded(self, channel_name: str) -> bool: ...
+
+    def get_grounded(self, channel_name: str | list[str]) -> bool | list[bool]:
         """Get if the channel is grounded."""
-        return bool(self.get_channel(channel_name).get_parameter_value("connect")[0])
+        return self.get_connected(channel_name, 0)
 
-    def set_grounded(self, channel_name: str) -> None:
+    @overload
+    def set_grounded(self, channel_name: list[str]) -> None: ...
+
+    @overload
+    def set_grounded(self, channel_name: str) -> None: ...
+
+    def set_grounded(self, channel_name: str | list[str]) -> None:
         """Set the channel to grounded."""
-        return self.get_channel(channel_name).set_parameter("connect", 0)
+        return self.set_connected(channel_name, 0)
 
-    def get_ungrounded(self, channel_name: str) -> bool:
+    @overload
+    def get_ungrounded(self, channel_name: list[str]) -> list[bool]: ...
+
+    @overload
+    def get_ungrounded(self, channel_name: str) -> bool: ...
+
+    def get_ungrounded(self, channel_name: str | list[str]) -> bool | list[bool]:
         """Get if the channel is ungrounded."""
-        return bool(self.get_channel(channel_name).get_parameter_value("disconnect")[0])
+        return self.get_disconnected(channel_name, 0)
 
-    def set_ungrounded(self, channel_name: str) -> None:
+    @overload
+    def set_ungrounded(self, channel_name: list[str]) -> None: ...
+
+    @overload
+    def set_ungrounded(self, channel_name: str) -> None: ...
+
+    def set_ungrounded(self, channel_name: str | list[str]) -> None:
         """Set the channel to ungrounded."""
-        return self.get_channel(channel_name).set_parameter("disconnect", 0)
+        self.set_disconnected(channel_name, 0)
 
-    def get_connected(self, channel_name: str, line_number: int) -> bool:
+    @overload
+    def get_connected(
+        self, channel_name: list[str], line_number: int
+    ) -> list[bool]: ...
+
+    @overload
+    def get_connected(self, channel_name: str, line_number: int) -> bool: ...
+
+    def get_connected(
+        self, channel_name: str | list[str], line_number: int
+    ) -> bool | list[bool]:
         """Get if the channel is connected to the line number."""
-        connected_lines = self.get_channel(channel_name).get_parameter_value("connect")
-        if line_number < 0 or line_number >= len(connected_lines):
-            raise ValueError(f"Line number {line_number} is out of range")
-        return bool(connected_lines[line_number])
+        if isinstance(channel_name, str):
+            return bool(
+                self.get_channel(channel_name).get_parameter_value("connect")[
+                    line_number
+                ]
+            )
+        else:
+            connected_str = self.driver.query(
+                f"close? {self._channels_suffix(channel_name, line_number)}"
+            )
+            return [bool(int(line)) for line in connected_str.split(",")]
 
-    def set_connected(self, channel_name: str, line_number: int) -> None:
+    @overload
+    def set_connected(self, channel_name: list[str], line_number: int) -> None: ...
+
+    @overload
+    def set_connected(self, channel_name: str, line_number: int) -> None: ...
+
+    def set_connected(self, channel_name: str | list[str], line_number: int) -> None:
         """Set the channel to connected to the line number."""
-        return self.get_channel(channel_name).set_parameter("connect", line_number)
+        if isinstance(channel_name, str):
+            self.get_channel(channel_name).set_parameter("connect", line_number)
+        else:
+            self.driver.write(
+                f"close {self._channels_suffix(channel_name, line_number)}"
+            )
 
-    def get_disconnected(self, channel_name: str, line_number: int) -> bool:
+    @overload
+    def get_disconnected(
+        self, channel_name: list[str], line_number: int
+    ) -> list[bool]: ...
+
+    @overload
+    def get_disconnected(self, channel_name: str, line_number: int) -> bool: ...
+
+    def get_disconnected(
+        self, channel_name: str | list[str], line_number: int
+    ) -> bool | list[bool]:
         """Get if the channel is disconnected from the line number."""
-        disconnected_lines = self.get_channel(channel_name).get_parameter_value(
-            "disconnect"
-        )
-        if line_number < 0 or line_number >= len(disconnected_lines):
-            raise ValueError(f"Line number {line_number} is out of range")
-        return bool(disconnected_lines[line_number])
+        if isinstance(channel_name, str):
+            return bool(
+                self.get_channel(channel_name).get_parameter_value("disconnect")[
+                    line_number
+                ]
+            )
+        else:
+            connected_str = self.driver.query(
+                f"open? {self._channels_suffix(channel_name, line_number)}"
+            )
+            return [bool(int(line)) for line in connected_str.split(",")]
 
-    def set_disconnected(self, channel_name: str, line_number: int) -> None:
+    @overload
+    def set_disconnected(self, channel_name: list[str], line_number: int) -> None: ...
+
+    @overload
+    def set_disconnected(self, channel_name: str, line_number: int) -> None: ...
+
+    def set_disconnected(self, channel_name: str | list[str], line_number: int) -> None:
         """Set the channel to disconnected from the line number."""
-        return self.get_channel(channel_name).set_parameter("disconnect", line_number)
+        if isinstance(channel_name, str):
+            self.get_channel(channel_name).set_parameter("disconnect", line_number)
+        else:
+            self.driver.write(
+                f"open {self._channels_suffix(channel_name, line_number)}"
+            )
+
+    def close(self) -> None:
+        """Close the QSwitch driver."""
+        self.driver.close()
