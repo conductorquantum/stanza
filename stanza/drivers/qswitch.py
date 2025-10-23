@@ -23,13 +23,13 @@ class QSwitchChannel(InstrumentChannel):
         self.channel_id = channel_id
 
     def _query_all_relays(self, command: str) -> list[int]:
-        """Query all 10 relays and return their states."""
+        """Query all 10 relays on this channel and return their states as a list of integers."""
         relays = ",".join(f"{self.channel_id}!{i}" for i in range(10))
         response = self.driver.query(f"{command}? (@{relays})")
         return [int(v) for v in response.split(",")]
 
     def _set_relay(self, command: str, relay: int | str) -> None:
-        """Set a single relay or multiple relays."""
+        """Execute a relay command for a single relay (int) or multiple relays (comma-separated string)."""
         if isinstance(relay, int):
             self.driver.write(f"{command} (@{self.channel_id}!{relay})")
         else:
@@ -37,19 +37,23 @@ class QSwitchChannel(InstrumentChannel):
             self.driver.write(f"{command} (@{relays})")
 
     def _get_connect(self) -> list[int]:
+        """Get the connection state of all relays on this channel."""
         return self._query_all_relays("close")
 
     def _set_connect(self, relay: int | str) -> None:
+        """Connect the specified relay or relays on this channel."""
         self._set_relay("close", relay)
 
     def _get_disconnect(self) -> list[int]:
+        """Get the disconnection state of all relays on this channel."""
         return self._query_all_relays("open")
 
     def _set_disconnect(self, relay: int | str) -> None:
+        """Disconnect the specified relay or relays on this channel."""
         self._set_relay("open", relay)
 
     def _setup_parameters(self) -> None:
-        """Setup parameters after channel_id is properly set."""
+        """Initialize and add connect_relay and disconnect_relay parameters to this channel."""
         self.add_parameter(
             Parameter(
                 name="connect_relay",
@@ -95,6 +99,7 @@ class QSwitch(BaseControlInstrument):
         self._initialize_channels(channel_configs)
 
     def _initialize_channels(self, channel_configs: dict[str, ChannelConfig]) -> None:
+        """Create and add QSwitchChannel instances for all configured breakout channels."""
         for cfg in channel_configs.values():
             if cfg.breakout_channel is not None:
                 self.add_channel(
@@ -103,7 +108,7 @@ class QSwitch(BaseControlInstrument):
                 )
 
     def _channels_suffix(self, channel_names: list[str], tap: int | str) -> str:
-        """Get the channels suffix for the driver."""
+        """Format channel names and tap number into a SCPI command suffix for multi-channel operations."""
         channels = ",".join(
             f"{self.channel_configs[ch].breakout_channel}!{tap}" for ch in channel_names
         )

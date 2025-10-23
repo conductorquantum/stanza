@@ -395,10 +395,10 @@ class TestDeviceBreakoutBox:
         with pytest.raises(DeviceError, match="Breakout Box instrument must implement"):
             Device("test", device_config, channel_configs, None, None, "invalid")
 
-    def test_breakout_box_lines_property(
+    def test_breakout_lines_property(
         self, device_config, control_instrument, measurement_instrument
     ):
-        """Test breakout_box_lines property returns channels with breakout_channel set."""
+        """Test breakout_lines property returns channels with breakout_channel set."""
         device_config.gates["gate1"].breakout_channel = 1
         device_config.gates["gate2"] = Gate(
             name="gate2",
@@ -416,30 +416,30 @@ class TestDeviceBreakoutBox:
             control_instrument,
             measurement_instrument,
         )
-        breakout_lines = device.breakout_box_lines
+        breakout_lines = device.breakout_lines
         assert isinstance(breakout_lines, list)
         assert "gate1" in breakout_lines
         assert "gate2" in breakout_lines
 
     def test_ground_no_breakout_box(self, device):
-        """Test ground() raises error when breakout box not configured."""
+        """Test ground_breakout_lines() raises error when breakout box not configured."""
         with pytest.raises(DeviceError, match="Breakout box instrument not configured"):
-            device.ground()
+            device.ground_breakout_lines()
 
     def test_unground_no_breakout_box(self, device):
-        """Test unground() raises error when breakout box not configured."""
+        """Test unground_breakout_lines() raises error when breakout box not configured."""
         with pytest.raises(DeviceError, match="Breakout box instrument not configured"):
-            device.unground()
+            device.unground_breakout_lines()
 
     def test_connect_no_breakout_box(self, device):
-        """Test connect() raises error when breakout box not configured."""
+        """Test connect_breakout_lines() raises error when breakout box not configured."""
         with pytest.raises(DeviceError, match="Breakout box instrument not configured"):
-            device.connect()
+            device.connect_breakout_lines()
 
     def test_disconnect_no_breakout_box(self, device):
-        """Test disconnect() raises error when breakout box not configured."""
+        """Test disconnect_breakout_lines() raises error when breakout box not configured."""
         with pytest.raises(DeviceError, match="Breakout box instrument not configured"):
-            device.disconnect()
+            device.disconnect_breakout_lines()
 
     def test_ground_with_breakout_box(
         self, device_config, control_instrument, measurement_instrument
@@ -465,7 +465,7 @@ class TestDeviceBreakoutBox:
             breakout_box,
         )
 
-        device.ground()
+        device.ground_breakout_lines()
         assert "gate1" in breakout_box.grounded_lines
         assert "gate2" in breakout_box.grounded_lines
 
@@ -486,7 +486,7 @@ class TestDeviceBreakoutBox:
             breakout_box,
         )
 
-        device.unground()
+        device.unground_breakout_lines()
         assert "gate1" in breakout_box.ungrounded_lines
 
     def test_connect_with_measure_channel(self, device_config, control_instrument):
@@ -521,7 +521,7 @@ class TestDeviceBreakoutBox:
             breakout_box,
         )
 
-        device.connect()
+        device.connect_breakout_lines()
         assert ("gate1", 5) in breakout_box.connected_calls
 
     def test_connect_with_control_channel(self, device_config, measurement_instrument):
@@ -569,7 +569,7 @@ class TestDeviceBreakoutBox:
             breakout_box,
         )
 
-        device.connect()
+        device.connect_breakout_lines()
         assert ("contact2", 7) in breakout_box.connected_calls
 
     def test_disconnect_with_measure_channel(self, device_config, control_instrument):
@@ -604,7 +604,7 @@ class TestDeviceBreakoutBox:
             breakout_box,
         )
 
-        device.disconnect()
+        device.disconnect_breakout_lines()
         assert ("gate1", 5) in breakout_box.disconnected_calls
 
     def test_connection_no_instrument_channel(
@@ -630,7 +630,7 @@ class TestDeviceBreakoutBox:
         )
 
         with pytest.raises(DeviceError, match="has no associated instrument channel"):
-            device.connect()
+            device.connect_breakout_lines()
 
     def test_connection_no_measurement_instrument(
         self, device_config, control_instrument
@@ -649,7 +649,7 @@ class TestDeviceBreakoutBox:
         )
 
         with pytest.raises(DeviceError, match="Measurement instrument not configured"):
-            device.connect()
+            device.connect_breakout_lines()
 
     def test_connection_no_control_instrument(
         self, device_config, measurement_instrument
@@ -676,7 +676,7 @@ class TestDeviceBreakoutBox:
         )
 
         with pytest.raises(DeviceError, match="Control instrument not configured"):
-            device.connect()
+            device.connect_breakout_lines()
 
     def test_connection_no_breakout_line_configured(
         self, device_config, control_instrument
@@ -714,4 +714,4 @@ class TestDeviceBreakoutBox:
         with pytest.raises(
             DeviceError, match="instrument breakout line not configured"
         ):
-            device.connect()
+            device.connect_breakout_lines()

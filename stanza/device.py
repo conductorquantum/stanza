@@ -79,7 +79,7 @@ class Device:
         self.channel_configs = channel_configs
 
     @property
-    def breakout_box_lines(self) -> list[str]:
+    def breakout_lines(self) -> list[str]:
         """List of all breakout box line names in the device."""
         return [
             channel.name
@@ -615,27 +615,27 @@ class Device:
         if not np.allclose(actual_voltages, [0.0] * len(actual_voltages), atol=1e-6):
             raise DeviceError("Failed to set all controllable pads to 0V")
 
-    def ground(self) -> None:
+    def ground_breakout_lines(self) -> None:
         """Ground all breakout box lines."""
         if not self.breakout_box_instrument:
             raise DeviceError("Breakout box instrument not configured")
 
-        self.breakout_box_instrument.set_grounded(self.breakout_box_lines)
+        self.breakout_box_instrument.set_grounded(self.breakout_lines)
 
-    def unground(self) -> None:
+    def unground_breakout_lines(self) -> None:
         """Unground all breakout box lines."""
         if not self.breakout_box_instrument:
             raise DeviceError("Breakout box instrument not configured")
 
-        self.breakout_box_instrument.set_ungrounded(self.breakout_box_lines)
+        self.breakout_box_instrument.set_ungrounded(self.breakout_lines)
 
-    def connect(self) -> None:
+    def connect_breakout_lines(self) -> None:
         """Connect all breakout box lines."""
         if not self.breakout_box_instrument:
             raise DeviceError("Breakout box instrument not configured")
         self._set_breakout_connection(self.breakout_box_instrument.set_connected)
 
-    def disconnect(self) -> None:
+    def disconnect_breakout_lines(self) -> None:
         """Disconnect all breakout box lines."""
         if not self.breakout_box_instrument:
             raise DeviceError("Breakout box instrument not configured")
@@ -647,7 +647,7 @@ class Device:
         """Filter breakout box lines by channel type."""
         return [
             line
-            for line in self.breakout_box_lines
+            for line in self.breakout_lines
             if has_channel(self.channel_configs[line])
         ]
 
@@ -684,7 +684,7 @@ class Device:
         )
 
         all_instrument_lines = set(control_lines) | set(measurement_lines)
-        orphan_lines = set(self.breakout_box_lines) - all_instrument_lines
+        orphan_lines = set(self.breakout_lines) - all_instrument_lines
         if orphan_lines:
             raise DeviceError(
                 f"Breakout box line {orphan_lines.pop()} has no associated instrument channel"
