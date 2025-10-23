@@ -8,7 +8,7 @@ from typing import Any
 import yaml
 
 from stanza.base.channels import ChannelConfig
-from stanza.base.registry import load_driver_class
+from stanza.base.registry import load_driver_class, validate_driver_protocols
 from stanza.device import Device
 from stanza.models import DeviceConfig, InstrumentType, PadType
 
@@ -154,6 +154,7 @@ def device_from_config(
             )
 
         driver_class = load_driver_class(instrument_config.driver)
+        validate_driver_protocols(driver_class, instrument_config.type)
         instrument = driver_class(instrument_config, channel_configs, **driver_kwargs)
 
         match instrument_config.type:
