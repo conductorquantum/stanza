@@ -174,7 +174,7 @@ class TestLoadDeviceConfig:
         assert result.name == "Sample Device"
         assert len(result.gates) == 3
         assert len(result.contacts) == 2
-        assert len(result.instruments) == 3
+        assert len(result.instruments) == 2
         assert "G1" in result.gates
         assert "IN" in result.contacts
         assert result.gates["G1"].control_channel == 3

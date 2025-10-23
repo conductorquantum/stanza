@@ -74,3 +74,6 @@ class TestQSwitchPyVisaSim:
         qswitch_sim.set_ungrounded("ch1")
         qswitch_sim.set_connected("ch1", 3)
         qswitch_sim.set_disconnected("ch1", 5)
+
+    def test_close(self, qswitch_sim):
+        qswitch_sim.close()
