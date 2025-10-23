@@ -30,21 +30,19 @@ routines:
           step_size: 1e-2
 
 instruments:
-  - name: qdac2-control
-    type: CONTROL
+  - name: qdac2
+    type: GENERAL
+    ip_addr: 192.168.1.100
+    port: 5025
     driver: qdac2
-    ip_addr: 127.0.0.1
-    slew_rate: 1.0
-
-  - name: qdac2-measurement
-    type: MEASUREMENT
-    driver: qdac2
-    ip_addr: 127.0.0.1
+    measurement_aperature_s: 1e-3
     measurement_duration: 1e-3
     sample_time: 10e-6
+    slew_rate: 100.0
+    breakout_line: 9
 
-  - name: qswitch-breakout
+  - name: qswitch
     type: BREAKOUT_BOX
     driver: qswitch
-    ip_addr: 192.168.1.100
+    ip_addr: 192.168.1.102
     port: 5025
