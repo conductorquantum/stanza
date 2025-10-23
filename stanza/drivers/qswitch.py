@@ -20,31 +20,53 @@ class QSwitchChannel(InstrumentChannel):
         super().__init__(config)
         self.channel_id = channel_id
 
+    def _query_all_relays(self, command: str) -> list[int]:
+        """Query all 10 relays and return their states."""
+        relays = ",".join(f"{self.channel_id}!{i}" for i in range(10))
+        response = self.driver.query(f"{command}? (@{relays})")
+        return [int(v) for v in response.split(",")]
+
+    def _set_relay(self, command: str, relay: int | str) -> None:
+        """Set a single relay or multiple relays."""
+        if isinstance(relay, int):
+            self.driver.write(f"{command} (@{self.channel_id}!{relay})")
+        else:
+            relays = ",".join(f"(@{self.channel_id}!{r})" for r in relay.split(","))
+            self.driver.write(f"{command} (@{relays})")
+
+    def _get_connect(self) -> list[int]:
+        return self._query_all_relays("close")
+
+    def _set_connect(self, relay: int | str) -> None:
+        self._set_relay("close", relay)
+
+    def _get_disconnect(self) -> list[int]:
+        return self._query_all_relays("open")
+
+    def _set_disconnect(self, relay: int | str) -> None:
+        self._set_relay("open", relay)
+
     def _setup_parameters(self) -> None:
         """Setup parameters after channel_id is properly set."""
-        connect_param = Parameter(
-            name="connect",
-            value=None,
-            unit="bool",
-            getter=lambda: [
-                int(self.driver.query(f"close? (@{self.channel_id}!{i})"))
-                for i in range(0, 10)
-            ],
-            setter=lambda r: self.driver.write(f"close (@{self.channel_id}!{r})"),
+        self.add_parameter(
+            Parameter(
+                name="connect_relay",
+                value=None,
+                unit="bool",
+                getter=self._get_connect,
+                setter=self._set_connect,
+            )
         )
-        self.add_parameter(connect_param)
 
-        disconnect_param = Parameter(
-            name="disconnect",
-            value=None,
-            unit="bool",
-            getter=lambda: [
-                int(self.driver.query(f"open? (@{self.channel_id}!{i})"))
-                for i in range(0, 10)
-            ],
-            setter=lambda r: self.driver.write(f"open (@{self.channel_id}!{r})"),
+        self.add_parameter(
+            Parameter(
+                name="disconnect_relay",
+                value=None,
+                unit="bool",
+                getter=self._get_disconnect,
+                setter=self._set_disconnect,
+            )
         )
-        self.add_parameter(disconnect_param)
 
 
 class QSwitch(BaseControlInstrument):
@@ -71,23 +93,19 @@ class QSwitch(BaseControlInstrument):
         self._initialize_channels(channel_configs)
 
     def _initialize_channels(self, channel_configs: dict[str, ChannelConfig]) -> None:
-        for channel_config in channel_configs.values():
-            if channel_config.breakout_channel is not None:
-                channel = QSwitchChannel(
-                    channel_config.name,
-                    channel_config.breakout_channel,
-                    channel_config,
-                    self.driver,
+        for cfg in channel_configs.values():
+            if cfg.breakout_channel is not None:
+                self.add_channel(
+                    cfg.name,
+                    QSwitchChannel(cfg.name, cfg.breakout_channel, cfg, self.driver),
                 )
-                self.add_channel(channel_config.name, channel)
 
     def _channels_suffix(self, channel_names: list[str], tap: int | str) -> str:
         """Get the channels suffix for the driver."""
-        channel_numbers = [
-            self.channel_configs[ch].breakout_channel for ch in channel_names
-        ]
-        channel_str = ",".join([f"{line}!{tap}" for line in channel_numbers])
-        return f"(@{channel_str})"
+        channels = ",".join(
+            f"{self.channel_configs[ch].breakout_channel}!{tap}" for ch in channel_names
+        )
+        return f"(@{channels})"
 
     @overload
     def get_grounded(self, channel_name: list[str]) -> list[bool]: ...
@@ -107,7 +125,7 @@ class QSwitch(BaseControlInstrument):
 
     def set_grounded(self, channel_name: str | list[str]) -> None:
         """Set the channel to grounded."""
-        return self.set_connected(channel_name, 0)
+        self.set_connected(channel_name, 0)
 
     @overload
     def get_ungrounded(self, channel_name: list[str]) -> list[bool]: ...
@@ -143,15 +161,15 @@ class QSwitch(BaseControlInstrument):
         """Get if the channel is connected to the line number."""
         if isinstance(channel_name, str):
             return bool(
-                self.get_channel(channel_name).get_parameter_value("connect")[
+                self.get_channel(channel_name).get_parameter_value("connect_relay")[
                     line_number
                 ]
             )
-        else:
-            connected_str = self.driver.query(
-                f"close? {self._channels_suffix(channel_name, line_number)}"
-            )
-            return [bool(int(line)) for line in connected_str.split(",")]
+
+        response = self.driver.query(
+            f"close? {self._channels_suffix(channel_name, line_number)}"
+        )
+        return [bool(int(v)) for v in response.split(",")]
 
     @overload
     def set_connected(self, channel_name: list[str], line_number: int) -> None: ...
@@ -162,7 +180,7 @@ class QSwitch(BaseControlInstrument):
     def set_connected(self, channel_name: str | list[str], line_number: int) -> None:
         """Set the channel to connected to the line number."""
         if isinstance(channel_name, str):
-            self.get_channel(channel_name).set_parameter("connect", line_number)
+            self.get_channel(channel_name).set_parameter("connect_relay", line_number)
         else:
             self.driver.write(
                 f"close {self._channels_suffix(channel_name, line_number)}"
@@ -182,15 +200,15 @@ class QSwitch(BaseControlInstrument):
         """Get if the channel is disconnected from the line number."""
         if isinstance(channel_name, str):
             return bool(
-                self.get_channel(channel_name).get_parameter_value("disconnect")[
+                self.get_channel(channel_name).get_parameter_value("disconnect_relay")[
                     line_number
                 ]
             )
-        else:
-            connected_str = self.driver.query(
-                f"open? {self._channels_suffix(channel_name, line_number)}"
-            )
-            return [bool(int(line)) for line in connected_str.split(",")]
+
+        response = self.driver.query(
+            f"open? {self._channels_suffix(channel_name, line_number)}"
+        )
+        return [bool(int(v)) for v in response.split(",")]
 
     @overload
     def set_disconnected(self, channel_name: list[str], line_number: int) -> None: ...
@@ -201,7 +219,9 @@ class QSwitch(BaseControlInstrument):
     def set_disconnected(self, channel_name: str | list[str], line_number: int) -> None:
         """Set the channel to disconnected from the line number."""
         if isinstance(channel_name, str):
-            self.get_channel(channel_name).set_parameter("disconnect", line_number)
+            self.get_channel(channel_name).set_parameter(
+                "disconnect_relay", line_number
+            )
         else:
             self.driver.write(
                 f"open {self._channels_suffix(channel_name, line_number)}"

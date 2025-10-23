@@ -50,8 +50,8 @@ class TestQSwitchPyVisaSim:
 
     def test_parameter_access(self, qswitch_sim):
         channel = qswitch_sim.channels["ch1"]
-        assert channel.get_parameter("connect") is not None
-        assert channel.get_parameter("disconnect") is not None
+        assert channel.get_parameter("connect_relay") is not None
+        assert channel.get_parameter("disconnect_relay") is not None
 
     def test_get_grounded(self, qswitch_sim):
         assert qswitch_sim.get_grounded("ch1") is True
