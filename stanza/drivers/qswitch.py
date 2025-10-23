@@ -116,7 +116,7 @@ class QSwitch(BaseControlInstrument):
     def get_grounded(self, channel_name: str) -> bool: ...
 
     def get_grounded(self, channel_name: str | list[str]) -> bool | list[bool]:
-        """Get if the channel is grounded."""
+        """Check if breakout box channel(s) are grounded."""
         return self.get_connected(channel_name, 0)
 
     @overload
@@ -126,7 +126,7 @@ class QSwitch(BaseControlInstrument):
     def set_grounded(self, channel_name: str) -> None: ...
 
     def set_grounded(self, channel_name: str | list[str]) -> None:
-        """Set the channel to grounded."""
+        """Set breakout box channel(s) to grounded."""
         self.set_connected(channel_name, 0)
 
     @overload
@@ -136,7 +136,7 @@ class QSwitch(BaseControlInstrument):
     def get_ungrounded(self, channel_name: str) -> bool: ...
 
     def get_ungrounded(self, channel_name: str | list[str]) -> bool | list[bool]:
-        """Get if the channel is ungrounded."""
+        """Check if breakout box channel(s) are ungrounded."""
         return self.get_disconnected(channel_name, 0)
 
     @overload
@@ -146,7 +146,7 @@ class QSwitch(BaseControlInstrument):
     def set_ungrounded(self, channel_name: str) -> None: ...
 
     def set_ungrounded(self, channel_name: str | list[str]) -> None:
-        """Set the channel to ungrounded."""
+        """Set breakout box channel(s) to ungrounded."""
         self.set_disconnected(channel_name, 0)
 
     @overload
@@ -160,7 +160,7 @@ class QSwitch(BaseControlInstrument):
     def get_connected(
         self, channel_name: str | list[str], line_number: int
     ) -> bool | list[bool]:
-        """Get if the channel is connected to the line number."""
+        """Get if breakout box channel(s) are connected to the line number."""
         if isinstance(channel_name, str):
             return bool(
                 self.get_channel(channel_name).get_parameter_value("connect_relay")[
@@ -180,7 +180,7 @@ class QSwitch(BaseControlInstrument):
     def set_connected(self, channel_name: str, line_number: int) -> None: ...
 
     def set_connected(self, channel_name: str | list[str], line_number: int) -> None:
-        """Set the channel to connected to the line number."""
+        """Set breakout box channel(s) to connected to the line number."""
         if isinstance(channel_name, str):
             self.get_channel(channel_name).set_parameter("connect_relay", line_number)
         else:
@@ -199,7 +199,7 @@ class QSwitch(BaseControlInstrument):
     def get_disconnected(
         self, channel_name: str | list[str], line_number: int
     ) -> bool | list[bool]:
-        """Get if the channel is disconnected from the line number."""
+        """Get if breakout box channel(s) are disconnected from the line number."""
         if isinstance(channel_name, str):
             return bool(
                 self.get_channel(channel_name).get_parameter_value("disconnect_relay")[
@@ -219,7 +219,7 @@ class QSwitch(BaseControlInstrument):
     def set_disconnected(self, channel_name: str, line_number: int) -> None: ...
 
     def set_disconnected(self, channel_name: str | list[str], line_number: int) -> None:
-        """Set the channel to disconnected from the line number."""
+        """Set breakout box channel(s) to disconnected from the line number."""
         if isinstance(channel_name, str):
             self.get_channel(channel_name).set_parameter(
                 "disconnect_relay", line_number
