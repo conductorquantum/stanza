@@ -12,6 +12,8 @@ logger = logging.getLogger(__name__)
 
 
 class QSwitchChannel(InstrumentChannel):
+    """QSwitch channel for setting and getting the state of the lines and relays."""
+
     def __init__(
         self, name: str, channel_id: int, config: ChannelConfig, driver: PyVisaDriver
     ):
