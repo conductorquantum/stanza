@@ -58,7 +58,8 @@ class BokehLiveWriter(AbstractDataWriter):
 
     def flush(self) -> None:
         """Flush any pending updates."""
-        self.backend.push_updates()
+        if hasattr(self.backend, "push_updates"):
+            self.backend.push_updates()
 
     def finalize_session(self, metadata: SessionMetadata | None = None) -> None:
         """End of session."""

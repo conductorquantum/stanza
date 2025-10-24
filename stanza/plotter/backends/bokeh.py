@@ -1,25 +1,11 @@
-"""Bokeh backend protocol."""
+"""Bokeh backend type alias."""
 
-from typing import Any, Protocol, runtime_checkable
+from __future__ import annotations
 
+from typing import Union
 
-@runtime_checkable
-class BokehBackend(Protocol):
-    """Protocol for bokeh rendering backends."""
+from stanza.plotter.backends.inline import InlineBackend
+from stanza.plotter.backends.notebook import NotebookBackend
+from stanza.plotter.backends.server import ServerBackend
 
-    def create_figure(self, name: str, x_label: str, y_label: str) -> tuple[Any, bool]:
-        """Create a new bokeh figure.
-
-        Returns:
-            Tuple of (figure, needs_display) where needs_display indicates
-            if display_figure should be called after adding renderers.
-        """
-        ...
-
-    def display_figure(self, fig: Any) -> None:
-        """Display the figure after renderers have been added."""
-        ...
-
-    def push_updates(self) -> None:
-        """Push all pending updates to display."""
-        ...
+BokehBackend = Union["ServerBackend", "InlineBackend", "NotebookBackend"]

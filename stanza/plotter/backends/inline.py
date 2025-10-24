@@ -52,10 +52,6 @@ class InlineBackend:
 
         return source, True
 
-    def display_figure(self, _source: Any) -> None:
-        """Not needed - display happens on first data stream."""
-        pass
-
     def stream_data(self, name: str, new_data: dict[str, Any], rollover: int) -> None:
         """Add data to plot and display/update it.
 
@@ -79,7 +75,3 @@ class InlineBackend:
         if name not in self._displayed:
             display(BokehModel(self._figures[name]))
             self._displayed.add(name)
-
-    def push_updates(self) -> None:
-        """Not needed - updates are automatic."""
-        pass

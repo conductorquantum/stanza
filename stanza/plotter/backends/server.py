@@ -131,4 +131,3 @@ class ServerBackend:
                 self._sources[name].stream(new_data, rollover=rollover)
 
             self._doc.add_next_tick_callback(do_stream)
-
