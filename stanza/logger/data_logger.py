@@ -11,8 +11,10 @@ from typing import Any
 from stanza.exceptions import LoggingError
 from stanza.logger.datatypes import SessionMetadata
 from stanza.logger.session import LoggerSession
+from stanza.logger.writers.bokeh_writer import BokehLiveWriter
 from stanza.logger.writers.hdf5_writer import HDF5Writer
 from stanza.logger.writers.jsonl_writer import JSONLWriter
+from stanza.plotter.backends.bokeh import BokehBackend
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +25,7 @@ class DataLogger:
     _WRITER_REGISTRY = {
         "hdf5": HDF5Writer,
         "jsonl": JSONLWriter,
+        "bokeh": BokehLiveWriter,
     }
 
     def __init__(
@@ -36,6 +39,7 @@ class DataLogger:
         compression_level: int = 6,
         buffer_size: int = 1000,
         auto_flush_interval: float | None = 30.0,
+        bokeh_backend: BokehBackend | None = None,
     ):
         if not routine_name or not routine_name.strip():
             raise ValueError("Routine name is required")
@@ -61,6 +65,7 @@ class DataLogger:
         self._compression_level = compression_level
         self._buffer_size = buffer_size
         self._auto_flush_interval = auto_flush_interval
+        self._bokeh_backend = bokeh_backend
 
     @staticmethod
     def _slugify(name: str) -> str:
@@ -109,6 +114,10 @@ class DataLogger:
             session_writers.append(writer)
 
         session_writer_pool = dict(zip(self._formats, session_writers, strict=False))
+
+        if self._bokeh_backend is not None:
+            bokeh_writer = BokehLiveWriter(backend=self._bokeh_backend, max_points=1000)
+            session_writer_pool["bokeh"] = bokeh_writer
 
         writer_refs = list(session_writer_pool.keys())
 
