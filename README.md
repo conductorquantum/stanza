@@ -122,10 +122,10 @@ Then run your routines - all data will be logged to the active session directory
 
 ```python
 from stanza.routines import RoutineRunner
-from stanza.models import DeviceConfig
+from stanza.utils import load_device_config
 
 # Load configuration
-config = DeviceConfig.from_yaml("device.yaml")
+config = load_device_config("device.yaml")
 
 # Create runner - automatically loads routine parameters from config
 runner = RoutineRunner(configs=[config])
@@ -201,6 +201,55 @@ voltage = device.check("G1")
 v_data, i_data = device.sweep_1d("G1", voltages, "DRAIN")
 v_data, i_data = device.sweep_2d("G1", v1, "G2", v2, "DRAIN")
 v_data, i_data = device.sweep_nd(["G1", "G2"], voltages, "DRAIN")
+```
+
+### Breakout Box Operations
+
+Stanza supports digital breakout boxes for routing control and measurement signals. Configure channels with `breakout_channel` and instruments with `breakout_line`:
+
+```yaml
+# device.yaml with QSwitch breakout box
+gates:
+  G1: {type: BARRIER, control_channel: 1, breakout_channel: 1, v_lower_bound: -3.0, v_upper_bound: 3.0}
+  G2: {type: PLUNGER, control_channel: 2, breakout_channel: 2, v_lower_bound: -3.0, v_upper_bound: 3.0}
+
+contacts:
+  DRAIN: {type: DRAIN, control_channel: 3, measure_channel: 1, breakout_channel: 3, v_lower_bound: -3.0, v_upper_bound: 3.0}
+
+instruments:
+  - name: qdac2
+    type: GENERAL
+    driver: qdac2
+    ip_addr: 192.168.1.100
+    port: 5025
+    slew_rate: 100.0
+    breakout_line: 9  # QSwitch relay that connects to this instrument
+
+  - name: qswitch
+    type: BREAKOUT_BOX
+    driver: qswitch
+    ip_addr: 192.168.1.102
+    port: 5025
+```
+
+Control the breakout box in your routines:
+
+```python
+@routine
+def configure_breakout(ctx):
+    device = ctx.resources.device
+
+    # Ground all breakout lines for safety
+    device.ground_breakout_lines()
+
+    # Unground specific lines to enable control
+    device.unground_breakout_lines()
+
+    # Connect all lines to their configured instruments
+    device.connect_breakout_lines()
+
+    # Disconnect breakout lines when not in use
+    device.disconnect_breakout_lines()
 ```
 
 ## Built-in Routines
