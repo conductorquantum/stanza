@@ -21,12 +21,18 @@ class SweepContext:
     Accumulates data points via append() calls, streams to live plot writers
     immediately, and writes the complete sweep to file writers on context exit.
 
-    Only 1D sweeps (scalar x, scalar y) are supported for streaming.
+    Supports 1D sweeps (scalar x, scalar y) and 2D sweeps ([x0, x1], y).
 
     Example:
+        >>> # 1D sweep
         >>> with session.sweep("signal", "Time", "Amplitude") as s:
         ...     for x, y in data_stream:
         ...         s.append([x], [y])  # Live plot updates
+
+        >>> # 2D sweep
+        >>> with session.sweep("heatmap", ["V1", "V2"], "Current") as s:
+        ...     for v1, v2 in voltage_pairs:
+        ...         s.append([v1, v2], [current])  # Live heatmap updates
         >>> # Sweep written to files here
     """
 
@@ -34,7 +40,7 @@ class SweepContext:
         self,
         session: LoggerSession,
         name: str,
-        x_label: str,
+        x_label: str | list[str],
         y_label: str,
         metadata: dict[str, Any],
         routine_name: str | None = None,
@@ -44,7 +50,7 @@ class SweepContext:
         Args:
             session: Parent LoggerSession
             name: Sweep name
-            x_label: X-axis label
+            x_label: X-axis label (string for 1D, list for 2D)
             y_label: Y-axis label
             metadata: User metadata dict
             routine_name: Optional routine name
@@ -57,8 +63,9 @@ class SweepContext:
         self.metadata = dict(metadata) if metadata else {}
         self.routine_name = routine_name
 
-        self._x_data: list[float] = []
+        self._x_data: list[float] | list[list[float]] = []
         self._y_data: list[float] = []
+        self._dim: int | None = None  # Detect on first append
         self._active = True
 
     def append(
@@ -66,39 +73,65 @@ class SweepContext:
     ) -> None:
         """Append data points and stream to live plots.
 
-        Args:
-            x_data: X values (must be 1D)
-            y_data: Y values (must be 1D)
-
-        Raises:
-            ValueError: If arrays are not 1D, shapes don't match, or sweep is inactive
+        1D: append([x], [y]) or append([x1, x2, ...], [y1, y2, ...])
+        2D: append([x, y], [value])
         """
         if not self._active:
             raise ValueError(f"Sweep '{self.name}' is no longer active")
 
-        x_arr = np.asarray(x_data)
-        y_arr = np.asarray(y_data)
+        x_arr = np.asarray(x_data, dtype=float)
+        y_arr = np.asarray(y_data, dtype=float)
 
-        # Enforce non-empty inputs for predictability
         if x_arr.size == 0 or y_arr.size == 0:
             raise ValueError("x_data and y_data cannot be empty")
 
         if x_arr.ndim != 1 or y_arr.ndim != 1:
-            raise ValueError(
-                f"Only 1D sweeps supported. Got x.ndim={x_arr.ndim}, y.ndim={y_arr.ndim}. "
-                f"Use log_sweep() for multi-dimensional sweeps."
-            )
+            raise ValueError("x_data and y_data must be 1D arrays")
 
-        if len(x_arr) != len(y_arr):
-            raise ValueError(
-                f"x_data and y_data length mismatch: {len(x_arr)} vs {len(y_arr)}"
-            )
+        if not (np.isfinite(x_arr).all() and np.isfinite(y_arr).all()):
+            raise ValueError("x_data and y_data cannot contain NaN or inf")
 
-        # Accumulate data and stream to live plots
-        self._x_data.extend(x_arr.tolist())
-        self._y_data.extend(y_arr.tolist())
+        # Detect dimension on first append
+        if self._dim is None:
+            expecting_2d = isinstance(self.x_label, list) and len(self.x_label) == 2
+
+            if len(y_arr) == 1:
+                # Single y value: determine dim from x length
+                self._dim = len(x_arr)
+                if expecting_2d and self._dim != 2:
+                    raise ValueError(
+                        f"x_label has 2 elements but x_data has {self._dim}"
+                    )
+            elif len(x_arr) == len(y_arr):
+                # Matching lengths: 1D batch mode
+                if expecting_2d:
+                    raise ValueError("For 2D sweeps, y_data must be length 1")
+                self._dim = 1
+            else:
+                raise ValueError(
+                    f"Ambiguous: x has {len(x_arr)} values, y has {len(y_arr)}. "
+                    f"Use append([x], [y]) for 1D or append([x, y], [value]) for 2D."
+                )
+
+            if self._dim not in (1, 2):
+                raise ValueError(f"Only 1D and 2D supported, got {self._dim}D")
+
+            self.metadata["_dim"] = self._dim
+
+        # Validate and accumulate
+        if self._dim == 1:
+            if len(x_arr) != len(y_arr):
+                raise ValueError(f"Length mismatch: {len(x_arr)} vs {len(y_arr)}")
+            self._x_data.extend(x_arr.tolist())
+            self._y_data.extend(y_arr.tolist())
+        else:  # 2D
+            if len(x_arr) != 2 or len(y_arr) != 1:
+                raise ValueError("2D requires len(x)==2, len(y)==1")
+            self._x_data.append(x_arr.tolist())
+            self._y_data.append(float(y_arr[0]))
+
         self.session._stream_live_sweep_chunk(
-            self.name, x_arr, y_arr, self.x_label, self.y_label
+            self.name, x_arr, y_arr, self.x_label, self.y_label, self._dim
         )
 
     def end(self) -> None:
@@ -113,13 +146,18 @@ class SweepContext:
             logger.debug("Sweep '%s' empty, skipping write", self.name)
             return
 
+        # Filter internal metadata (keys starting with _)
+        user_metadata = {
+            k: v for k, v in self.metadata.items() if not k.startswith("_")
+        }
+
         sweep_data = SweepData(
             name=self.name,
-            x_data=np.array(self._x_data),
-            y_data=np.array(self._y_data),
+            x_data=np.array(self._x_data, dtype=float),
+            y_data=np.array(self._y_data, dtype=float),
             x_label=self.x_label,
             y_label=self.y_label,
-            metadata=self.metadata,
+            metadata=user_metadata,
             timestamp=time.time(),
             session_id=self.session.session_id,
             routine_name=self.routine_name,
@@ -376,20 +414,26 @@ class LoggerSession:
     def sweep(
         self,
         name: str,
-        x_label: str,
+        x_label: str | list[str],
         y_label: str,
         metadata: dict[str, Any] | None = None,
     ) -> SweepContext:
         """Create streaming sweep context for live plotting.
 
         Accumulates data via append(), writes complete sweep to files on exit.
-        Only 1D data supported. Exception in context = no file write.
+        Supports 1D and 2D data. Exception in context = no file write.
         One active sweep per name; HDF5 auto-uniquifies sequential same-name sweeps.
 
         Example:
+            # 1D sweep
             with session.sweep("signal", "Time (s)", "Amplitude") as s:
                 for x, y in data_stream:
                     s.append([x], [y])
+
+            # 2D sweep
+            with session.sweep("heatmap", ["V1 (V)", "V2 (V)"], "Current (A)") as s:
+                for v1, v2 in voltage_pairs:
+                    s.append([v1, v2], [current])
         """
         if not self._active:
             raise LoggerSessionError("Session is not initialized")
@@ -420,19 +464,32 @@ class LoggerSession:
         )
 
     def _stream_live_sweep_chunk(
-        self, name: str, x: np.ndarray, y: np.ndarray, x_label: str, y_label: str
+        self,
+        name: str,
+        x: np.ndarray,
+        y: np.ndarray,
+        x_label: str | list[str],
+        y_label: str,
+        dim: int,
     ) -> None:
         """Stream data chunk to live plot writers only."""
         if not self._live_writers:
             return
 
+        # Reshape x_data for consistent SweepData format
+        x_data: np.ndarray
+        if dim == 1:
+            x_data = x.reshape(-1)
+        else:  # dim == 2
+            x_data = x.reshape(1, -1)
+
         temp_sweep = SweepData(
             name=name,
-            x_data=x,
+            x_data=x_data,
             y_data=y,
             x_label=x_label,
             y_label=y_label,
-            metadata={},
+            metadata={"_dim": dim},
             timestamp=time.time(),
             session_id=self.session_id,
         )

@@ -29,7 +29,7 @@ class ServerBackend:
         self._running = False
 
         # Plot configurations and data buffered before browser connects
-        self._plot_specs: dict[str, dict[str, str]] = {}
+        self._plot_specs: dict[str, dict[str, Any]] = {}
         self._buffer: dict[str, dict[str, list[Any]]] = {}
 
     def start(self) -> None:
@@ -41,18 +41,8 @@ class ServerBackend:
             """Initialize document when browser connects."""
             self._doc = doc
 
-            for name, spec in self._plot_specs.items():
-                data = self._buffer.get(name, {"x": [], "y": []})
-
-                source = ColumnDataSource(data=data)
-                self._sources[name] = source
-
-                plot = figure(title=name, width=800, height=400)
-                plot.xaxis.axis_label = spec["x_label"]
-                plot.yaxis.axis_label = spec["y_label"]
-                plot.line("x", "y", source=source, line_width=2, color="navy")
-
-                doc.add_root(plot)
+            for name in self._plot_specs.keys():
+                self._create_plot(name)
 
         def run_server() -> None:
             """Server thread: create event loop and start server."""
@@ -82,47 +72,132 @@ class ServerBackend:
             self._running = False
 
     def create_figure(
-        self, name: str, x_label: str, y_label: str
-    ) -> tuple[ColumnDataSource, bool]:
+        self,
+        name: str,
+        x_label: str,
+        y_label: str,
+        plot_type: str = "line",
+        z_label: str | None = None,
+        cell_size: tuple[float, float] | None = None,
+    ) -> None:
         """Register a new plot. Created when browser connects."""
         if not self._running:
             raise RuntimeError("Server not started")
 
         if name in self._plot_specs:
-            return ColumnDataSource(data={"x": [], "y": []}), True
+            return
 
-        self._plot_specs[name] = {"x_label": x_label, "y_label": y_label}
+        self._plot_specs[name] = {
+            "x_label": x_label,
+            "y_label": y_label,
+            "plot_type": plot_type,
+            "z_label": z_label,
+            "cell_size": cell_size,
+        }
 
         # If browser already connected, create plot immediately
         if self._doc is not None and name not in self._sources:
+            self._doc.add_next_tick_callback(lambda: self._create_plot(name))
 
-            def create() -> None:
-                data = self._buffer.pop(name, {"x": [], "y": []})
-                source = ColumnDataSource(data=data)
-                self._sources[name] = source
+    def _create_plot(self, name: str) -> None:
+        """Create plot based on spec."""
+        spec = self._plot_specs[name]
 
-                spec = self._plot_specs[name]
-                plot = figure(title=name, width=800, height=400)
-                plot.xaxis.axis_label = spec["x_label"]
-                plot.yaxis.axis_label = spec["y_label"]
-                plot.line("x", "y", source=source, line_width=2, color="navy")
+        if spec["plot_type"] == "line":
+            self._create_line_plot(name, spec)
+        elif spec["plot_type"] == "heatmap":
+            self._create_heatmap_plot(name, spec)
+        else:
+            raise ValueError(f"Unknown plot type: {spec['plot_type']}")
 
-                if self._doc:
-                    self._doc.add_root(plot)
+    def _create_line_plot(self, name: str, spec: dict[str, Any]) -> None:
+        """Create 1D line plot."""
+        data = self._buffer.pop(name, {"x": [], "y": []})
+        source = ColumnDataSource(data=data)
+        self._sources[name] = source
 
-            self._doc.add_next_tick_callback(create)
+        plot = figure(title=name, width=800, height=400)
+        plot.xaxis.axis_label = spec["x_label"]
+        plot.yaxis.axis_label = spec["y_label"]
+        plot.line("x", "y", source=source, line_width=2, color="navy")
 
-        return ColumnDataSource(data={"x": [], "y": []}), True
+        if self._doc:
+            self._doc.add_root(plot)
 
-    def stream_data(self, name: str, new_data: dict[str, Any], rollover: int) -> None:
+    def _create_heatmap_plot(self, name: str, spec: dict[str, Any]) -> None:
+        """Create 2D heatmap with rect glyph and linear color mapping."""
+        from bokeh.models import LinearColorMapper
+        from bokeh.models.annotations import ColorBar
+        from bokeh.palettes import Viridis256
+
+        data = self._buffer.pop(
+            name, {"x": [], "y": [], "value": [], "width": [], "height": []}
+        )
+        source = ColumnDataSource(data=data)
+        self._sources[name] = source
+
+        # Create color mapper
+        mapper = LinearColorMapper(palette=Viridis256, low=0, high=1)
+
+        plot = figure(
+            title=name,
+            width=800,
+            height=600,
+        )
+        plot.xaxis.axis_label = spec["x_label"]
+        plot.yaxis.axis_label = spec["y_label"]
+
+        # Add rect glyph with color mapping
+        plot.rect(
+            x="x",
+            y="y",
+            width="width",
+            height="height",
+            source=source,
+            fill_color={"field": "value", "transform": mapper},
+            line_color=None,
+        )
+
+        # Add color bar
+        color_bar = ColorBar(
+            color_mapper=mapper,
+            width=8,
+            location=(0, 0),
+            title=spec.get("z_label", "Value"),
+        )
+        plot.add_layout(color_bar, "right")
+
+        # Store plot state for dynamic updates
+        cell_size = spec.get("cell_size", (None, None))
+        self._plot_specs[name].update(
+            {
+                "mapper": mapper,
+                "dx": cell_size[0] if cell_size else None,
+                "dy": cell_size[1] if cell_size else None,
+                "value_min": float("inf"),
+                "value_max": float("-inf"),
+            }
+        )
+
+        if self._doc:
+            self._doc.add_root(plot)
+
+    def stream_data(
+        self, name: str, new_data: dict[str, Any], rollover: int | None = None
+    ) -> None:
         """Add data to plot. Buffers if browser not yet connected."""
         # Buffer data if plot not yet created
         if name not in self._sources:
             if name not in self._buffer:
-                self._buffer[name] = {"x": [], "y": []}
-            self._buffer[name]["x"].extend(new_data["x"])
-            self._buffer[name]["y"].extend(new_data["y"])
+                self._buffer[name] = {k: [] for k in new_data.keys()}
+            for key, values in new_data.items():
+                self._buffer[name].setdefault(key, []).extend(values)
             return
+
+        # For heatmap, calculate rect sizes and update color range
+        spec = self._plot_specs.get(name, {})
+        if spec.get("plot_type") == "heatmap" and "value" in new_data:
+            new_data = self._prepare_heatmap_data(name, new_data)
 
         # Stream to existing plot (thread-safe via callback)
         if self._doc:
@@ -130,4 +205,43 @@ class ServerBackend:
             def do_stream() -> None:
                 self._sources[name].stream(new_data, rollover=rollover)
 
+                # Update color mapper for heatmaps
+                if spec.get("plot_type") == "heatmap" and "mapper" in spec:
+                    spec["mapper"].low = spec["value_min"]
+                    spec["mapper"].high = spec["value_max"]
+
             self._doc.add_next_tick_callback(do_stream)
+
+    def _prepare_heatmap_data(self, name: str, data: dict[str, Any]) -> dict[str, Any]:
+        """Calculate rect sizes and update color range for heatmap data."""
+        import numpy as np
+
+        spec = self._plot_specs[name]
+
+        def calc_delta(key: str) -> float:
+            """Calculate minimum delta from existing + new data."""
+            if key not in data or len(data[key]) == 0:
+                return 0.1
+            existing = list(self._sources[name].data.get(key, []))
+            all_vals = existing + data[key]
+            if len(all_vals) > 1:
+                unique = sorted(set(all_vals))
+                if len(unique) > 1:
+                    return float(min(np.diff(unique)))
+            return 0.1
+
+        if spec["dx"] is None:
+            spec["dx"] = calc_delta("x")
+        if spec["dy"] is None:
+            spec["dy"] = calc_delta("y")
+
+        n = len(data.get("value", []))
+        data["width"] = [spec["dx"]] * n
+        data["height"] = [spec["dy"]] * n
+
+        if "value" in data:
+            values = np.array(data["value"])
+            spec["value_min"] = float(min(spec["value_min"], float(values.min())))
+            spec["value_max"] = float(max(spec["value_max"], float(values.max())))
+
+        return data

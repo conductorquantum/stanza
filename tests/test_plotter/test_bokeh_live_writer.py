@@ -2,6 +2,7 @@
 
 import getpass
 
+import numpy as np
 import pytest
 
 from stanza.logger.datatypes import MeasurementData, SessionMetadata, SweepData
@@ -16,13 +17,22 @@ class MockBackend:
         self.push_count = 0
         self.streamed_data: dict[str, list[dict]] = {}
 
-    def create_figure(self, name: str, x_label: str, y_label: str) -> object:
+    def create_figure(
+        self,
+        name: str,
+        x_label: str,
+        y_label: str,
+        plot_type: str = "line",
+        z_label: str | None = None,
+        cell_size: tuple[float, float] | None = None,
+    ) -> object:
         """Mock create_figure."""
         self.figures_created.append(
             {
                 "name": name,
                 "x_label": x_label,
                 "y_label": y_label,
+                "plot_type": plot_type,
             }
         )
         fig = type("MockFig", (), {"line": lambda *args, **kwargs: None})()
@@ -68,8 +78,7 @@ def test_initialization(mock_backend: MockBackend) -> None:
 
     assert writer.backend is mock_backend
     assert writer.max_points == 500
-    assert len(writer._figures) == 0
-    assert len(writer._sources) == 0
+    assert len(writer._plots) == 0
 
 
 def test_initialize_session(
@@ -109,8 +118,8 @@ def test_write_sweep_creates_figure(
 
     sweep = SweepData(
         name="G1_sweep",
-        x_data=[1.0, 2.0, 3.0],
-        y_data=[0.1, 0.2, 0.3],
+        x_data=np.array([1.0, 2.0, 3.0]),
+        y_data=np.array([0.1, 0.2, 0.3]),
         x_label="Voltage (V)",
         y_label="Current (A)",
         metadata={},
@@ -122,7 +131,7 @@ def test_write_sweep_creates_figure(
 
     assert len(mock_backend.figures_created) == 1
     assert mock_backend.figures_created[0]["name"] == "G1_sweep"
-    assert "G1_sweep" in writer._sources
+    assert "G1_sweep" in writer._plots
 
 
 def test_flush_calls_backend_push(

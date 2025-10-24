@@ -82,25 +82,29 @@ class TestSweepContext:
         logger_session.finalize()
 
     def test_rejects_length_mismatch(self, logger_session):
-        """Test that append rejects x and y arrays with different lengths."""
+        """Test that append rejects x and y arrays with different lengths for 1D sweeps."""
         logger_session.initialize()
         sweep = logger_session.sweep("test", "X", "Y")
 
-        with pytest.raises(ValueError, match="length mismatch"):
+        # First establish it's a 1D sweep by appending matching lengths
+        sweep.append([1.0], [2.0])
+
+        # Now try mismatched lengths - should fail
+        with pytest.raises(ValueError, match="Length mismatch"):
             sweep.append([1.0, 2.0], [3.0])
 
         sweep.cancel()
         logger_session.finalize()
 
     def test_enforces_1d_arrays_only(self, logger_session):
-        """Test that 2D arrays are rejected."""
+        """Test that multidimensional numpy arrays are rejected."""
         logger_session.initialize()
         sweep = logger_session.sweep("test", "X", "Y")
 
-        with pytest.raises(ValueError, match="Only 1D sweeps supported"):
+        with pytest.raises(ValueError, match="must be 1D arrays"):
             sweep.append(np.array([[1, 2], [3, 4]]), [1.0, 2.0])
 
-        with pytest.raises(ValueError, match="Only 1D sweeps supported"):
+        with pytest.raises(ValueError, match="must be 1D arrays"):
             sweep.append([1.0, 2.0], np.array([[1, 2], [3, 4]]))
 
         sweep.cancel()

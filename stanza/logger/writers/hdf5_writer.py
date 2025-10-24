@@ -189,7 +189,14 @@ class HDF5Writer(AbstractDataWriter):
             data_group = sweep_group.create_group("data")
             metadata_group = sweep_group.create_group("metadata")
 
-            self._create_dataset(data_group, sweep.x_label, sweep.x_data)
+            # Handle x_label which can be str (1D) or list[str] (2D)
+            if isinstance(sweep.x_label, list):
+                # 2D sweep: x_data has shape (N, 2)
+                for i, label in enumerate(sweep.x_label):
+                    self._create_dataset(data_group, label, sweep.x_data[:, i])
+            else:
+                # 1D sweep
+                self._create_dataset(data_group, sweep.x_label, sweep.x_data)
             self._create_dataset(data_group, sweep.y_label, sweep.y_data)
 
             sweep_group.attrs["x_label"] = sweep.x_label
