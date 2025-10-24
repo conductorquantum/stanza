@@ -7,12 +7,16 @@ Two backends available:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Literal, Union
+import logging
+from typing import TYPE_CHECKING, Literal
+
+from stanza.plotter.backends.inline import InlineBackend
+from stanza.plotter.backends.server import ServerBackend
 
 if TYPE_CHECKING:
     from stanza.logger.data_logger import DataLogger
-    from stanza.plotter.backends.inline import InlineBackend
-    from stanza.plotter.backends.server import ServerBackend
+
+logger = logging.getLogger(__name__)
 
 
 def enable_live_plotting(
@@ -44,14 +48,14 @@ def enable_live_plotting(
 
         bokeh_backend = ServerBackend(port=port)
         bokeh_backend.start()
-        print(f"📊 Server started: http://localhost:{port}")
+        logger.info(f"Bokeh Server started: http://localhost:{port}")
 
     elif backend == "inline":
         from stanza.plotter.backends.inline import InlineBackend
 
         bokeh_backend = InlineBackend()
         bokeh_backend.start()
-        print("📊 Inline plotting enabled")
+        logger.info("Bokeh Inline plotting enabled")
 
     else:
         raise ValueError(f"Unknown backend: {backend}")
