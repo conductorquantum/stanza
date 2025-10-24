@@ -1,6 +1,7 @@
 """Tests for Stanza CLI (stanza/cli.py)."""
 
 import json
+import re
 from pathlib import Path
 
 from click.testing import CliRunner
@@ -30,7 +31,8 @@ class TestCLI:
 
         assert result.exit_code == 0
         assert "(Stanza)" in result.output
-        assert "0.1" in result.output
+        # Check for valid semantic version format (e.g., 0.1.0, 1.2.3)
+        assert re.search(r"\d+\.\d+\.\d+", result.output) is not None
 
 
 class TestInitCommand:

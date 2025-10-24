@@ -122,10 +122,10 @@ Then run your routines - all data will be logged to the active session directory
 
 ```python
 from stanza.routines import RoutineRunner
-from stanza.models import DeviceConfig
+from stanza.utils import load_device_config
 
 # Load configuration
-config = DeviceConfig.from_yaml("device.yaml")
+config = load_device_config("device.yaml")
 
 # Create runner - automatically loads routine parameters from config
 runner = RoutineRunner(configs=[config])
@@ -203,7 +203,7 @@ v_data, i_data = device.sweep_2d("G1", v1, "G2", v2, "DRAIN")
 v_data, i_data = device.sweep_nd(["G1", "G2"], voltages, "DRAIN")
 ```
 
-### Breakout Box Operations (QSwitch)
+### Breakout Box Operations
 
 Stanza supports digital breakout boxes for routing control and measurement signals. Configure channels with `breakout_channel` and instruments with `breakout_line`:
 
