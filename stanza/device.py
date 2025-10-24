@@ -616,27 +616,51 @@ class Device:
             raise DeviceError("Failed to set all controllable pads to 0V")
 
     def ground_breakout_lines(self) -> None:
-        """Ground all breakout box lines."""
+        """Ground all breakout box lines.
+
+        This method sets all breakout box lines to a grounded state.
+
+        Raises:
+            DeviceError: If the breakout box instrument is not configured.
+        """
         if not self.breakout_box_instrument:
             raise DeviceError("Breakout box instrument not configured")
 
         self.breakout_box_instrument.set_grounded(self.breakout_lines)
 
     def unground_breakout_lines(self) -> None:
-        """Unground all breakout box lines."""
+        """Unground all breakout box lines.
+
+        This method sets all breakout box lines to an ungrounded state.
+
+        Raises:
+            DeviceError: If the breakout box instrument is not configured.
+        """
         if not self.breakout_box_instrument:
             raise DeviceError("Breakout box instrument not configured")
 
         self.breakout_box_instrument.set_ungrounded(self.breakout_lines)
 
     def connect_breakout_lines(self) -> None:
-        """Connect all breakout box lines."""
+        """Connect all breakout box lines.
+
+        This method connects all breakout box lines to the instrument.
+
+        Raises:
+            DeviceError: If the breakout box instrument is not configured.
+        """
         if not self.breakout_box_instrument:
             raise DeviceError("Breakout box instrument not configured")
         self._set_breakout_connection(self.breakout_box_instrument.set_connected)
 
     def disconnect_breakout_lines(self) -> None:
-        """Disconnect all breakout box lines."""
+        """Disconnect all breakout box lines.
+
+        This method disconnects all breakout box lines from the instrument.
+
+        Raises:
+            DeviceError: If the breakout box instrument is not configured.
+        """
         if not self.breakout_box_instrument:
             raise DeviceError("Breakout box instrument not configured")
         self._set_breakout_connection(self.breakout_box_instrument.set_disconnected)
@@ -644,7 +668,16 @@ class Device:
     def _get_lines_by_channel(
         self, has_channel: Callable[[ChannelConfig], bool]
     ) -> list[str]:
-        """Filter breakout box lines by channel type."""
+        """Filter breakout box lines by channel type.
+
+        This method filters the breakout box lines by the channel type.
+
+        Args:
+            has_channel: A callable that returns True if the channel has the specified type.
+
+        Returns:
+            A list of breakout box lines that have the specified channel type.
+        """
         return [
             line
             for line in self.breakout_lines
@@ -658,7 +691,16 @@ class Device:
         instrument_name: str,
         connection_method: Callable[[list[str], int], None],
     ) -> None:
-        """Apply connection method to a list of lines for a specific instrument."""
+        """Apply connection method to a list of lines for a specific instrument.
+
+        This method applies the connection method to a list of lines for a specific instrument.
+
+        Args:
+            lines: A list of breakout box lines to apply the connection method to.
+            instrument: The instrument to apply the connection method to.
+            instrument_name: The name of the instrument.
+            connection_method: The connection method to apply.
+        """
         if not lines:
             return
         if not instrument:
@@ -675,7 +717,13 @@ class Device:
     def _set_breakout_connection(
         self, connection_method: Callable[[list[str], int], None]
     ) -> None:
-        """Set breakout box connection state for all lines, grouped by instrument."""
+        """Set breakout box connection state for all lines, grouped by instrument type.
+
+        This method sets the breakout box connection state for all lines, grouped by instrument type.
+
+        Args:
+            connection_method: The connection method to apply to the control and measurement instruments.
+        """
         control_lines = self._get_lines_by_channel(
             lambda c: c.control_channel is not None
         )
