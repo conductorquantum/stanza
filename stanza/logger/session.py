@@ -274,6 +274,10 @@ class LoggerSession:
             self._active = False
             raise LoggerSessionError(f"Failed to finalize session: {str(e)}") from e
 
+    def close(self) -> None:
+        """Close the session (alias for finalize())."""
+        self.finalize()
+
     def log_measurement(
         self,
         name: str,
