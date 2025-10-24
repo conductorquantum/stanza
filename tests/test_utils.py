@@ -3,8 +3,19 @@ from unittest.mock import patch
 
 import pytest
 
-from stanza.models import PadType
+from stanza.models import (
+    Contact,
+    ContactType,
+    ControlInstrumentConfig,
+    DeviceConfig,
+    Gate,
+    GateType,
+    InstrumentType,
+    MeasurementInstrumentConfig,
+    PadType,
+)
 from stanza.utils import (
+    device_from_config,
     generate_channel_configs,
     get_config_resource,
     load_device_config,
@@ -168,8 +179,10 @@ class TestLoadDeviceConfig:
         assert "IN" in result.contacts
         assert result.gates["G1"].control_channel == 3
         assert result.gates["G1"].measure_channel == 3
+        assert result.gates["G1"].breakout_channel == 3
         assert result.contacts["IN"].control_channel == 1
         assert result.contacts["IN"].measure_channel == 1
+        assert result.contacts["IN"].breakout_channel == 1
 
     def test_loads_external_yaml_config(self, valid_device_yaml, tmp_path):
         config_file = tmp_path / "device.yaml"
@@ -206,3 +219,49 @@ class TestGenerateChannelConfigs:
         assert channel_configs["GPIO1"].pad_type == PadType.GPIO
         assert channel_configs["GPIO1"].output_mode == "digital"
         assert channel_configs["GPIO1"].control_channel == 4
+
+
+class TestDeviceFromConfig:
+    """Test device_from_config utility function with new breakout box support."""
+
+    def test_device_from_config_missing_driver_field(self):
+        device_config = DeviceConfig(
+            name="test_device",
+            gates={
+                "G1": Gate(
+                    name="G1",
+                    type=GateType.PLUNGER,
+                    v_lower_bound=-1.0,
+                    v_upper_bound=1.0,
+                    control_channel=1,
+                )
+            },
+            contacts={
+                "C1": Contact(
+                    name="C1",
+                    type=ContactType.SOURCE,
+                    v_lower_bound=-1.0,
+                    v_upper_bound=1.0,
+                    measure_channel=1,
+                )
+            },
+            instruments=[
+                ControlInstrumentConfig(
+                    name="ctrl",
+                    type=InstrumentType.CONTROL,
+                    ip_addr="127.0.0.1",
+                    slew_rate=1.0,
+                    driver=None,
+                ),
+                MeasurementInstrumentConfig(
+                    name="meas",
+                    type=InstrumentType.MEASUREMENT,
+                    ip_addr="127.0.0.1",
+                    measurement_duration=1.0,
+                    sample_time=0.1,
+                ),
+            ],
+        )
+
+        with pytest.raises(ValueError, match="missing driver field"):
+            device_from_config(device_config)

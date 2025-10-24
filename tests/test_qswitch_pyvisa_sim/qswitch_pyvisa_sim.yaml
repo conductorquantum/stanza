@@ -1,0 +1,253 @@
+spec: "1.0"
+devices:
+  qswitch_scpi:
+    eom:
+      ASRL INSTR:
+        q: "\n"
+        r: "\n"
+      TCPIP SOCKET:
+        q: "\n"
+        r: "\n"
+    dialogues:
+      - q: "*IDN?"
+        r: "QDevil,QSwitch,QSWSIM1234,v1.0.0"
+      - q: "close? (@1!0,2!0)"
+        r: "1,1"
+      - q: "open? (@1!1,2!1)"
+        r: "1,1"
+      - q: "close (@1!3,2!3)"
+        r: "OK"
+      - q: "open (@1!5,2!5)"
+        r: "OK"
+      - q: "close? (@1!0,1!1,1!2,1!3,1!4,1!5,1!6,1!7,1!8,1!9)"
+        r: "1,0,0,0,0,0,0,0,0,0"
+      - q: "open? (@1!0,1!1,1!2,1!3,1!4,1!5,1!6,1!7,1!8,1!9)"
+        r: "0,1,1,1,1,1,1,1,1,1"
+      - q: "close? (@2!0,2!1,2!2,2!3,2!4,2!5,2!6,2!7,2!8,2!9)"
+        r: "1,0,0,0,0,0,0,0,0,0"
+      - q: "open? (@2!0,2!1,2!2,2!3,2!4,2!5,2!6,2!7,2!8,2!9)"
+        r: "0,1,1,1,1,1,1,1,1,1"
+      - q: "close (@1!0)"
+        r: "OK"
+      - q: "close (@1!1)"
+        r: "OK"
+      - q: "close (@1!2)"
+        r: "OK"
+      - q: "close (@1!3)"
+        r: "OK"
+      - q: "close (@1!4)"
+        r: "OK"
+      - q: "close (@1!5)"
+        r: "OK"
+      - q: "close (@1!6)"
+        r: "OK"
+      - q: "close (@1!7)"
+        r: "OK"
+      - q: "close (@1!8)"
+        r: "OK"
+      - q: "close (@1!9)"
+        r: "OK"
+      - q: "open (@1!0)"
+        r: "OK"
+      - q: "open (@1!1)"
+        r: "OK"
+      - q: "open (@1!2)"
+        r: "OK"
+      - q: "open (@1!3)"
+        r: "OK"
+      - q: "open (@1!4)"
+        r: "OK"
+      - q: "open (@1!5)"
+        r: "OK"
+      - q: "open (@1!6)"
+        r: "OK"
+      - q: "open (@1!7)"
+        r: "OK"
+      - q: "open (@1!8)"
+        r: "OK"
+      - q: "open (@1!9)"
+        r: "OK"
+      - q: "close (@2!0)"
+        r: "OK"
+      - q: "close (@2!1)"
+        r: "OK"
+      - q: "close (@2!2)"
+        r: "OK"
+      - q: "close (@2!3)"
+        r: "OK"
+      - q: "close (@2!4)"
+        r: "OK"
+      - q: "close (@2!5)"
+        r: "OK"
+      - q: "close (@2!6)"
+        r: "OK"
+      - q: "close (@2!7)"
+        r: "OK"
+      - q: "close (@2!8)"
+        r: "OK"
+      - q: "close (@2!9)"
+        r: "OK"
+      - q: "open (@2!0)"
+        r: "OK"
+      - q: "open (@2!1)"
+        r: "OK"
+      - q: "open (@2!2)"
+        r: "OK"
+      - q: "open (@2!3)"
+        r: "OK"
+      - q: "open (@2!4)"
+        r: "OK"
+      - q: "open (@2!5)"
+        r: "OK"
+      - q: "open (@2!6)"
+        r: "OK"
+      - q: "open (@2!7)"
+        r: "OK"
+      - q: "open (@2!8)"
+        r: "OK"
+      - q: "open (@2!9)"
+        r: "OK"
+    properties:
+      close_1_0:
+        default: 1
+        getter:
+          q: "close? (@1!0)"
+          r: "{:d}"
+        specs:
+          type: int
+      close_1_1:
+        default: 0
+        getter:
+          q: "close? (@1!1)"
+          r: "{:d}"
+        specs:
+          type: int
+      close_1_2:
+        default: 0
+        getter:
+          q: "close? (@1!2)"
+          r: "{:d}"
+        specs:
+          type: int
+      close_1_3:
+        default: 0
+        getter:
+          q: "close? (@1!3)"
+          r: "{:d}"
+        specs:
+          type: int
+      close_1_4:
+        default: 0
+        getter:
+          q: "close? (@1!4)"
+          r: "{:d}"
+        specs:
+          type: int
+      close_1_5:
+        default: 0
+        getter:
+          q: "close? (@1!5)"
+          r: "{:d}"
+        specs:
+          type: int
+      close_1_6:
+        default: 0
+        getter:
+          q: "close? (@1!6)"
+          r: "{:d}"
+        specs:
+          type: int
+      close_1_7:
+        default: 0
+        getter:
+          q: "close? (@1!7)"
+          r: "{:d}"
+        specs:
+          type: int
+      close_1_8:
+        default: 0
+        getter:
+          q: "close? (@1!8)"
+          r: "{:d}"
+        specs:
+          type: int
+      close_1_9:
+        default: 0
+        getter:
+          q: "close? (@1!9)"
+          r: "{:d}"
+        specs:
+          type: int
+      open_1_0:
+        default: 0
+        getter:
+          q: "open? (@1!0)"
+          r: "{:d}"
+        specs:
+          type: int
+      open_1_1:
+        default: 1
+        getter:
+          q: "open? (@1!1)"
+          r: "{:d}"
+        specs:
+          type: int
+      open_1_2:
+        default: 1
+        getter:
+          q: "open? (@1!2)"
+          r: "{:d}"
+        specs:
+          type: int
+      open_1_3:
+        default: 1
+        getter:
+          q: "open? (@1!3)"
+          r: "{:d}"
+        specs:
+          type: int
+      open_1_4:
+        default: 1
+        getter:
+          q: "open? (@1!4)"
+          r: "{:d}"
+        specs:
+          type: int
+      open_1_5:
+        default: 1
+        getter:
+          q: "open? (@1!5)"
+          r: "{:d}"
+        specs:
+          type: int
+      open_1_6:
+        default: 1
+        getter:
+          q: "open? (@1!6)"
+          r: "{:d}"
+        specs:
+          type: int
+      open_1_7:
+        default: 1
+        getter:
+          q: "open? (@1!7)"
+          r: "{:d}"
+        specs:
+          type: int
+      open_1_8:
+        default: 1
+        getter:
+          q: "open? (@1!8)"
+          r: "{:d}"
+        specs:
+          type: int
+      open_1_9:
+        default: 1
+        getter:
+          q: "open? (@1!9)"
+          r: "{:d}"
+        specs:
+          type: int
+resources:
+  ASRL2::INSTR:
+    device: qswitch_scpi

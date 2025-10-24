@@ -1,27 +1,13 @@
-from stanza.base.protocols import ControlInstrument, MeasurementInstrument
-
-
-class MockControlInstrument:
-    def __init__(self):
-        self.voltages = {}
-        self.slew_rates = {}
-
-    def set_voltage(self, channel_name: str, voltage: float) -> None:
-        self.voltages[channel_name] = voltage
-
-    def get_voltage(self, channel_name: str) -> float:
-        return self.voltages.get(channel_name, 0.0)
-
-    def get_slew_rate(self, channel_name: str) -> float:
-        return self.slew_rates.get(channel_name, 1.0)
-
-
-class MockMeasurementInstrument:
-    def __init__(self):
-        self.measurements = {}
-
-    def measure(self, channel_name: str) -> float:
-        return self.measurements.get(channel_name, 0.0)
+from stanza.base.protocols import (
+    BreakoutBoxInstrument,
+    ControlInstrument,
+    MeasurementInstrument,
+)
+from tests.conftest import (
+    MockBreakoutBoxInstrument,
+    MockControlInstrument,
+    MockMeasurementInstrument,
+)
 
 
 class TestControlInstrumentProtocol:
@@ -58,3 +44,48 @@ class TestMeasurementInstrumentProtocol:
         mock_instrument = MockMeasurementInstrument()
 
         assert hasattr(mock_instrument, "measure")
+
+
+class TestBreakoutBoxInstrumentProtocol:
+    def test_protocol_implementation(self):
+        mock_instrument = MockBreakoutBoxInstrument()
+        assert isinstance(mock_instrument, BreakoutBoxInstrument)
+
+    def test_protocol_methods_exist(self):
+        mock_instrument = MockBreakoutBoxInstrument()
+        assert hasattr(mock_instrument, "get_grounded")
+        assert hasattr(mock_instrument, "set_grounded")
+        assert hasattr(mock_instrument, "get_ungrounded")
+        assert hasattr(mock_instrument, "set_ungrounded")
+        assert hasattr(mock_instrument, "get_connected")
+        assert hasattr(mock_instrument, "set_connected")
+        assert hasattr(mock_instrument, "get_disconnected")
+        assert hasattr(mock_instrument, "set_disconnected")
+
+    def test_grounding_functionality(self):
+        mock_instrument = MockBreakoutBoxInstrument()
+
+        assert mock_instrument.get_ungrounded("ch1") is True
+        assert mock_instrument.get_grounded("ch1") is False
+
+        mock_instrument.set_grounded("ch1")
+        assert mock_instrument.get_grounded("ch1") is True
+        assert mock_instrument.get_ungrounded("ch1") is False
+
+        mock_instrument.set_ungrounded("ch1")
+        assert mock_instrument.get_ungrounded("ch1") is True
+        assert mock_instrument.get_grounded("ch1") is False
+
+    def test_connection_functionality(self):
+        mock_instrument = MockBreakoutBoxInstrument()
+
+        assert mock_instrument.get_disconnected("ch1", 5) is True
+        assert mock_instrument.get_connected("ch1", 5) is False
+
+        mock_instrument.set_connected("ch1", 5)
+        assert mock_instrument.get_connected("ch1", 5) is True
+        assert mock_instrument.get_disconnected("ch1", 5) is False
+        assert ("ch1", 5) in mock_instrument.connected_calls
+
+        mock_instrument.set_disconnected("ch1", 5)
+        assert ("ch1", 5) in mock_instrument.disconnected_calls

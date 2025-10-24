@@ -28,6 +28,7 @@ class ChannelConfig:
     electrode_type: GateType | ContactType | GPIOType
     control_channel: int | None = None
     measure_channel: int | None = None
+    breakout_channel: int | None = None
     output_mode: str = "dc"
     enabled: bool = True
     unit: str = "V"

@@ -8,7 +8,7 @@ from typing import Any
 import yaml
 
 from stanza.base.channels import ChannelConfig
-from stanza.base.registry import load_driver_class
+from stanza.base.registry import load_driver_class, validate_driver_protocols
 from stanza.device import Device
 from stanza.models import DeviceConfig, InstrumentType, PadType
 
@@ -89,6 +89,7 @@ def generate_channel_configs(device_config: DeviceConfig) -> dict[str, ChannelCo
             name=gate_name,
             control_channel=gate.control_channel,
             measure_channel=gate.measure_channel,
+            breakout_channel=gate.breakout_channel,
             voltage_range=(gate.v_lower_bound, gate.v_upper_bound),
             pad_type=PadType.GATE,
             electrode_type=gate.type,
@@ -101,6 +102,7 @@ def generate_channel_configs(device_config: DeviceConfig) -> dict[str, ChannelCo
             name=contact_name,
             control_channel=contact.control_channel,
             measure_channel=contact.measure_channel,
+            breakout_channel=contact.breakout_channel,
             voltage_range=(contact.v_lower_bound, contact.v_upper_bound),
             pad_type=PadType.CONTACT,
             electrode_type=contact.type,
@@ -113,6 +115,7 @@ def generate_channel_configs(device_config: DeviceConfig) -> dict[str, ChannelCo
             name=gpio_name,
             control_channel=gpio.control_channel,
             measure_channel=gpio.measure_channel,
+            breakout_channel=gpio.breakout_channel,
             voltage_range=(gpio.v_lower_bound, gpio.v_upper_bound),
             pad_type=PadType.GPIO,
             electrode_type=gpio.type,
@@ -142,6 +145,7 @@ def device_from_config(
 
     control_instrument = None
     measurement_instrument = None
+    breakout_box_instrument = None
 
     for instrument_config in device_config.instruments:
         if instrument_config.driver is None:
@@ -150,18 +154,25 @@ def device_from_config(
             )
 
         driver_class = load_driver_class(instrument_config.driver)
+        validate_driver_protocols(driver_class, instrument_config.type)
         instrument = driver_class(instrument_config, channel_configs, **driver_kwargs)
 
-        if instrument_config.type in (InstrumentType.CONTROL, InstrumentType.GENERAL):
-            if control_instrument is None:
+        match instrument_config.type:
+            case InstrumentType.BREAKOUT_BOX if breakout_box_instrument is None:
+                breakout_box_instrument = instrument
+            case InstrumentType.CONTROL if control_instrument is None:
                 control_instrument = instrument
-
-        if instrument_config.type in (
-            InstrumentType.MEASUREMENT,
-            InstrumentType.GENERAL,
-        ):
-            if measurement_instrument is None:
+            case InstrumentType.MEASUREMENT if measurement_instrument is None:
                 measurement_instrument = instrument
+            case InstrumentType.GENERAL if (
+                control_instrument is None and measurement_instrument is None
+            ):
+                control_instrument = instrument
+                measurement_instrument = instrument
+            case _:
+                raise ValueError(
+                    f"Instrument '{instrument_config.name}' is not a valid instrument type"
+                )
 
     return Device(
         name=device_config.name,
@@ -169,6 +180,7 @@ def device_from_config(
         channel_configs=channel_configs,
         control_instrument=control_instrument,
         measurement_instrument=measurement_instrument,
+        breakout_box_instrument=breakout_box_instrument,
     )
 
 

@@ -38,7 +38,7 @@ class QDAC2ControlChannel(ControlChannel):
         super().__init__(config)
 
     def _setup_parameters(self) -> None:
-        """Setup QDAC2-specific controlparameters with hardware integration."""
+        """Setup QDAC2-specific control parameters with hardware integration."""
         super()._setup_parameters()
 
         voltage_param = self.get_parameter("voltage")

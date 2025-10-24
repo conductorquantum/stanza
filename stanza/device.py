@@ -1,10 +1,16 @@
 import time
-from typing import Any, overload
+from collections.abc import Callable
+from typing import Any, cast, overload
 
 import numpy as np
 
 from stanza.base.channels import ChannelConfig
-from stanza.base.protocols import ControlInstrument, MeasurementInstrument
+from stanza.base.instruments import BaseControlInstrument, BaseMeasurementInstrument
+from stanza.base.protocols import (
+    BreakoutBoxInstrument,
+    ControlInstrument,
+    MeasurementInstrument,
+)
 from stanza.exceptions import DeviceError
 from stanza.logger.session import LoggerSession
 from stanza.models import ContactType, DeviceConfig, GateType, PadType
@@ -39,6 +45,7 @@ class Device:
         channel_configs: dict[str, ChannelConfig],
         control_instrument: Any | None,
         measurement_instrument: Any | None,
+        breakout_box_instrument: Any | None = None,
     ):
         self.name = name
         self.device_config = device_config
@@ -55,9 +62,30 @@ class Device:
                 "Measurement instrument must implement the `MeasurementInstrument` protocol"
             )
 
-        self.control_instrument = control_instrument
-        self.measurement_instrument = measurement_instrument
+        if breakout_box_instrument and not isinstance(
+            breakout_box_instrument, BreakoutBoxInstrument
+        ):
+            raise DeviceError(
+                "Breakout Box instrument must implement the `BreakoutBoxInstrument` protocol"
+            )
+
+        self.control_instrument = cast(ControlInstrument | None, control_instrument)
+        self.measurement_instrument = cast(
+            MeasurementInstrument | None, measurement_instrument
+        )
+        self.breakout_box_instrument = cast(
+            BreakoutBoxInstrument | None, breakout_box_instrument
+        )
         self.channel_configs = channel_configs
+
+    @property
+    def breakout_lines(self) -> list[str]:
+        """List of all breakout box line names in the device."""
+        return [
+            channel.name
+            for channel in self.channel_configs.values()
+            if channel.breakout_channel is not None
+        ]
 
     @property
     def gates(self) -> list[str]:
@@ -568,16 +596,17 @@ class Device:
                 to reach 0V within tolerance (1e-6V) after the operation.
         """
         pads: list[str] = []
-        if str(type).upper() == PadType.ALL:
-            pads = self.control_gates + self.control_contacts + self.control_gpios
-        elif str(type).upper() == PadType.GATE:
-            pads = self.control_gates
-        elif str(type).upper() == PadType.CONTACT:
-            pads = self.control_contacts
-        elif str(type).upper() == PadType.GPIO:
-            pads = self.control_gpios
-        else:
-            raise DeviceError(f"Invalid pad type: {type}")
+        match str(type).upper():
+            case PadType.ALL:
+                pads = self.control_gates + self.control_contacts + self.control_gpios
+            case PadType.GATE:
+                pads = self.control_gates
+            case PadType.CONTACT:
+                pads = self.control_contacts
+            case PadType.GPIO:
+                pads = self.control_gpios
+            case _:
+                raise DeviceError(f"Invalid pad type: {type}")
 
         gate_voltages = dict.fromkeys(pads, 0.0)
         self.jump(gate_voltages, wait_for_settling=True)
@@ -585,3 +614,136 @@ class Device:
         actual_voltages = self.check(pads)
         if not np.allclose(actual_voltages, [0.0] * len(actual_voltages), atol=1e-6):
             raise DeviceError("Failed to set all controllable pads to 0V")
+
+    def ground_breakout_lines(self) -> None:
+        """Ground all breakout box lines.
+
+        This method sets all breakout box lines to a grounded state.
+
+        Raises:
+            DeviceError: If the breakout box instrument is not configured.
+        """
+        if not self.breakout_box_instrument:
+            raise DeviceError("Breakout box instrument not configured")
+
+        self.breakout_box_instrument.set_grounded(self.breakout_lines)
+
+    def unground_breakout_lines(self) -> None:
+        """Unground all breakout box lines.
+
+        This method sets all breakout box lines to an ungrounded state.
+
+        Raises:
+            DeviceError: If the breakout box instrument is not configured.
+        """
+        if not self.breakout_box_instrument:
+            raise DeviceError("Breakout box instrument not configured")
+
+        self.breakout_box_instrument.set_ungrounded(self.breakout_lines)
+
+    def connect_breakout_lines(self) -> None:
+        """Connect all breakout box lines.
+
+        This method connects all breakout box lines to the instrument.
+
+        Raises:
+            DeviceError: If the breakout box instrument is not configured.
+        """
+        if not self.breakout_box_instrument:
+            raise DeviceError("Breakout box instrument not configured")
+        self._set_breakout_connection(self.breakout_box_instrument.set_connected)
+
+    def disconnect_breakout_lines(self) -> None:
+        """Disconnect all breakout box lines.
+
+        This method disconnects all breakout box lines from the instrument.
+
+        Raises:
+            DeviceError: If the breakout box instrument is not configured.
+        """
+        if not self.breakout_box_instrument:
+            raise DeviceError("Breakout box instrument not configured")
+        self._set_breakout_connection(self.breakout_box_instrument.set_disconnected)
+
+    def _get_lines_by_channel(
+        self, has_channel: Callable[[ChannelConfig], bool]
+    ) -> list[str]:
+        """Filter breakout box lines by channel type.
+
+        This method filters the breakout box lines by the channel type.
+
+        Args:
+            has_channel: A callable that returns True if the channel has the specified type.
+
+        Returns:
+            A list of breakout box lines that have the specified channel type.
+        """
+        return [
+            line
+            for line in self.breakout_lines
+            if has_channel(self.channel_configs[line])
+        ]
+
+    def _apply_breakout_connection(
+        self,
+        lines: list[str],
+        instrument: ControlInstrument | MeasurementInstrument | None,
+        instrument_name: str,
+        connection_method: Callable[[list[str], int], None],
+    ) -> None:
+        """Apply connection method to a list of lines for a specific instrument.
+
+        This method applies the connection method to a list of lines for a specific instrument.
+
+        Args:
+            lines: A list of breakout box lines to apply the connection method to.
+            instrument: The instrument to apply the connection method to.
+            instrument_name: The name of the instrument.
+            connection_method: The connection method to apply.
+        """
+        if not lines:
+            return
+        if not instrument:
+            raise DeviceError(f"{instrument_name} instrument not configured")
+        breakout_line = cast(
+            BaseControlInstrument | BaseMeasurementInstrument, instrument
+        ).instrument_config.breakout_line
+        if breakout_line is None:
+            raise DeviceError(
+                f"{instrument_name} instrument breakout line not configured"
+            )
+        connection_method(lines, breakout_line)
+
+    def _set_breakout_connection(
+        self, connection_method: Callable[[list[str], int], None]
+    ) -> None:
+        """Set breakout box connection state for all lines, grouped by instrument type.
+
+        This method sets the breakout box connection state for all lines, grouped by instrument type.
+
+        Args:
+            connection_method: The connection method to apply to the control and measurement instruments.
+        """
+        control_lines = self._get_lines_by_channel(
+            lambda c: c.control_channel is not None
+        )
+        measurement_lines = self._get_lines_by_channel(
+            lambda c: c.measure_channel is not None
+        )
+
+        all_instrument_lines = set(control_lines) | set(measurement_lines)
+        orphan_lines = set(self.breakout_lines) - all_instrument_lines
+        if orphan_lines:
+            raise DeviceError(
+                f"Breakout box line {orphan_lines.pop()} has no associated instrument channel"
+            )
+
+        self._apply_breakout_connection(
+            control_lines, self.control_instrument, "Control", connection_method
+        )
+        self._apply_breakout_connection(
+            measurement_lines,
+            self.measurement_instrument,
+            "Measurement",
+            connection_method,
+        )
