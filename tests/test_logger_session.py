@@ -356,21 +356,21 @@ class TestLoggerSession:
         )
         session = session_factory(metadata=metadata)
 
-        assert session.routine_name == ""
+        assert session.metadata.routine_name is None
 
 
 def test_time_based_auto_flush_triggers_on_measurement(tmpdir_path, session_factory):
     """Test that auto-flush triggers based on elapsed time during log_measurement."""
     session = session_factory(auto_flush_interval=30.0, buffer_size=100)
 
-    with patch("time.time") as mock_time:
-        mock_time.return_value = 1000.0
+    with patch("time.monotonic") as mock_monotonic:
+        mock_monotonic.return_value = 1000.0
         session.initialize()
 
         session.log_measurement("m1", {"value": 1})
         assert len(session._buffer) == 1
 
-        mock_time.return_value = 1031.0
+        mock_monotonic.return_value = 1031.0
 
         session.log_measurement("m2", {"value": 2})
 
@@ -386,14 +386,14 @@ def test_time_based_auto_flush_triggers_on_sweep(tmpdir_path, session_factory):
     """Test that auto-flush triggers based on elapsed time during log_sweep."""
     session = session_factory(auto_flush_interval=30.0, buffer_size=100)
 
-    with patch("time.time") as mock_time:
-        mock_time.return_value = 1000.0
+    with patch("time.monotonic") as mock_monotonic:
+        mock_monotonic.return_value = 1000.0
         session.initialize()
 
         session.log_sweep("s1", [1.0, 2.0], [3.0, 4.0], "X", "Y")
         assert len(session._buffer) == 1
 
-        mock_time.return_value = 1031.0
+        mock_monotonic.return_value = 1031.0
 
         session.log_sweep("s2", [5.0, 6.0], [7.0, 8.0], "X", "Y")
 
@@ -409,12 +409,12 @@ def test_no_auto_flush_within_interval(session_factory):
     """Test that multiple measurements within interval don't trigger auto-flush."""
     session = session_factory(auto_flush_interval=30.0, buffer_size=100)
 
-    with patch("time.time") as mock_time:
-        mock_time.return_value = 1000.0
+    with patch("time.monotonic") as mock_monotonic:
+        mock_monotonic.return_value = 1000.0
         session.initialize()
 
         for i in range(5):
-            mock_time.return_value = 1000.0 + i * 2.0
+            mock_monotonic.return_value = 1000.0 + i * 2.0
             session.log_measurement(f"m{i}", {"value": i})
 
         assert len(session._buffer) == 5
@@ -458,15 +458,15 @@ def test_auto_flush_disabled_when_none(session_factory):
     """Test that auto-flush is disabled when interval is None."""
     session = session_factory(auto_flush_interval=None, buffer_size=10)
 
-    with patch("time.time") as mock_time:
-        mock_time.return_value = 1000.0
+    with patch("time.monotonic") as mock_monotonic:
+        mock_monotonic.return_value = 1000.0
         session.initialize()
 
         for i in range(5):
-            mock_time.return_value = 1000.0 + i * 10.0
+            mock_monotonic.return_value = 1000.0 + i * 10.0
             session.log_measurement(f"m{i}", {"value": i})
 
-        mock_time.return_value = 2000.0
+        mock_monotonic.return_value = 2000.0
         session.log_measurement("m5", {"value": 5})
 
         assert len(session._buffer) == 6
@@ -478,15 +478,15 @@ def test_last_flush_time_updated_on_flush(session_factory):
     """Test that _last_flush_time is updated after successful flush."""
     session = session_factory(auto_flush_interval=30.0, buffer_size=100)
 
-    with patch("time.time") as mock_time:
-        mock_time.return_value = 1000.0
+    with patch("time.monotonic") as mock_monotonic:
+        mock_monotonic.return_value = 1000.0
         session.initialize()
         initial_flush_time = session._last_flush_time
 
-        mock_time.return_value = 1010.0
+        mock_monotonic.return_value = 1010.0
         session.log_measurement("test", {"value": 1})
 
-        mock_time.return_value = 1020.0
+        mock_monotonic.return_value = 1020.0
         session.flush()
 
         assert session._last_flush_time == 1020.0

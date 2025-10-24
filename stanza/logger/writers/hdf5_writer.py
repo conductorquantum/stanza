@@ -42,7 +42,7 @@ class HDF5Writer(AbstractDataWriter):
         self._measurement_counters: dict[str, int] = {}
 
         logger.info(
-            f"Initialized HDF5 writer with base directory: {self.base_directory}"
+            "Initialized HDF5 writer with base directory: %s", self.base_directory
         )
 
     def initialize_session(self, session: SessionMetadata) -> None:
@@ -74,7 +74,7 @@ class HDF5Writer(AbstractDataWriter):
             self._h5_file.create_group("sweeps")
             self._h5_file.create_group("analysis")
 
-            logger.info(f"Initialized HDF5 writer for session: {self.session_id}")
+            logger.info("Initialized HDF5 writer for session: %s", self.session_id)
         except Exception as e:
             if self._h5_file is not None:
                 self._h5_file.close()
@@ -108,7 +108,7 @@ class HDF5Writer(AbstractDataWriter):
                 self._h5_file.close()
                 self._h5_file = None
 
-            logger.debug(f"Session finalized: {self._session_file}")
+            logger.debug("Session finalized: %s", self._session_file)
             self._session_file = None
             self._measurement_counters.clear()
 
@@ -148,19 +148,7 @@ class HDF5Writer(AbstractDataWriter):
 
             for key, value in measurement.data.items():
                 if isinstance(value, (np.ndarray, list, tuple)):
-                    data_array = np.array(value)
-                    if self.compression is None:
-                        data_group.create_dataset(
-                            key,
-                            data=data_array,
-                        )
-                    else:
-                        data_group.create_dataset(
-                            key,
-                            data=data_array,
-                            compression=self.compression,
-                            compression_opts=self.compression_level,
-                        )
+                    self._create_dataset(data_group, key, np.array(value))
                 else:
                     data_group.attrs[key] = value
 
@@ -177,7 +165,7 @@ class HDF5Writer(AbstractDataWriter):
                 measurement.routine_name if measurement.routine_name is not None else ""
             )
 
-            logger.info(f"Wrote measurement: {measurement_name}")
+            logger.info("Wrote measurement: %s", measurement_name)
         except Exception as e:
             raise WriterError(f"Failed to write measurement: {measurement_name}") from e
 
@@ -195,33 +183,14 @@ class HDF5Writer(AbstractDataWriter):
 
         try:
             sweeps_group = self._h5_file["sweeps"]
-            sweep_group = sweeps_group.create_group(sweep.name)
+            sweep_name = self._unique_child_name(sweeps_group, sweep.name)
+            sweep_group = sweeps_group.create_group(sweep_name)
 
             data_group = sweep_group.create_group("data")
             metadata_group = sweep_group.create_group("metadata")
 
-            if self.compression is None:
-                data_group.create_dataset(
-                    sweep.x_label,
-                    data=sweep.x_data,
-                )
-                data_group.create_dataset(
-                    sweep.y_label,
-                    data=sweep.y_data,
-                )
-            else:
-                data_group.create_dataset(
-                    sweep.x_label,
-                    data=sweep.x_data,
-                    compression=self.compression,
-                    compression_opts=self.compression_level,
-                )
-                data_group.create_dataset(
-                    sweep.y_label,
-                    data=sweep.y_data,
-                    compression=self.compression,
-                    compression_opts=self.compression_level,
-                )
+            self._create_dataset(data_group, sweep.x_label, sweep.x_data)
+            self._create_dataset(data_group, sweep.y_label, sweep.y_data)
 
             sweep_group.attrs["x_label"] = sweep.x_label
             sweep_group.attrs["y_label"] = sweep.y_label
@@ -235,7 +204,7 @@ class HDF5Writer(AbstractDataWriter):
             metadata_group.attrs["timestamp"] = to_epoch(sweep.timestamp)
             metadata_group.attrs["session_id"] = sweep.session_id
 
-            logger.debug(f"Wrote sweep: {sweep.name}")
+            logger.debug("Wrote sweep: %s", sweep_name)
 
         except Exception as e:
             raise WriterError(f"Error writing sweep data: {str(e)}") from e
@@ -254,3 +223,27 @@ class HDF5Writer(AbstractDataWriter):
             logger.debug("Flushed data to disk")
         except Exception as e:
             raise WriterError(f"Error flushing data: {str(e)}") from e
+
+    def _create_dataset(self, group: h5py.Group, name: str, data: np.ndarray) -> None:
+        """Create a dataset with the configured compression settings."""
+        if self.compression is None:
+            group.create_dataset(name, data=data)
+        else:
+            group.create_dataset(
+                name,
+                data=data,
+                compression=self.compression,
+                compression_opts=self.compression_level,
+            )
+
+    def _unique_child_name(self, group: h5py.Group, base: str) -> str:
+        """Return a unique child name within a group based on base.
+
+        If `base` exists, returns `base_<n>` with the smallest available n.
+        """
+        if base not in group:
+            return base
+        i = 0
+        while f"{base}_{i}" in group:
+            i += 1
+        return f"{base}_{i}"
