@@ -1,2 +1,2 @@
--e .[dev,test,qm,routines]
+-e .[dev,test,qm,routines,notebooks]
 coverage[toml] >= 6.5.0,< 8.0

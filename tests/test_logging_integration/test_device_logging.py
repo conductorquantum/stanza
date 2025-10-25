@@ -27,16 +27,21 @@ class TestSweep1DLogging:
         logger.close_session(session.session_id)
 
     def test_buffers_sweep_data_correctly(self, device, temp_dir):
-        """Test that 1D sweep data is correctly buffered in session."""
+        """Test that 1D sweep data is correctly written using streaming API."""
         logger = DataLogger("test_routine", temp_dir)
         session = logger.create_session()
 
         device.sweep_1d("gate1", [0.0, 1.0], "contact1", session)
 
-        assert len(session._buffer) == 1
-        sweep_data = session._buffer[0]
-        assert len(sweep_data.x_data) == 2
-        assert len(sweep_data.y_data) == 2
+        # With streaming API, data is written directly to file, not buffered
+        jsonl_file = temp_dir / "test_routine" / session.session_id / "sweep.jsonl"
+        assert jsonl_file.exists()
+
+        # Verify sweep data was written correctly
+        with open(jsonl_file) as f:
+            sweep_data = json.loads(f.readline())
+            assert len(sweep_data["x_data"]) == 2
+            assert len(sweep_data["y_data"]) == 2
 
         logger.close_session(session.session_id)
 
@@ -85,16 +90,21 @@ class TestSweepAllLogging:
         logger.close_session(session.session_id)
 
     def test_buffers_sweep_data_correctly(self, device, temp_dir):
-        """Test that sweep_all data is correctly buffered in session."""
+        """Test that sweep_all data is correctly written using streaming API."""
         logger = DataLogger("test_routine", temp_dir)
         session = logger.create_session()
 
         device.sweep_all([0.0, 1.0], "contact1", session)
 
-        assert len(session._buffer) == 1
-        sweep_data = session._buffer[0]
-        assert len(sweep_data.x_data) == 2
-        assert len(sweep_data.y_data) == 2
+        # With streaming API, data is written directly to file, not buffered
+        jsonl_file = temp_dir / "test_routine" / session.session_id / "sweep.jsonl"
+        assert jsonl_file.exists()
+
+        # Verify sweep data was written correctly
+        with open(jsonl_file) as f:
+            sweep_data = json.loads(f.readline())
+            assert len(sweep_data["x_data"]) == 2
+            assert len(sweep_data["y_data"]) == 2
 
         logger.close_session(session.session_id)
 
