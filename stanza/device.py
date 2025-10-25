@@ -358,24 +358,34 @@ class Device:
         voltage_measurements = []
         current_measurements = []
 
-        for i, voltage in enumerate(voltages):
-            should_settle = i == 0
-            self.jump({gate_electrode: voltage}, wait_for_settling=should_settle)
-            voltage_measurements.append(self.check(gate_electrode))
-            current_measurements.append(self.measure(measure_electrode))
-
-        if session:
-            session.log_sweep(
-                name=f"{gate_electrode} sweep",
-                x_data=voltage_measurements,
-                y_data=current_measurements,
-                x_label="Voltage",
-                y_label="Current",
-                metadata={
-                    "gate_electrodes": [gate_electrode],
-                    "measure_electrode": measure_electrode,
-                },
-            )
+        if session is None:
+            # No logging - just collect data
+            for i, voltage in enumerate(voltages):
+                should_settle = i == 0
+                self.jump({gate_electrode: voltage}, wait_for_settling=should_settle)
+                v_actual = self.check(gate_electrode)
+                i_measured = self.measure(measure_electrode)
+                voltage_measurements.append(v_actual)
+                current_measurements.append(i_measured)
+        else:
+            # With logging and live plotting
+            metadata = {
+                "gate_electrodes": [gate_electrode],
+                "measure_electrode": measure_electrode,
+            }
+            with session.sweep(
+                f"{gate_electrode} sweep", "Voltage", "Current", metadata=metadata
+            ) as s:
+                for i, voltage in enumerate(voltages):
+                    should_settle = i == 0
+                    self.jump(
+                        {gate_electrode: voltage}, wait_for_settling=should_settle
+                    )
+                    v_actual = self.check(gate_electrode)
+                    i_measured = self.measure(measure_electrode)
+                    voltage_measurements.append(v_actual)
+                    current_measurements.append(i_measured)
+                    s.append([v_actual], [i_measured])
 
         return voltage_measurements, current_measurements
 
@@ -412,28 +422,46 @@ class Device:
         voltage_measurements = []
         current_measurements = []
 
-        for i, voltage_1 in enumerate(voltages_1):
-            for j, voltage_2 in enumerate(voltages_2):
-                should_settle = i == 0 and j == 0
-                self.jump(
-                    {gate_1: voltage_1, gate_2: voltage_2},
-                    wait_for_settling=should_settle,
-                )
-                voltage_measurements.append([self.check(gate_1), self.check(gate_2)])
-                current_measurements.append(self.measure(measure_electrode))
+        if session is None:
+            # No logging - just collect data
+            for i, voltage_1 in enumerate(voltages_1):
+                for j, voltage_2 in enumerate(voltages_2):
+                    should_settle = i == 0 and j == 0
+                    self.jump(
+                        {gate_1: voltage_1, gate_2: voltage_2},
+                        wait_for_settling=should_settle,
+                    )
+                    v1_actual = self.check(gate_1)
+                    v2_actual = self.check(gate_2)
+                    i_measured = self.measure(measure_electrode)
+                    voltage_measurements.append([v1_actual, v2_actual])
+                    current_measurements.append(i_measured)
+        else:
+            # With logging and live plotting
+            metadata = {
+                "gate_electrodes": [gate_1, gate_2],
+                "measure_electrode": measure_electrode,
+            }
+            with session.sweep(
+                f"{gate_1} and {gate_2} sweep",
+                [gate_1, gate_2],
+                "Current",
+                metadata=metadata,
+            ) as s:
+                for i, voltage_1 in enumerate(voltages_1):
+                    for j, voltage_2 in enumerate(voltages_2):
+                        should_settle = i == 0 and j == 0
+                        self.jump(
+                            {gate_1: voltage_1, gate_2: voltage_2},
+                            wait_for_settling=should_settle,
+                        )
+                        v1_actual = self.check(gate_1)
+                        v2_actual = self.check(gate_2)
+                        i_measured = self.measure(measure_electrode)
+                        voltage_measurements.append([v1_actual, v2_actual])
+                        current_measurements.append(i_measured)
+                        s.append([v1_actual, v2_actual], [i_measured])
 
-        if session:
-            session.log_sweep(
-                name=f"{gate_1} and {gate_2} sweep",
-                x_data=voltage_measurements,
-                y_data=current_measurements,
-                x_label="Voltage",
-                y_label="Current",
-                metadata={
-                    "gate_electrodes": [gate_1, gate_2],
-                    "measure_electrode": measure_electrode,
-                },
-            )
         return voltage_measurements, current_measurements
 
     def sweep_all(
@@ -463,29 +491,37 @@ class Device:
         voltage_measurements = []
         current_measurements = []
 
-        for i, voltage in enumerate(voltages):
-            should_settle = i == 0
-            self.jump(
-                dict.fromkeys(self.control_gates, voltage),
-                wait_for_settling=should_settle,
-            )
-            voltage_measurements.append(
-                [self.check(gate) or voltage for gate in self.control_gates]
-            )
-            current_measurements.append(self.measure(measure_electrode))
+        if session is None:
+            # No logging - just collect data
+            for i, voltage in enumerate(voltages):
+                should_settle = i == 0
+                self.jump(
+                    dict.fromkeys(self.control_gates, voltage),
+                    wait_for_settling=should_settle,
+                )
+                i_measured = self.measure(measure_electrode)
+                voltage_measurements.append([voltage])
+                current_measurements.append(i_measured)
+        else:
+            # With logging and live plotting
+            metadata = {
+                "gate_electrodes": self.control_gates,
+                "measure_electrode": measure_electrode,
+            }
+            with session.sweep(
+                "all gates sweep", "Voltage", "Current", metadata=metadata
+            ) as s:
+                for i, voltage in enumerate(voltages):
+                    should_settle = i == 0
+                    self.jump(
+                        dict.fromkeys(self.control_gates, voltage),
+                        wait_for_settling=should_settle,
+                    )
+                    i_measured = self.measure(measure_electrode)
+                    voltage_measurements.append([voltage])
+                    current_measurements.append(i_measured)
+                    s.append([voltage], [i_measured])
 
-        if session:
-            session.log_sweep(
-                name="all gates sweep",
-                x_data=voltage_measurements,
-                y_data=current_measurements,
-                x_label="Voltage",
-                y_label="Current",
-                metadata={
-                    "gate_electrodes": self.control_gates,
-                    "measure_electrode": measure_electrode,
-                },
-            )
         return voltage_measurements, current_measurements
 
     def sweep_nd(

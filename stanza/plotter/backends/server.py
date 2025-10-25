@@ -19,10 +19,16 @@ from bokeh.server.server import Server
 
 
 class ServerBackend:
-    """Live plotting in browser via Bokeh server."""
+    """Live plotting in browser via Bokeh server.
 
-    def __init__(self, port: int = 5006) -> None:
+    Can run as either:
+    - Embedded server (daemon=True): Runs in background thread, dies with parent process
+    - Persistent server (daemon=False): Runs in main thread, persists until explicitly stopped
+    """
+
+    def __init__(self, port: int = 5006, daemon: bool = True) -> None:
         self.port = port
+        self.daemon = daemon
         self._sources: dict[str, ColumnDataSource] = {}
         self._server: Server | None = None
         self._doc: Any = None
@@ -32,8 +38,13 @@ class ServerBackend:
         self._plot_specs: dict[str, dict[str, Any]] = {}
         self._buffer: dict[str, dict[str, list[Any]]] = {}
 
-    def start(self) -> None:
-        """Start Bokeh server in background thread."""
+    def start(self, block: bool = False) -> None:
+        """Start Bokeh server.
+
+        Args:
+            block: If True, blocks until server is stopped (for persistent mode).
+                   If False, runs in background thread (for embedded mode).
+        """
         if self._running:
             return
 
@@ -59,11 +70,16 @@ class ServerBackend:
             self._server.start()
             self._server.io_loop.start()
 
-        thread = threading.Thread(target=run_server, daemon=True)
-        thread.start()
-        self._running = True
-
-        time.sleep(1.0)  # Give server time to start
+        if block or not self.daemon:
+            # Run in main thread (blocks)
+            self._running = True
+            run_server()
+        else:
+            # Run in background daemon thread
+            thread = threading.Thread(target=run_server, daemon=True)
+            thread.start()
+            self._running = True
+            time.sleep(1.0)  # Give server time to start
 
     def stop(self) -> None:
         """Stop the Bokeh server."""

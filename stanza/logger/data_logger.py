@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import getpass
+import json
 import logging
+import os
 import re
 import time
 import uuid
@@ -66,6 +68,45 @@ class DataLogger:
         self._buffer_size = buffer_size
         self._auto_flush_interval = auto_flush_interval
         self._bokeh_backend = bokeh_backend
+
+        # Auto-enable live plotting if configured via CLI
+        if bokeh_backend is None:
+            self._auto_enable_live_plotting()
+
+    def _auto_enable_live_plotting(self) -> None:
+        """Auto-enable live plotting if configured."""
+        stanza_dir = Path.cwd() / ".stanza"
+        config_file = stanza_dir / "live_plot_config.json"
+        pid_file = stanza_dir / "live_plot_server.pid"
+
+        if not config_file.exists():
+            return
+
+        try:
+            config = json.load(open(config_file))
+            if not config.get("enabled"):
+                return
+
+            backend = config.get("backend", "server")
+
+            # If persistent server already running, skip embedded server
+            if backend == "server" and pid_file.exists():
+                pid = int(pid_file.read_text().strip())
+                try:
+                    os.kill(pid, 0)
+                    port = config.get("port", 5006)
+                    logger.info(f"Using persistent server (PID {pid}) at port {port}")
+                    return
+                except OSError:
+                    pass
+
+            from stanza.plotter import enable_live_plotting
+
+            port = config.get("port", 5006)
+            logger.info(f"Auto-enabling live plotting: {backend}:{port}")
+            enable_live_plotting(self, backend=backend, port=port)
+        except Exception as e:
+            logger.warning(f"Failed to auto-enable live plotting: {e}")
 
     @staticmethod
     def _slugify(name: str) -> str:
