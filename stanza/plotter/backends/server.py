@@ -84,10 +84,38 @@ class ServerBackend:
             time.sleep(1.0)  # Give server time to start
 
     def stop(self) -> None:
-        """Stop the Bokeh server."""
+        """Stop the Bokeh server and remove from active servers registry."""
         if self._server and self._running:
+            self._server.unlisten()
+            self._server.stop()
             self._server.io_loop.stop()
             self._running = False
+
+            from stanza.plotter import _active_servers
+
+            if self.port in _active_servers and _active_servers[self.port] is self:
+                del _active_servers[self.port]
+
+    def reset(self) -> None:
+        """Reset the document, clearing all plots and data sources.
+
+        This allows reusing the same server instance across multiple sessions.
+        """
+        if not self._running:
+            return
+
+        self._sources.clear()
+        self._plot_specs.clear()
+        self._buffer.clear()
+
+        # If browser is connected, clear the document too
+        if self._doc is not None:
+
+            def do_clear() -> None:
+                if self._doc is not None:
+                    self._doc.clear()
+
+            self._doc.add_next_tick_callback(do_clear)
 
     def create_figure(
         self,
@@ -200,18 +228,38 @@ class ServerBackend:
         self, name: str, new_data: dict[str, Any], rollover: int | None = None
     ) -> None:
         """Add data to plot. Buffers if browser not yet connected."""
-        # Buffer data if plot not yet created
+        spec = self._plot_specs.get(name, {})
+        if spec.get("plot_type") == "heatmap" and "value" in new_data:
+            if name in self._sources:
+                new_data = self._prepare_heatmap_data(name, new_data)
+            else:
+                if "dx" not in spec:
+                    spec.setdefault(
+                        "dx",
+                        spec.get("cell_size", (None, None))[0]
+                        if spec.get("cell_size")
+                        else None,
+                    )
+                if "dy" not in spec:
+                    spec.setdefault(
+                        "dy",
+                        spec.get("cell_size", (None, None))[1]
+                        if spec.get("cell_size")
+                        else None,
+                    )
+                spec.setdefault("value_min", float("inf"))
+                spec.setdefault("value_max", float("-inf"))
+
+                from stanza.plotter.backends.utils import prepare_heatmap_data
+
+                new_data = prepare_heatmap_data(new_data, {}, spec)
+
         if name not in self._sources:
             if name not in self._buffer:
                 self._buffer[name] = {k: [] for k in new_data.keys()}
             for key, values in new_data.items():
                 self._buffer[name].setdefault(key, []).extend(values)
             return
-
-        # For heatmap, calculate rect sizes and update color range
-        spec = self._plot_specs.get(name, {})
-        if spec.get("plot_type") == "heatmap" and "value" in new_data:
-            new_data = self._prepare_heatmap_data(name, new_data)
 
         # Stream to existing plot (thread-safe via callback)
         if self._doc:
