@@ -163,35 +163,8 @@ class InlineBackend:
 
     def _prepare_heatmap_data(self, name: str, data: dict[str, Any]) -> dict[str, Any]:
         """Calculate rect sizes and update color range for heatmap data."""
-        import numpy as np
+        from stanza.plotter.backends.utils import prepare_heatmap_data
 
         spec = self._plot_specs[name]
-        source = self._sources[name]
-
-        def calc_delta(key: str) -> float:
-            """Calculate minimum delta from existing + new data."""
-            if key not in data or len(data[key]) == 0:
-                return 0.1
-            existing = list(source.data.get(key, []))
-            all_vals = existing + data[key]
-            if len(all_vals) > 1:
-                unique = sorted(set(all_vals))
-                if len(unique) > 1:
-                    return float(min(np.diff(unique)))
-            return 0.1
-
-        if spec["dx"] is None:
-            spec["dx"] = calc_delta("x")
-        if spec["dy"] is None:
-            spec["dy"] = calc_delta("y")
-
-        n = len(data.get("value", []))
-        data["width"] = [spec["dx"]] * n
-        data["height"] = [spec["dy"]] * n
-
-        if "value" in data:
-            values = np.array(data["value"])
-            spec["value_min"] = min(spec["value_min"], float(values.min()))
-            spec["value_max"] = max(spec["value_max"], float(values.max()))
-
-        return data
+        existing_data = self._sources[name].data
+        return prepare_heatmap_data(data, existing_data, spec)

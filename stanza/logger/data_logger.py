@@ -3,7 +3,6 @@ from __future__ import annotations
 import getpass
 import json
 import logging
-import os
 import re
 import time
 import uuid
@@ -75,11 +74,9 @@ class DataLogger:
 
     def _auto_enable_live_plotting(self) -> None:
         """Auto-enable live plotting if configured."""
-        stanza_dir = Path.cwd() / ".stanza"
-        config_file = stanza_dir / "live_plot_config.json"
-        pid_file = stanza_dir / "live_plot_server.pid"
-
-        if not config_file.exists():
+        # Search up directory tree for .stanza config (like git)
+        config_file = self._find_config_file()
+        if not config_file:
             return
 
         try:
@@ -87,26 +84,33 @@ class DataLogger:
             if not config.get("enabled"):
                 return
 
-            backend = config.get("backend", "server")
-
-            # If persistent server already running, skip embedded server
-            if backend == "server" and pid_file.exists():
-                pid = int(pid_file.read_text().strip())
-                try:
-                    os.kill(pid, 0)
-                    port = config.get("port", 5006)
-                    logger.info(f"Using persistent server (PID {pid}) at port {port}")
-                    return
-                except OSError:
-                    pass
-
             from stanza.plotter import enable_live_plotting
 
+            backend = config.get("backend", "server")
             port = config.get("port", 5006)
+
             logger.info(f"Auto-enabling live plotting: {backend}:{port}")
             enable_live_plotting(self, backend=backend, port=port)
         except Exception as e:
             logger.warning(f"Failed to auto-enable live plotting: {e}")
+
+    def _find_config_file(self) -> Path | None:
+        """Search up directory tree for .stanza/live_plot_config.json."""
+        current = Path.cwd()
+
+        # Search up to 10 levels (reasonable limit)
+        for _ in range(10):
+            config_file = current / ".stanza" / "live_plot_config.json"
+            if config_file.exists():
+                return config_file
+
+            # Reached filesystem root
+            if current == current.parent:
+                break
+
+            current = current.parent
+
+        return None
 
     @staticmethod
     def _slugify(name: str) -> str:
