@@ -73,3 +73,33 @@ def test_push_updates_calls_push_notebook(mock_bokeh):
     backend.push_updates()
 
     assert mock_bokeh["push_notebook"].called
+
+
+def test_initialization_handles_output_notebook_failure():
+    """Test that initialization handles output_notebook failures gracefully."""
+    with patch("stanza.plotter.backends.notebook.output_notebook") as mock_output:
+        mock_output.side_effect = RuntimeError("Not in notebook")
+
+        backend = NotebookBackend()
+        assert len(backend._figures) == 0
+
+
+def test_display_figure_handles_show_failure(mock_bokeh):
+    """Test that display_figure handles show() failures gracefully."""
+    backend = NotebookBackend()
+    fig, needs_display = backend.create_figure("Test", "X", "Y")
+
+    mock_bokeh["show"].side_effect = RuntimeError("Display failed")
+
+    backend.display_figure(fig)
+
+
+def test_push_updates_handles_push_failure(mock_bokeh):
+    """Test that push_updates handles push_notebook failures gracefully."""
+    backend = NotebookBackend()
+    fig, needs_display = backend.create_figure("Test", "X", "Y")
+    backend.display_figure(fig)
+
+    mock_bokeh["push_notebook"].side_effect = RuntimeError("Push failed")
+
+    backend.push_updates()

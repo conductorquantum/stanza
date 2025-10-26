@@ -1,10 +1,13 @@
 """Bokeh backend for Jupyter notebooks using push_notebook."""
 
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from bokeh.io import output_notebook, push_notebook, show
 from bokeh.plotting import figure
+
+if TYPE_CHECKING:
+    from bokeh.plotting._figure import figure as Figure
 
 logger = logging.getLogger(__name__)
 
@@ -21,12 +24,12 @@ class NotebookBackend:
                 f"Make sure you're running in a Jupyter notebook. Error: {e}"
             )
 
-        self._figures: dict[str, figure] = {}
+        self._figures: dict[str, Figure] = {}
         self._handles: dict[str, Any] = {}
 
     def create_figure(
         self, name: str, x_label: str, y_label: str
-    ) -> tuple[figure, bool]:
+    ) -> tuple["Figure", bool]:
         """Create new figure but don't display until renderers are added."""
         fig = figure(
             title=name,

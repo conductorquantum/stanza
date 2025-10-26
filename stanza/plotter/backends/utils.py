@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+import numpy as np
+
 
 def prepare_heatmap_data(
     data: dict[str, Any],
@@ -20,7 +22,6 @@ def prepare_heatmap_data(
     Returns:
         Updated data with width and height fields added
     """
-    import numpy as np
 
     def calc_delta(key: str) -> float:
         """Calculate minimum delta from existing + new data."""

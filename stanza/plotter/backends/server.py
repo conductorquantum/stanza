@@ -13,7 +13,9 @@ from typing import Any
 
 from bokeh.application import Application
 from bokeh.application.handlers.function import FunctionHandler
-from bokeh.models import ColumnDataSource
+from bokeh.models import ColumnDataSource, LinearColorMapper
+from bokeh.models.annotations import ColorBar
+from bokeh.palettes import Viridis256
 from bokeh.plotting import figure
 from bokeh.server.server import Server
 
@@ -52,7 +54,7 @@ class ServerBackend:
             """Initialize document when browser connects."""
             self._doc = doc
 
-            for name in self._plot_specs.keys():
+            for name in self._plot_specs:
                 self._create_plot(name)
 
         def run_server() -> None:
@@ -142,10 +144,6 @@ class ServerBackend:
 
     def _create_heatmap_plot(self, name: str, spec: dict[str, Any]) -> None:
         """Create 2D heatmap with rect glyph and linear color mapping."""
-        from bokeh.models import LinearColorMapper
-        from bokeh.models.annotations import ColorBar
-        from bokeh.palettes import Viridis256
-
         data = self._buffer.pop(
             name, {"x": [], "y": [], "value": [], "width": [], "height": []}
         )

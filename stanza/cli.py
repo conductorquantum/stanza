@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from pathlib import Path
 from typing import Any, cast
 
@@ -89,8 +90,6 @@ def status() -> None:
     click.echo(f"  Location: {active_session}")
 
     if metadata:
-        from datetime import datetime
-
         created = datetime.fromtimestamp(metadata["created_at"])
         click.echo(f"  Created: {created.strftime('%Y-%m-%d %H:%M:%S')}")
 

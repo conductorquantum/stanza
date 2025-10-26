@@ -6,12 +6,19 @@ Install: pip install jupyter_bokeh
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from bokeh.models import ColumnDataSource
+from bokeh.models import ColumnDataSource, LinearColorMapper
+from bokeh.models.annotations import ColorBar
+from bokeh.palettes import Viridis256
 from bokeh.plotting import figure, output_notebook
 from IPython.display import display
 from jupyter_bokeh.widgets import BokehModel  # type: ignore[import-untyped]
+
+from stanza.plotter.backends.utils import prepare_heatmap_data
+
+if TYPE_CHECKING:
+    from bokeh.plotting._figure import figure as Figure
 
 
 class InlineBackend:
@@ -19,7 +26,7 @@ class InlineBackend:
 
     def __init__(self) -> None:
         self._sources: dict[str, ColumnDataSource] = {}
-        self._figures: dict[str, figure] = {}
+        self._figures: dict[str, Figure] = {}
         self._displayed: set[str] = set()
         self._plot_specs: dict[str, dict[str, Any]] = {}
 
@@ -73,10 +80,6 @@ class InlineBackend:
         cell_size: tuple[float, float] | None,
     ) -> None:
         """Create 2D heatmap plot."""
-        from bokeh.models import LinearColorMapper
-        from bokeh.models.annotations import ColorBar
-        from bokeh.palettes import Viridis256
-
         source = ColumnDataSource(
             data={"x": [], "y": [], "value": [], "width": [], "height": []}
         )
@@ -151,20 +154,16 @@ class InlineBackend:
 
         source.data = merged_data
 
-        # Update color mapper for heatmaps
         if spec.get("plot_type") == "heatmap" and "mapper" in spec:
             spec["mapper"].low = spec["value_min"]
             spec["mapper"].high = spec["value_max"]
 
-        # Display on first stream
         if name not in self._displayed:
             display(BokehModel(self._figures[name]))
             self._displayed.add(name)
 
     def _prepare_heatmap_data(self, name: str, data: dict[str, Any]) -> dict[str, Any]:
         """Calculate rect sizes and update color range for heatmap data."""
-        from stanza.plotter.backends.utils import prepare_heatmap_data
-
         spec = self._plot_specs[name]
         existing_data = self._sources[name].data
         return prepare_heatmap_data(data, existing_data, spec)
