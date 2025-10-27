@@ -3,8 +3,10 @@
 from unittest.mock import Mock, patch
 
 import pytest
+from bokeh.models import ColumnDataSource, LinearColorMapper
 
 from stanza.plotter.backends.inline import InlineBackend
+from stanza.plotter.backends.utils import PlotSpec, PlotState
 
 
 @pytest.fixture
@@ -13,16 +15,41 @@ def mock_bokeh():
     with (
         patch("stanza.plotter.backends.inline.output_notebook") as mock_output,
         patch("stanza.plotter.backends.inline.display") as mock_display,
-        patch("stanza.plotter.backends.inline.figure") as mock_figure_func,
+        patch("stanza.plotter.backends.inline.make_line_plot") as mock_make_line,
+        patch("stanza.plotter.backends.inline.make_heatmap_plot") as mock_make_heatmap,
         patch("stanza.plotter.backends.inline.BokehModel") as mock_bokeh_model,
     ):
         mock_fig = Mock()
-        mock_figure_func.return_value = mock_fig
+        mock_source = Mock(spec=ColumnDataSource)
+        mock_source.data = {}
+        mock_mapper = Mock(spec=LinearColorMapper)
+
+        line_spec = PlotSpec(name="test", plot_type="line", x_label="X", y_label="Y")
+        heatmap_spec = PlotSpec(
+            name="test",
+            plot_type="heatmap",
+            x_label="X",
+            y_label="Y",
+            z_label="Value",
+            cell_size=(0.5, 0.5),
+            mapper=mock_mapper,
+            dx=0.5,
+            dy=0.5,
+        )
+
+        line_state = PlotState(source=mock_source, figure=mock_fig, spec=line_spec)
+        heatmap_state = PlotState(
+            source=mock_source, figure=mock_fig, spec=heatmap_spec
+        )
+
+        mock_make_line.return_value = line_state
+        mock_make_heatmap.return_value = heatmap_state
 
         yield {
             "output_notebook": mock_output,
             "display": mock_display,
-            "figure": mock_figure_func,
+            "make_line_plot": mock_make_line,
+            "make_heatmap_plot": mock_make_heatmap,
             "BokehModel": mock_bokeh_model,
         }
 
@@ -31,8 +58,7 @@ def test_initialization(mock_bokeh):
     """Test backend initialization."""
     backend = InlineBackend()
 
-    assert len(backend._sources) == 0
-    assert len(backend._figures) == 0
+    assert len(backend._plots) == 0
     assert len(backend._displayed) == 0
 
 
@@ -56,9 +82,8 @@ def test_create_line_plot(mock_bokeh):
 
     backend.create_figure("test_line", "Voltage", "Current", plot_type="line")
 
-    assert "test_line" in backend._sources
-    assert "test_line" in backend._figures
-    assert backend._plot_specs["test_line"]["plot_type"] == "line"
+    assert "test_line" in backend._plots
+    assert backend._plots["test_line"].spec.plot_type == "line"
 
 
 def test_create_heatmap_plot(mock_bokeh):
@@ -74,13 +99,12 @@ def test_create_heatmap_plot(mock_bokeh):
         cell_size=(0.5, 0.5),
     )
 
-    assert "test_heatmap" in backend._sources
-    assert "test_heatmap" in backend._figures
-    spec = backend._plot_specs["test_heatmap"]
-    assert spec["plot_type"] == "heatmap"
-    assert spec["dx"] == 0.5
-    assert spec["dy"] == 0.5
-    assert "mapper" in spec
+    assert "test_heatmap" in backend._plots
+    plot = backend._plots["test_heatmap"]
+    assert plot.spec.plot_type == "heatmap"
+    assert plot.spec.dx == 0.5
+    assert plot.spec.dy == 0.5
+    assert plot.spec.mapper is not None
 
 
 def test_create_unknown_plot_type_raises(mock_bokeh):
@@ -121,10 +145,10 @@ def test_stream_data_heatmap_updates_color_mapper(mock_bokeh):
     backend.create_figure("test", "X", "Y", plot_type="heatmap")
 
     backend.stream_data("test", {"x": [1.0], "y": [1.0], "value": [5.0]})
-    spec = backend._plot_specs["test"]
+    plot = backend._plots["test"]
 
-    assert spec["value_min"] <= 5.0
-    assert spec["value_max"] >= 5.0
+    assert plot.spec.value_min <= 5.0
+    assert plot.spec.value_max >= 5.0
 
 
 def test_stream_data_with_rollover(mock_bokeh):
@@ -136,9 +160,9 @@ def test_stream_data_with_rollover(mock_bokeh):
         "test", {"x": [1.0, 2.0, 3.0], "y": [4.0, 5.0, 6.0]}, rollover=2
     )
 
-    source = backend._sources["test"]
-    assert len(source.data["x"]) == 2
-    assert source.data["x"] == [2.0, 3.0]
+    plot = backend._plots["test"]
+    assert len(plot.source.data["x"]) == 2
+    assert plot.source.data["x"] == [2.0, 3.0]
 
 
 def test_stream_data_ignores_unknown_plot(mock_bokeh):
@@ -156,9 +180,9 @@ def test_stream_data_accumulates_multiple_calls(mock_bokeh):
     backend.stream_data("test", {"x": [1.0], "y": [2.0]})
     backend.stream_data("test", {"x": [3.0], "y": [4.0]})
 
-    source = backend._sources["test"]
-    assert source.data["x"] == [1.0, 3.0]
-    assert source.data["y"] == [2.0, 4.0]
+    plot = backend._plots["test"]
+    assert plot.source.data["x"] == [1.0, 3.0]
+    assert plot.source.data["y"] == [2.0, 4.0]
 
 
 def test_create_figure_idempotent(mock_bokeh):
@@ -168,4 +192,4 @@ def test_create_figure_idempotent(mock_bokeh):
     backend.create_figure("test", "X", "Y")
     backend.create_figure("test", "X", "Y")
 
-    assert len(backend._sources) == 1
+    assert len(backend._plots) == 1

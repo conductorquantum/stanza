@@ -8,27 +8,27 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from bokeh.models import ColumnDataSource, LinearColorMapper
-from bokeh.models.annotations import ColorBar
-from bokeh.palettes import Viridis256
-from bokeh.plotting import figure, output_notebook
+from bokeh.plotting import output_notebook
 from IPython.display import display
 from jupyter_bokeh.widgets import BokehModel  # type: ignore[import-untyped]
 
-from stanza.plotter.backends.utils import prepare_heatmap_data
+from stanza.plotter.backends.utils import (
+    PlotState,
+    make_heatmap_plot,
+    make_line_plot,
+    prepare_heatmap_data,
+)
 
 if TYPE_CHECKING:
-    from bokeh.plotting._figure import figure as Figure
+    pass
 
 
 class InlineBackend:
     """Display live-updating plots directly in notebook cells."""
 
     def __init__(self) -> None:
-        self._sources: dict[str, ColumnDataSource] = {}
-        self._figures: dict[str, Figure] = {}
+        self._plots: dict[str, PlotState] = {}
         self._displayed: set[str] = set()
-        self._plot_specs: dict[str, dict[str, Any]] = {}
 
     def start(self) -> None:
         """Initialize Bokeh notebook output."""
@@ -48,122 +48,46 @@ class InlineBackend:
         cell_size: tuple[float, float] | None = None,
     ) -> None:
         """Create a new plot configuration."""
-        if name in self._sources:
+        if name in self._plots:
             return
 
         if plot_type == "line":
-            self._create_line_plot(name, x_label, y_label)
+            plot_state = make_line_plot(name, x_label, y_label)
         elif plot_type == "heatmap":
-            self._create_heatmap_plot(name, x_label, y_label, z_label, cell_size)
+            plot_state = make_heatmap_plot(name, x_label, y_label, z_label, cell_size)
         else:
             raise ValueError(f"Unknown plot type: {plot_type}")
 
-    def _create_line_plot(self, name: str, x_label: str, y_label: str) -> None:
-        """Create 1D line plot."""
-        source = ColumnDataSource(data={"x": [], "y": []})
-        self._sources[name] = source
-
-        fig = figure(title=name, width=800, height=400)
-        fig.xaxis.axis_label = x_label
-        fig.yaxis.axis_label = y_label
-        fig.line("x", "y", source=source, line_width=2, color="navy")
-        self._figures[name] = fig
-
-        self._plot_specs[name] = {"plot_type": "line"}
-
-    def _create_heatmap_plot(
-        self,
-        name: str,
-        x_label: str,
-        y_label: str,
-        z_label: str | None,
-        cell_size: tuple[float, float] | None,
-    ) -> None:
-        """Create 2D heatmap plot."""
-        source = ColumnDataSource(
-            data={"x": [], "y": [], "value": [], "width": [], "height": []}
-        )
-        self._sources[name] = source
-
-        # Create color mapper
-        mapper = LinearColorMapper(palette=Viridis256, low=0, high=1)
-
-        fig = figure(
-            title=name,
-            width=800,
-            height=600,
-        )
-        fig.xaxis.axis_label = x_label
-        fig.yaxis.axis_label = y_label
-
-        # Add rect glyph
-        fig.rect(
-            x="x",
-            y="y",
-            width="width",
-            height="height",
-            source=source,
-            fill_color={"field": "value", "transform": mapper},
-            line_color=None,
-        )
-
-        # Add color bar
-        color_bar = ColorBar(
-            color_mapper=mapper,
-            width=8,
-            location=(0, 0),
-            title=z_label or "Value",
-        )
-        fig.add_layout(color_bar, "right")
-
-        self._figures[name] = fig
-        self._plot_specs[name] = {
-            "plot_type": "heatmap",
-            "mapper": mapper,
-            "dx": cell_size[0] if cell_size else None,
-            "dy": cell_size[1] if cell_size else None,
-            "value_min": float("inf"),
-            "value_max": float("-inf"),
-        }
+        self._plots[name] = plot_state
 
     def stream_data(
         self, name: str, new_data: dict[str, Any], rollover: int | None = None
     ) -> None:
         """Add data to plot and display/update it.
 
-        On first call: displays the plot
-        On subsequent calls: updates automatically via ColumnDataSource
+        First call displays the plot, subsequent calls update via ColumnDataSource.
         """
-        if name not in self._sources:
+        plot = self._plots.get(name)
+        if plot is None:
             return
 
-        source = self._sources[name]
-        spec = self._plot_specs.get(name, {})
+        if plot.spec.plot_type == "heatmap" and "value" in new_data:
+            new_data = prepare_heatmap_data(new_data, plot.source.data, plot.spec)
 
-        if spec.get("plot_type") == "heatmap" and "value" in new_data:
-            # Prepare heatmap data
-            new_data = self._prepare_heatmap_data(name, new_data)
-
-        # Merge with existing data
+        # Merge with existing data and apply rollover
         merged_data = {}
         for key, new_vals in new_data.items():
-            merged = list(source.data.get(key, [])) + new_vals
-            merged_data[key] = (
-                merged[-rollover:] if rollover and len(merged) > rollover else merged
-            )
+            merged = list(plot.source.data.get(key, [])) + new_vals
+            if rollover and len(merged) > rollover:
+                merged = merged[-rollover:]
+            merged_data[key] = merged
 
-        source.data = merged_data
+        plot.source.data = merged_data
 
-        if spec.get("plot_type") == "heatmap" and "mapper" in spec:
-            spec["mapper"].low = spec["value_min"]
-            spec["mapper"].high = spec["value_max"]
+        if plot.spec.plot_type == "heatmap" and plot.spec.mapper:
+            plot.spec.mapper.low = plot.spec.value_min
+            plot.spec.mapper.high = plot.spec.value_max
 
         if name not in self._displayed:
-            display(BokehModel(self._figures[name]))
+            display(BokehModel(plot.figure))
             self._displayed.add(name)
-
-    def _prepare_heatmap_data(self, name: str, data: dict[str, Any]) -> dict[str, Any]:
-        """Calculate rect sizes and update color range for heatmap data."""
-        spec = self._plot_specs[name]
-        existing_data = self._sources[name].data
-        return prepare_heatmap_data(data, existing_data, spec)

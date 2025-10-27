@@ -3,8 +3,14 @@
 from unittest.mock import Mock
 
 import pytest
+from bokeh.models import ColumnDataSource
 
 from stanza.plotter.backends.server import ServerBackend
+from stanza.plotter.backends.utils import (
+    PlotSpec,
+    PlotState,
+    prepare_heatmap_data,
+)
 
 
 @pytest.fixture
@@ -18,7 +24,7 @@ def test_initialization(backend):
     assert backend.port == 5050
     assert backend.daemon is True
     assert backend._running is False
-    assert len(backend._sources) == 0
+    assert len(backend._plots) == 0
     assert len(backend._plot_specs) == 0
 
 
@@ -39,9 +45,9 @@ def test_create_figure_registers_line_plot():
 
     assert "test_line" in backend._plot_specs
     spec = backend._plot_specs["test_line"]
-    assert spec["x_label"] == "Voltage"
-    assert spec["y_label"] == "Current"
-    assert spec["plot_type"] == "line"
+    assert spec.x_label == "Voltage"
+    assert spec.y_label == "Current"
+    assert spec.plot_type == "line"
 
 
 def test_create_figure_registers_heatmap():
@@ -60,9 +66,9 @@ def test_create_figure_registers_heatmap():
 
     assert "test_heatmap" in backend._plot_specs
     spec = backend._plot_specs["test_heatmap"]
-    assert spec["plot_type"] == "heatmap"
-    assert spec["z_label"] == "Intensity"
-    assert spec["cell_size"] == (0.1, 0.2)
+    assert spec.plot_type == "heatmap"
+    assert spec.z_label == "Intensity"
+    assert spec.cell_size == (0.1, 0.2)
 
 
 def test_stream_data_buffers_before_browser_connects():
@@ -109,12 +115,14 @@ def test_create_line_plot_with_buffered_data():
     backend = ServerBackend(port=5057)
     backend._running = True
     backend._doc = Mock()
-    backend._plot_specs["test"] = {"x_label": "X", "y_label": "Y", "plot_type": "line"}
+    backend._plot_specs["test"] = PlotSpec(
+        name="test", x_label="X", y_label="Y", plot_type="line"
+    )
     backend._buffer["test"] = {"x": [1.0, 2.0], "y": [3.0, 4.0]}
 
-    backend._create_line_plot("test", backend._plot_specs["test"])
+    backend._create_line_plot("test")
 
-    assert "test" in backend._sources
+    assert "test" in backend._plots
     assert "test" not in backend._buffer
     backend._doc.add_root.assert_called_once()
 
@@ -124,53 +132,51 @@ def test_create_heatmap_plot_spec():
     backend = ServerBackend(port=5058)
     backend._running = True
     backend._doc = Mock()
-    backend._plot_specs["test"] = {
-        "x_label": "X",
-        "y_label": "Y",
-        "plot_type": "heatmap",
-        "z_label": "Value",
-        "cell_size": (0.5, 0.5),
-    }
+    backend._plot_specs["test"] = PlotSpec(
+        name="test",
+        x_label="X",
+        y_label="Y",
+        plot_type="heatmap",
+        z_label="Value",
+        cell_size=(0.5, 0.5),
+    )
 
-    backend._create_heatmap_plot("test", backend._plot_specs["test"])
+    backend._create_heatmap_plot("test")
 
-    assert "test" in backend._sources
-    spec = backend._plot_specs["test"]
-    assert "mapper" in spec
-    assert spec["dx"] == 0.5
-    assert spec["dy"] == 0.5
+    assert "test" in backend._plots
+    plot = backend._plots["test"]
+    assert plot.spec.mapper is not None
+    assert plot.spec.dx == 0.5
+    assert plot.spec.dy == 0.5
     backend._doc.add_root.assert_called_once()
 
 
 def test_create_plot_raises_on_unknown_type():
     """Test that _create_plot raises on unknown plot type."""
     backend = ServerBackend(port=5059)
-    backend._plot_specs["test"] = {"plot_type": "unknown"}
+    backend._plot_specs["test"] = PlotSpec(
+        name="test", x_label="X", y_label="Y", plot_type="unknown"
+    )
 
     with pytest.raises(ValueError, match="Unknown plot type"):
         backend._create_plot("test")
 
 
 def test_prepare_heatmap_data_updates_color_range():
-    """Test that _prepare_heatmap_data calculates cell sizes and updates range."""
+    """Test that prepare_heatmap_data calculates cell sizes and updates range."""
     backend = ServerBackend(port=5060)
-    backend._plot_specs["test"] = {
-        "plot_type": "heatmap",
-        "dx": None,
-        "dy": None,
-        "value_min": float("inf"),
-        "value_max": float("-inf"),
-    }
-    backend._sources["test"] = Mock()
-    backend._sources["test"].data = {"x": [], "y": [], "value": []}
+    spec = PlotSpec(name="test", plot_type="heatmap", x_label="X", y_label="Y")
+    source = ColumnDataSource(data={"x": [], "y": [], "value": []})
+    plot_state = PlotState(source=source, figure=Mock(), spec=spec)
+    backend._plots["test"] = plot_state
 
     data = {"x": [1.0, 2.0], "y": [1.0, 1.0], "value": [5.0, 10.0]}
-    result = backend._prepare_heatmap_data("test", data)
+    result = prepare_heatmap_data(data, plot_state.source.data, plot_state.spec)
 
     assert "width" in result
     assert "height" in result
-    assert backend._plot_specs["test"]["value_min"] <= 5.0
-    assert backend._plot_specs["test"]["value_max"] >= 10.0
+    assert plot_state.spec.value_min <= 5.0
+    assert plot_state.spec.value_max >= 10.0
 
 
 def test_start_is_idempotent():
@@ -207,14 +213,14 @@ def test_create_figure_with_doc_adds_callback():
 
 def test_stream_data_with_doc_adds_callback():
     """Test that streaming data with connected doc adds callback."""
-    from bokeh.models import ColumnDataSource
-
     backend = ServerBackend(port=5064)
     backend._running = True
     backend._doc = Mock()
-    backend._plot_specs["test"] = {"plot_type": "line"}
 
-    backend._sources["test"] = ColumnDataSource(data={"x": [], "y": []})
+    spec = PlotSpec(name="test", plot_type="line", x_label="X", y_label="Y")
+    source = ColumnDataSource(data={"x": [], "y": []})
+    plot_state = PlotState(source=source, figure=Mock(), spec=spec)
+    backend._plots["test"] = plot_state
 
     backend.stream_data("test", {"x": [1.0], "y": [2.0]})
 
