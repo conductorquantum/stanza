@@ -158,6 +158,8 @@ print(result["currents"])
 
 Visualize your data in real-time as routines execute. Stanza supports two plotting backends:
 
+![Stanza Live Plotting Demo](docs/images/stanza_live_plotting.gif)
+
 ### Quick Start with CLI
 
 Enable live plotting in your notebook or script:
