@@ -3,6 +3,7 @@
 import json
 import re
 from pathlib import Path
+from unittest.mock import patch
 
 from click.testing import CliRunner
 
@@ -114,6 +115,21 @@ class TestInitCommand:
 
         assert result.exit_code != 0
         assert "Error" in result.output or "does not exist" in result.output
+
+    def test_init_handles_file_exists_error(self):
+        """Test that init handles FileExistsError gracefully."""
+        runner = CliRunner()
+
+        with runner.isolated_filesystem():
+            runner.invoke(cli, ["init", "--name", "test"])
+
+            with patch("stanza.cli.StanzaSession.create_session_directory") as mock:
+                mock.side_effect = FileExistsError("Directory exists")
+
+                result = runner.invoke(cli, ["init", "--name", "test"])
+
+                assert result.exit_code != 0
+                assert "already exists" in result.output
 
     def test_init_with_different_names_creates_multiple_directories(self):
         """Test that init with different names creates multiple directories."""
@@ -244,9 +260,103 @@ class TestStatusCommand:
             assert result.exit_code == 0
             assert "Active session:" in result.output
             assert "Location:" in result.output
-            assert (
-                "Created:" not in result.output or result.output.count("Created:") == 0
+            assert "Created:" not in result.output
+
+
+class TestLivePlotCommand:
+    """Test suite for 'stanza live-plot' commands."""
+
+    def test_live_plot_enable_server_backend(self):
+        """Test enabling live plotting with server backend."""
+        runner = CliRunner()
+
+        with runner.isolated_filesystem():
+            result = runner.invoke(
+                cli, ["live-plot", "enable", "--backend", "server", "--port", "5010"]
             )
+
+            assert result.exit_code == 0
+            assert "Live plotting enabled" in result.output
+            assert "server" in result.output
+            assert "5010" in result.output
+
+            config_file = Path.cwd() / ".stanza" / "live_plot_config.json"
+            assert config_file.exists()
+
+            config = json.loads(config_file.read_text())
+            assert config["enabled"] is True
+            assert config["backend"] == "server"
+            assert config["port"] == 5010
+
+    def test_live_plot_enable_inline_backend(self):
+        """Test enabling live plotting with inline backend."""
+        runner = CliRunner()
+
+        with runner.isolated_filesystem():
+            result = runner.invoke(cli, ["live-plot", "enable", "--backend", "inline"])
+
+            assert result.exit_code == 0
+            assert "Live plotting enabled" in result.output
+            assert "inline" in result.output
+
+            config_file = Path.cwd() / ".stanza" / "live_plot_config.json"
+            config = json.loads(config_file.read_text())
+            assert config["backend"] == "inline"
+
+    def test_live_plot_disable(self):
+        """Test disabling live plotting."""
+        runner = CliRunner()
+
+        with runner.isolated_filesystem():
+            runner.invoke(cli, ["live-plot", "enable"])
+
+            result = runner.invoke(cli, ["live-plot", "disable"])
+
+            assert result.exit_code == 0
+            assert "disabled" in result.output
+
+            config_file = Path.cwd() / ".stanza" / "live_plot_config.json"
+            config = json.loads(config_file.read_text())
+            assert config["enabled"] is False
+
+    def test_live_plot_status_when_disabled(self):
+        """Test live plot status when not configured."""
+        runner = CliRunner()
+
+        with runner.isolated_filesystem():
+            result = runner.invoke(cli, ["live-plot", "status"])
+
+            assert result.exit_code == 0
+            assert "disabled" in result.output
+
+    def test_live_plot_status_when_enabled(self):
+        """Test live plot status shows configuration."""
+        runner = CliRunner()
+
+        with runner.isolated_filesystem():
+            runner.invoke(
+                cli, ["live-plot", "enable", "--backend", "server", "--port", "6000"]
+            )
+
+            result = runner.invoke(cli, ["live-plot", "status"])
+
+            assert result.exit_code == 0
+            assert "enabled" in result.output
+            assert "server" in result.output
+            assert "6000" in result.output
+
+    def test_live_plot_status_after_disable(self):
+        """Test live plot status after disabling."""
+        runner = CliRunner()
+
+        with runner.isolated_filesystem():
+            runner.invoke(cli, ["live-plot", "enable"])
+            runner.invoke(cli, ["live-plot", "disable"])
+
+            result = runner.invoke(cli, ["live-plot", "status"])
+
+            assert result.exit_code == 0
+            assert "disabled" in result.output
 
 
 class TestCLIIntegration:

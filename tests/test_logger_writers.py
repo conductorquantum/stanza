@@ -99,6 +99,78 @@ class TestHDF5Writer:
 
             writer.finalize_session()
 
+    def test_hdf5_writer_uniquifies_sweep_names(self):
+        """Test that HDF5 writer adds suffixes to duplicate sweep names."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            writer = HDF5Writer(tmpdir)
+            session = SessionMetadata(
+                session_id="test_session",
+                start_time=100.0,
+                user="test_user",
+            )
+            writer.initialize_session(session)
+
+            # Write first sweep with name "signal"
+            sweep1 = SweepData(
+                name="signal",
+                x_data=np.array([0.0, 1.0]),
+                y_data=np.array([0.0, 1.0]),
+                x_label="X",
+                y_label="Y",
+                metadata={},
+                timestamp=100.0,
+                session_id="test_session",
+            )
+            writer.write_sweep(sweep1)
+
+            # Write second sweep with same name "signal"
+            sweep2 = SweepData(
+                name="signal",
+                x_data=np.array([2.0, 3.0]),
+                y_data=np.array([2.0, 3.0]),
+                x_label="X",
+                y_label="Y",
+                metadata={},
+                timestamp=101.0,
+                session_id="test_session",
+            )
+            writer.write_sweep(sweep2)
+
+            # Write third sweep with same name "signal"
+            sweep3 = SweepData(
+                name="signal",
+                x_data=np.array([4.0, 5.0]),
+                y_data=np.array([4.0, 5.0]),
+                x_label="X",
+                y_label="Y",
+                metadata={},
+                timestamp=102.0,
+                session_id="test_session",
+            )
+            writer.write_sweep(sweep3)
+
+            writer.flush()
+
+            # Verify all three sweeps are in the file with unique names
+            with h5py.File(writer._session_file, "r") as f:
+                assert "sweeps" in f
+                assert "signal" in f["sweeps"]
+                assert "signal_0" in f["sweeps"]
+                assert "signal_1" in f["sweeps"]
+
+                # Verify data integrity
+                np.testing.assert_array_equal(
+                    f["sweeps/signal/data/Y"][:], np.array([0.0, 1.0])
+                )
+                np.testing.assert_array_equal(
+                    f["sweeps/signal_0/data/Y"][:], np.array([2.0, 3.0])
+                )
+                np.testing.assert_array_equal(
+                    f["sweeps/signal_1/data/Y"][:], np.array([4.0, 5.0])
+                )
+
+            writer.finalize_session()
+
     def test_raises_error_when_writing_without_session(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             writer = HDF5Writer(tmpdir)

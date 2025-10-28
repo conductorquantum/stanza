@@ -154,6 +154,56 @@ print(result["currents"])
 
 **Type Safety**: Built on Pydantic for configuration validation and type checking.
 
+## Live Plotting
+
+Visualize your data in real-time as routines execute. Stanza supports two plotting backends:
+
+![Stanza Live Plotting Demo](docs/images/stanza_live_plotting.gif)
+
+### Quick Start with CLI
+
+Enable live plotting in your notebook or script:
+
+```bash
+# Plots in browser (default) - opens at http://localhost:5006
+stanza live-plot enable
+
+# Plots in notebook cells (requires: pip install jupyter_bokeh)
+stanza live-plot enable --backend inline
+```
+
+Once enabled, the `DataLogger` automatically detects the configuration and streams data to plots as your routines run.
+
+### Python API
+
+You can also enable live plotting programmatically:
+
+**Server Backend** - Opens plots in a browser window (works in any environment):
+
+```python
+from stanza.plotter import enable_live_plotting
+
+# Enable live plotting with browser backend
+backend = enable_live_plotting(runner.context.resources.logger, backend="server", port=5006)
+
+# Run your routine - plots update live at http://localhost:5006
+result = runner.run("sweep_barrier")
+```
+
+**Inline Backend** - Displays plots directly in notebook cells (requires `jupyter_bokeh`):
+
+```python
+from stanza.plotter import enable_live_plotting
+
+# Enable inline plotting
+backend = enable_live_plotting(runner.context.resources.logger, backend="inline")
+
+# Run your routine - plots appear and update in the notebook cell
+result = runner.run("sweep_barrier")
+```
+
+Plots automatically update as data is logged, supporting both 1D line plots and 2D heatmaps for real-time visualization of sweeps and measurements.
+
 ## Architecture
 
 Stanza separates concerns into three layers:

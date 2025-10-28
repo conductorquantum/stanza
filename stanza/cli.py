@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import json
+from datetime import datetime
 from pathlib import Path
+from typing import Any, cast
 
 import click
 
@@ -87,10 +90,75 @@ def status() -> None:
     click.echo(f"  Location: {active_session}")
 
     if metadata:
-        from datetime import datetime
-
         created = datetime.fromtimestamp(metadata["created_at"])
         click.echo(f"  Created: {created.strftime('%Y-%m-%d %H:%M:%S')}")
+
+
+def _get_config_file() -> Path:
+    """Get path to live plot config file."""
+    config_dir = Path.cwd() / StanzaSession.CONFIG_DIR
+    config_dir.mkdir(exist_ok=True)
+    return config_dir / "live_plot_config.json"
+
+
+def _read_config() -> dict[str, Any]:
+    """Read live plot config, return empty dict if not found."""
+    config_file = _get_config_file()
+    if not config_file.exists():
+        return {}
+    return cast(dict[str, Any], json.loads(config_file.read_text()))
+
+
+def _write_config(config: dict[str, Any]) -> None:
+    """Write live plot config."""
+    config_file = _get_config_file()
+    config_file.write_text(json.dumps(config, indent=2) + "\n")
+
+
+@cli.group()
+def live_plot() -> None:
+    """Manage live plotting."""
+    pass
+
+
+@live_plot.command(name="enable")
+@click.option("--backend", type=click.Choice(["server", "inline"]), default="server")
+@click.option("--port", type=int, default=5006)
+def enable_live_plot(backend: str, port: int) -> None:
+    """Enable live plotting configuration."""
+    _write_config({"enabled": True, "backend": backend, "port": port})
+
+    click.echo(f"✓ Live plotting enabled ({backend} backend)")
+    if backend == "server":
+        click.echo(f"  Port: {port}")
+        click.echo(f"  DataLogger will auto-start server on port {port}")
+        click.echo(
+            f"  Open http://localhost:{port} in browser when running experiments"
+        )
+
+
+@live_plot.command(name="disable")
+def disable_live_plot() -> None:
+    """Disable live plotting configuration."""
+    _write_config({"enabled": False})
+    click.echo("✓ Live plotting disabled")
+
+
+@live_plot.command(name="status")
+def live_plot_status() -> None:
+    """Show live plotting configuration."""
+    config = _read_config()
+
+    if not config.get("enabled"):
+        click.echo("Live plotting: disabled")
+        return
+
+    backend = config.get("backend", "server")
+    port = config.get("port", 5006)
+
+    click.echo(f"Live plotting: enabled ({backend} backend)")
+    if backend == "server":
+        click.echo(f"  Port: {port}")
 
 
 def main() -> None:
