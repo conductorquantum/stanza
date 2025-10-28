@@ -281,3 +281,285 @@ class TestCLIIntegration:
             assert status_result.exit_code == 0
             assert "_second" in status_result.output
             assert "_first" not in status_result.output
+
+
+# ============================================================================
+# Phase 8: Jupyter CLI Tests
+# ============================================================================
+
+
+class TestJupyterCommands:
+    """Test suite for 'stanza jupyter' commands."""
+
+    def test_jupyter_help(self):
+        """Test that jupyter help command works."""
+        runner = CliRunner()
+        result = runner.invoke(cli, ["jupyter", "--help"])
+
+        assert result.exit_code == 0
+        assert "Manage Jupyter notebook server" in result.output
+        assert "start" in result.output
+        assert "stop" in result.output
+        assert "status" in result.output
+
+    def test_jupyter_status_no_server(self):
+        """Test jupyter status when no server is running."""
+        runner = CliRunner()
+
+        with runner.isolated_filesystem():
+            result = runner.invoke(cli, ["jupyter", "status"])
+
+            assert result.exit_code == 0
+            assert "No Jupyter server is currently running" in result.output
+            assert "stanza jupyter start" in result.output
+
+    def test_jupyter_start_success(self, tmp_path, monkeypatch):
+        """Test jupyter start command with mocked jupyter.start()."""
+        runner = CliRunner()
+
+        # Mock the jupyter.start function
+        def mock_start(notebook_dir):
+            return {
+                "pid": 12345,
+                "url": "http://localhost:8888?token=test",
+                "started_at": "2024-01-01T00:00:00Z",
+                "root_dir": str(notebook_dir),
+            }
+
+        import stanza.cli
+
+        monkeypatch.setattr(stanza.cli.jupyter, "start", mock_start)
+
+        with runner.isolated_filesystem():
+            notebook_dir = Path.cwd() / "notebooks"
+            notebook_dir.mkdir()
+
+            result = runner.invoke(cli, ["jupyter", "start", str(notebook_dir)])
+
+            assert result.exit_code == 0
+            assert "✓ Jupyter server started successfully" in result.output
+            assert "PID: 12345" in result.output
+            assert "http://localhost:8888" in result.output
+            assert "survive terminal closure" in result.output
+
+    def test_jupyter_start_default_directory(self, tmp_path, monkeypatch):
+        """Test jupyter start uses current directory by default."""
+        runner = CliRunner()
+
+        called_with = None
+
+        def mock_start(notebook_dir):
+            nonlocal called_with
+            called_with = notebook_dir
+            return {
+                "pid": 12345,
+                "url": "http://localhost:8888",
+                "started_at": "2024-01-01T00:00:00Z",
+                "root_dir": str(notebook_dir),
+            }
+
+        import stanza.cli
+
+        monkeypatch.setattr(stanza.cli.jupyter, "start", mock_start)
+
+        with runner.isolated_filesystem():
+            result = runner.invoke(cli, ["jupyter", "start"])
+
+            assert result.exit_code == 0
+            assert called_with is not None
+            assert called_with.resolve() == Path.cwd().resolve()
+
+    def test_jupyter_start_already_running(self, monkeypatch):
+        """Test jupyter start when server already running."""
+        runner = CliRunner()
+
+        def mock_start(notebook_dir):
+            raise RuntimeError("Jupyter server already running (PID 12345)")
+
+        import stanza.cli
+
+        monkeypatch.setattr(stanza.cli.jupyter, "start", mock_start)
+
+        with runner.isolated_filesystem():
+            result = runner.invoke(cli, ["jupyter", "start"])
+
+            assert result.exit_code == 1
+            assert "Error" in result.output
+            assert "already running" in result.output
+
+    def test_jupyter_stop_success(self, monkeypatch):
+        """Test jupyter stop command."""
+        runner = CliRunner()
+
+        stopped = False
+
+        def mock_stop():
+            nonlocal stopped
+            stopped = True
+
+        import stanza.cli
+
+        monkeypatch.setattr(stanza.cli.jupyter, "stop", mock_stop)
+
+        result = runner.invoke(cli, ["jupyter", "stop"])
+
+        assert result.exit_code == 0
+        assert "✓ Jupyter server stopped successfully" in result.output
+        assert stopped is True
+
+    def test_jupyter_status_running(self, monkeypatch):
+        """Test jupyter status when server is running."""
+        runner = CliRunner()
+
+        def mock_status():
+            return {
+                "pid": 12345,
+                "url": "http://localhost:8888?token=test",
+                "uptime_seconds": 3665,  # 1h 1m 5s
+                "root_dir": "/tmp/notebooks",
+            }
+
+        import stanza.cli
+
+        monkeypatch.setattr(stanza.cli.jupyter, "status", mock_status)
+
+        result = runner.invoke(cli, ["jupyter", "status"])
+
+        assert result.exit_code == 0
+        assert "Jupyter server is running" in result.output
+        assert "PID: 12345" in result.output
+        assert "http://localhost:8888" in result.output
+        assert "Uptime: 1h 1m" in result.output
+        assert "/tmp/notebooks" in result.output
+
+    def test_jupyter_status_uptime_formatting(self, monkeypatch):
+        """Test that status formats uptime correctly."""
+        runner = CliRunner()
+
+        def mock_status():
+            return {
+                "pid": 12345,
+                "url": "http://localhost:8888",
+                "uptime_seconds": 7320,  # 2h 2m
+                "root_dir": "/tmp",
+            }
+
+        import stanza.cli
+
+        monkeypatch.setattr(stanza.cli.jupyter, "status", mock_status)
+
+        result = runner.invoke(cli, ["jupyter", "status"])
+
+        assert result.exit_code == 0
+        assert "Uptime: 2h 2m" in result.output
+
+    def test_jupyter_open_success(self, monkeypatch):
+        """Test jupyter open command."""
+        runner = CliRunner()
+
+        def mock_status():
+            return {
+                "pid": 12345,
+                "url": "http://localhost:8888?token=test123",
+                "uptime_seconds": 100,
+                "root_dir": "/tmp",
+            }
+
+        # Mock webbrowser.open
+        opened_url = None
+
+        def mock_webbrowser_open(url):
+            nonlocal opened_url
+            opened_url = url
+
+        import stanza.cli
+
+        monkeypatch.setattr(stanza.cli.jupyter, "status", mock_status)
+        monkeypatch.setattr("webbrowser.open", mock_webbrowser_open)
+
+        result = runner.invoke(cli, ["jupyter", "open"])
+
+        assert result.exit_code == 0
+        assert "✓ Opened" in result.output
+        assert "http://localhost:8888?token=test123" in result.output
+        assert opened_url == "http://localhost:8888?token=test123"
+
+    def test_jupyter_open_not_running(self, monkeypatch):
+        """Test jupyter open when server not running."""
+        runner = CliRunner()
+
+        def mock_status():
+            return None
+
+        import stanza.cli
+
+        monkeypatch.setattr(stanza.cli.jupyter, "status", mock_status)
+
+        result = runner.invoke(cli, ["jupyter", "open"])
+
+        assert result.exit_code == 1
+        assert "Error: No Jupyter server is currently running" in result.output
+        assert "stanza jupyter start" in result.output
+
+
+class TestJupyterCLIIntegration:
+    """Integration tests for Jupyter CLI workflow."""
+
+    def test_jupyter_full_workflow(self, monkeypatch):
+        """Test complete workflow: start -> status -> stop."""
+        runner = CliRunner()
+
+        # Mock state
+        server_state = None
+
+        def mock_start(notebook_dir):
+            nonlocal server_state
+            server_state = {
+                "pid": 12345,
+                "url": "http://localhost:8888?token=test",
+                "started_at": "2024-01-01T00:00:00Z",
+                "root_dir": str(notebook_dir),
+            }
+            return server_state.copy()
+
+        def mock_status():
+            if server_state is None:
+                return None
+            return {**server_state, "uptime_seconds": 100}
+
+        def mock_stop():
+            nonlocal server_state
+            server_state = None
+
+        import stanza.cli
+
+        monkeypatch.setattr(stanza.cli.jupyter, "start", mock_start)
+        monkeypatch.setattr(stanza.cli.jupyter, "status", mock_status)
+        monkeypatch.setattr(stanza.cli.jupyter, "stop", mock_stop)
+
+        with runner.isolated_filesystem():
+            # Check status when not running
+            result1 = runner.invoke(cli, ["jupyter", "status"])
+            assert result1.exit_code == 0
+            assert "No Jupyter server" in result1.output
+
+            # Start server
+            result2 = runner.invoke(cli, ["jupyter", "start"])
+            assert result2.exit_code == 0
+            assert "started successfully" in result2.output
+
+            # Check status when running
+            result3 = runner.invoke(cli, ["jupyter", "status"])
+            assert result3.exit_code == 0
+            assert "Jupyter server is running" in result3.output
+            assert "PID: 12345" in result3.output
+
+            # Stop server
+            result4 = runner.invoke(cli, ["jupyter", "stop"])
+            assert result4.exit_code == 0
+            assert "stopped successfully" in result4.output
+
+            # Check status after stop
+            result5 = runner.invoke(cli, ["jupyter", "status"])
+            assert result5.exit_code == 0
+            assert "No Jupyter server" in result5.output
