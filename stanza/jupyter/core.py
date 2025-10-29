@@ -14,6 +14,8 @@ from typing import Any, TextIO
 import requests
 from jupyter_core.paths import jupyter_runtime_dir
 
+from stanza.jupyter.utils import tail_log
+
 
 @dataclass
 class ServerState:
@@ -43,6 +45,16 @@ class RuntimeInfo:
     token: str
     port: int
     runtime_file: str
+
+
+@dataclass
+class SessionInfo:
+    """Active Jupyter notebook session with log file metadata."""
+
+    notebook_path: str
+    log_path: str
+    size_bytes: int
+    line_count: int
 
 
 @dataclass
@@ -197,30 +209,6 @@ def _open_logs(tail_bytes: int = 50000) -> tuple[TextIO, TextIO]:
     return stdout, stderr
 
 
-def _tail_log(log_file: Path, lines: int = 20) -> str:
-    """Read the last N lines from a log file efficiently.
-
-    Only reads the last 4KB of the file to avoid loading large files into memory.
-    """
-    if not log_file.exists():
-        return ""
-
-    try:
-        with open(log_file, "rb") as f:
-            file_size = f.seek(0, os.SEEK_END)
-            if file_size == 0:
-                return ""
-
-            chunk_size = min(4096, file_size)
-            f.seek(-chunk_size, os.SEEK_END)
-            tail_bytes = f.read()
-
-        tail_text = tail_bytes.decode("utf-8", errors="replace")
-        return "\n".join(tail_text.splitlines()[-lines:])
-    except (OSError, UnicodeDecodeError):
-        return ""
-
-
 def _discover_runtime(
     pid: int, timeout: float = 10.0, poll_interval: float = 0.2
 ) -> RuntimeInfo:
@@ -318,6 +306,17 @@ def _force_kill(pid: int) -> None:
         pass
 
 
+def _api_request(state: ServerState, endpoint: str) -> Any:
+    """Make authenticated request to Jupyter API."""
+    token = state.url.split("token=")[1] if "token=" in state.url else ""
+    url_base = state.url.split("?")[0].replace("/lab", "")
+    headers = {"Authorization": f"token {token}"} if token else {}
+
+    response = requests.get(f"{url_base}/{endpoint}", headers=headers, timeout=2)
+    response.raise_for_status()
+    return response.json()
+
+
 def _setup_ipython_startup() -> None:
     """Copy auto-logging startup script to stanza's IPython configuration directory."""
     _config.ipython_startup_dir.mkdir(parents=True, exist_ok=True)
@@ -350,8 +349,6 @@ def start(
         )
 
     _clear_state()
-
-    # Set up IPython startup directory with auto-logging script
     _setup_ipython_startup()
 
     with _FileLock(_config.lock_file):
@@ -367,7 +364,6 @@ def start(
                 f"--ServerApp.notebook_dir={notebook_dir.absolute()}",
             ]
 
-            # Set IPYTHONDIR to use stanza's managed IPython configuration
             env = os.environ.copy()
             env["IPYTHONDIR"] = str(_config.ipython_dir.absolute())
 
@@ -387,7 +383,7 @@ def start(
 
             time.sleep(startup_wait)
             if not _is_alive(pid):
-                stderr_tail = _tail_log(_config.stderr_log, lines=10)
+                stderr_tail = tail_log(_config.stderr_log, lines=10)
                 raise RuntimeError(
                     f"Jupyter server failed to start. Last 10 lines of stderr:\n"
                     f"{stderr_tail}"
@@ -465,3 +461,89 @@ def status() -> dict[str, Any] | None:
             root_dir=state.root_dir,
         )
     )
+
+
+def list_sessions() -> list[dict[str, Any]]:
+    """List active notebook sessions with log metadata."""
+    state = _read_state()
+    if not state or not _is_alive(state.pid):
+        return []
+
+    try:
+        sessions = _api_request(state, "api/sessions")
+
+        results = []
+        for session in sessions:
+            notebook_path = session.get("notebook", {}).get("path") or session.get(
+                "path"
+            )
+            if not notebook_path:
+                continue
+
+            full_notebook_path = Path(state.root_dir) / notebook_path
+            log_path = full_notebook_path.with_suffix(".log")
+
+            size_bytes = 0
+            line_count = 0
+            if log_path.exists():
+                try:
+                    size_bytes = log_path.stat().st_size
+                    with open(log_path, "rb") as f:
+                        line_count = sum(1 for _ in f)
+                except OSError:
+                    pass
+
+            results.append(
+                asdict(
+                    SessionInfo(
+                        notebook_path=str(full_notebook_path),
+                        log_path=str(log_path),
+                        size_bytes=size_bytes,
+                        line_count=line_count,
+                    )
+                )
+            )
+
+        return results
+
+    except (requests.RequestException, KeyError, IndexError, json.JSONDecodeError):
+        return []
+
+
+def kill_kernel(notebook_name: str) -> None:
+    """Kill kernel for notebook via Jupyter API."""
+    state = _read_state()
+    if not state or not _is_alive(state.pid):
+        raise RuntimeError("No Jupyter server running")
+
+    try:
+        sessions = _api_request(state, "api/sessions")
+
+        for session in sessions:
+            notebook_path = session.get("notebook", {}).get("path") or session.get(
+                "path"
+            )
+            if not notebook_path:
+                continue
+
+            full_notebook_path = Path(state.root_dir) / notebook_path
+
+            if notebook_name.lower() in full_notebook_path.name.lower():
+                kernel_id = session.get("kernel", {}).get("id")
+                if not kernel_id:
+                    raise RuntimeError(f"No kernel ID for {notebook_path}")
+
+                token = state.url.split("token=")[1] if "token=" in state.url else ""
+                url_base = state.url.split("?")[0].replace("/lab", "")
+                headers = {"Authorization": f"token {token}"} if token else {}
+
+                response = requests.delete(
+                    f"{url_base}/api/kernels/{kernel_id}", headers=headers, timeout=2
+                )
+                response.raise_for_status()
+                return
+
+        raise RuntimeError(f"No session for '{notebook_name}'")
+
+    except requests.RequestException as e:
+        raise RuntimeError(f"Failed to kill kernel: {e}") from e

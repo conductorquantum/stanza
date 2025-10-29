@@ -12,6 +12,8 @@ import click
 
 from stanza import __version__, jupyter
 from stanza.context import StanzaSession
+from stanza.jupyter import logs as log_stream
+from stanza.jupyter.utils import format_size
 
 
 @click.group()
@@ -279,6 +281,92 @@ def jupyter_open() -> None:
     except Exception as e:
         click.echo(f"✗ Error: {e}", err=True)
         raise click.Abort() from e
+
+
+def _require_server() -> None:
+    """Check if server is running, abort if not."""
+    if jupyter.status() is None:
+        click.echo("✗ No Jupyter server running", err=True)
+        click.echo("Start with: stanza jupyter start")
+        raise click.Abort()
+
+
+def _find_notebook(name: str) -> dict[str, Any]:
+    """Find notebook session by name, abort if not found or ambiguous."""
+    sessions = jupyter.list_sessions()
+    matches = [
+        s for s in sessions if name.lower() in Path(s["notebook_path"]).name.lower()
+    ]
+
+    if not matches:
+        click.echo(f"✗ No notebook matching '{name}'", err=True)
+        if sessions:
+            click.echo("Active notebooks:")
+            for s in sessions:
+                click.echo(f"  - {Path(s['notebook_path']).name}")
+        raise click.Abort()
+
+    if len(matches) > 1:
+        click.echo(f"✗ Multiple notebooks match '{name}':", err=True)
+        for s in matches:
+            click.echo(f"  - {Path(s['notebook_path']).name}")
+        raise click.Abort()
+
+    return matches[0]
+
+
+@jupyter_cli.command(name="list")
+def jupyter_list() -> None:
+    """List active notebook sessions."""
+    _require_server()
+    sessions = jupyter.list_sessions()
+
+    if not sessions:
+        click.echo("No active sessions")
+        return
+
+    for s in sessions:
+        click.echo(Path(s["notebook_path"]).name)
+
+
+@jupyter_cli.command(name="logs")
+@click.argument("notebook", required=False)
+@click.option("-n", "--lines", type=int, default=10, help="Lines to show initially")
+def jupyter_logs(notebook: str | None, lines: int) -> None:
+    """List logs or tail a notebook's log file."""
+    _require_server()
+
+    if notebook is None:
+        sessions = jupyter.list_sessions()
+        if not sessions:
+            click.echo("No active sessions")
+            return
+
+        for s in sessions:
+            nb = Path(s["notebook_path"]).name
+            log = Path(s["log_path"]).name
+            size = format_size(s["size_bytes"])
+            click.echo(f"{nb} → {log}  ({s['line_count']} lines, {size})")
+        return
+
+    session = _find_notebook(notebook)
+    log_path = Path(session["log_path"])
+    click.echo(f"Tailing {Path(session['notebook_path']).name} (Ctrl+C to detach)")
+    log_stream.follow(log_path, lines=lines)
+
+
+@jupyter_cli.command(name="attach")
+@click.argument("notebook", required=True)
+@click.option("-n", "--lines", type=int, default=10, help="Lines to show initially")
+def jupyter_attach(notebook: str, lines: int) -> None:
+    """Attach to notebook with active control (Ctrl+C kills kernel)."""
+    _require_server()
+    session = _find_notebook(notebook)
+    log_path = Path(session["log_path"])
+    notebook_name = Path(session["notebook_path"]).name
+
+    click.echo(f"Attached to {notebook_name} (Ctrl+C kills kernel, ESC exits)")
+    log_stream.attach(log_path, lambda: jupyter.kill_kernel(notebook_name), lines=lines)
 
 
 def main() -> None:
