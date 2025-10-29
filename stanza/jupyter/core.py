@@ -2,6 +2,7 @@ import calendar
 import fcntl
 import json
 import os
+import shutil
 import signal
 import subprocess
 import sys
@@ -16,7 +17,7 @@ from jupyter_core.paths import jupyter_runtime_dir
 
 @dataclass
 class ServerState:
-    """The jupyter server state."""
+    """Persistent Jupyter server state stored on disk."""
 
     pid: int
     url: str
@@ -26,7 +27,7 @@ class ServerState:
 
 @dataclass
 class ServerStatus:
-    """The jupyter server status."""
+    """Runtime Jupyter server status with calculated uptime."""
 
     pid: int
     url: str
@@ -36,7 +37,7 @@ class ServerStatus:
 
 @dataclass
 class RuntimeInfo:
-    """The jupyter runtime info."""
+    """Jupyter runtime information parsed from jpserver-{pid}.json."""
 
     url: str
     token: str
@@ -46,33 +47,47 @@ class RuntimeInfo:
 
 @dataclass
 class Config:
-    """The jupyter server config."""
+    """Configuration for Jupyter server management."""
 
     state_dir: Path = Path(".stanza/jupyter")
     log_max_size: int = 1024 * 1024
 
     @property
     def state_file(self) -> Path:
+        """Path to the server state JSON file."""
         return self.state_dir / "state.json"
 
     @property
     def lock_file(self) -> Path:
+        """Path to the file lock for preventing concurrent operations."""
         return self.state_dir / ".lock"
 
     @property
     def stdout_log(self) -> Path:
+        """Path to the Jupyter server stdout log."""
         return self.state_dir / "stdout.log"
 
     @property
     def stderr_log(self) -> Path:
+        """Path to the Jupyter server stderr log."""
         return self.state_dir / "stderr.log"
+
+    @property
+    def ipython_dir(self) -> Path:
+        """Path to stanza's managed IPython configuration directory."""
+        return self.state_dir / "ipython"
+
+    @property
+    def ipython_startup_dir(self) -> Path:
+        """Path to IPython startup scripts directory for auto-logging."""
+        return self.ipython_dir / "profile_default" / "startup"
 
 
 _config = Config()
 
 
 def _read_state() -> ServerState | None:
-    """Read the jupyter server state."""
+    """Read the Jupyter server state from disk, returning None if unavailable or corrupt."""
     if not _config.state_file.exists():
         return None
 
@@ -89,7 +104,7 @@ def _read_state() -> ServerState | None:
 
 
 def _write_state(state: ServerState) -> None:
-    """Write the jupyter server state."""
+    """Write the Jupyter server state to disk atomically with secure permissions."""
     _config.state_dir.mkdir(parents=True, exist_ok=True)
 
     tmp = _config.state_file.with_suffix(".tmp")
@@ -103,7 +118,7 @@ def _write_state(state: ServerState) -> None:
 
 
 def _clear_state() -> None:
-    """Clear the jupyter server state."""
+    """Delete the server state file and log files, ignoring errors."""
     for path in [_config.state_file, _config.stdout_log, _config.stderr_log]:
         if path.exists():
             try:
@@ -113,7 +128,7 @@ def _clear_state() -> None:
 
 
 def _is_alive(pid: int) -> bool:
-    """Check if the jupyter server process is alive."""
+    """Check if a process with the given PID is running."""
     try:
         os.kill(pid, 0)
         return True
@@ -122,15 +137,16 @@ def _is_alive(pid: int) -> bool:
 
 
 class _FileLock:
-    """File lock interface for thread-safe operations."""
+    """File-based lock for preventing concurrent Jupyter server operations."""
 
     def __init__(self, lock_file: Path, timeout: float = 5.0):
+        """Initialize lock with the lock file path and acquisition timeout."""
         self.lock_file = lock_file
         self.timeout = timeout
         self.fd: Any = None
 
     def __enter__(self) -> "_FileLock":
-        """Acquire the lock."""
+        """Acquire exclusive lock, blocking until available or timeout."""
         self.lock_file.parent.mkdir(parents=True, exist_ok=True)
         self.fd = open(self.lock_file, "w")
 
@@ -149,7 +165,7 @@ class _FileLock:
                 time.sleep(0.1)
 
     def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
-        """Release the lock."""
+        """Release lock and close file descriptor."""
         if self.fd:
             try:
                 fcntl.flock(self.fd.fileno(), fcntl.LOCK_UN)
@@ -159,7 +175,11 @@ class _FileLock:
 
 
 def _open_logs(tail_bytes: int = 50000) -> tuple[TextIO, TextIO]:
-    """Open the logs."""
+    """Open stdout and stderr log files, truncating if they exceed max size.
+
+    Returns file handles opened in append mode. If a log file exceeds log_max_size,
+    it is truncated to keep only the last tail_bytes.
+    """
     _config.state_dir.mkdir(parents=True, exist_ok=True)
 
     for log_file in [_config.stdout_log, _config.stderr_log]:
@@ -178,7 +198,10 @@ def _open_logs(tail_bytes: int = 50000) -> tuple[TextIO, TextIO]:
 
 
 def _tail_log(log_file: Path, lines: int = 20) -> str:
-    """Tail the log file."""
+    """Read the last N lines from a log file efficiently.
+
+    Only reads the last 4KB of the file to avoid loading large files into memory.
+    """
     if not log_file.exists():
         return ""
 
@@ -188,7 +211,6 @@ def _tail_log(log_file: Path, lines: int = 20) -> str:
             if file_size == 0:
                 return ""
 
-            # Read last 4KB or whole file, whichever is smaller
             chunk_size = min(4096, file_size)
             f.seek(-chunk_size, os.SEEK_END)
             tail_bytes = f.read()
@@ -202,7 +224,11 @@ def _tail_log(log_file: Path, lines: int = 20) -> str:
 def _discover_runtime(
     pid: int, timeout: float = 10.0, poll_interval: float = 0.2
 ) -> RuntimeInfo:
-    """Discover the jupyter runtime."""
+    """Discover Jupyter runtime information by polling for jpserver-{pid}.json.
+
+    Waits for Jupyter to write its runtime file containing the server URL, token,
+    and port. Constructs a JupyterLab URL with authentication token.
+    """
     runtime_dir = Path(jupyter_runtime_dir())
     runtime_file = runtime_dir / f"jpserver-{pid}.json"
 
@@ -240,7 +266,11 @@ def _discover_runtime(
 def _shutdown(
     state: ServerState, timeout: float = 5.0, poll_interval: float = 0.2
 ) -> None:
-    """Shutdown the jupyter server."""
+    """Gracefully shutdown Jupyter server via REST API.
+
+    Sends a shutdown request to the Jupyter server using the authentication token,
+    then polls until the process terminates or timeout is reached.
+    """
     try:
         token = state.url.split("token=")[1] if "token=" in state.url else ""
         if token:
@@ -263,7 +293,10 @@ def _shutdown(
 
 
 def _kill(pid: int, timeout: float = 5.0, poll_interval: float = 0.2) -> None:
-    """Kill the jupyter server."""
+    """Terminate Jupyter server process with SIGTERM.
+
+    Sends SIGTERM and waits for process to exit, polling until termination or timeout.
+    """
     try:
         os.kill(pid, signal.SIGTERM)
         max_polls = int(timeout / poll_interval)
@@ -277,7 +310,7 @@ def _kill(pid: int, timeout: float = 5.0, poll_interval: float = 0.2) -> None:
 
 
 def _force_kill(pid: int) -> None:
-    """Force kill the jupyter server."""
+    """Force kill Jupyter server process with SIGKILL."""
     try:
         os.kill(pid, signal.SIGKILL)
         time.sleep(0.5)
@@ -285,10 +318,30 @@ def _force_kill(pid: int) -> None:
         pass
 
 
+def _setup_ipython_startup() -> None:
+    """Copy auto-logging startup script to stanza's IPython configuration directory."""
+    _config.ipython_startup_dir.mkdir(parents=True, exist_ok=True)
+
+    source_script = Path(__file__).parent / "startup.py"
+    dest_script = _config.ipython_startup_dir / "00-auto-logging.py"
+
+    if source_script.exists():
+        shutil.copy2(source_script, dest_script)
+    else:
+        raise RuntimeError(f"Auto-logging script not found at {source_script}")
+
+
 def start(
     notebook_dir: Path, port: int = 8888, startup_wait: float = 0.5
 ) -> dict[str, Any]:
-    """Start the jupyter server."""
+    """Start a Jupyter server in the background with auto-logging enabled.
+
+    Launches jupyter_server as a detached process, discovers its runtime information,
+    and saves the state to disk. Configures IPYTHONDIR to enable automatic cell
+    output logging to notebook_name.log files.
+
+    Returns a dict with keys: pid, url, started_at, root_dir.
+    """
     state = _read_state()
     if state and _is_alive(state.pid):
         raise RuntimeError(
@@ -297,6 +350,10 @@ def start(
         )
 
     _clear_state()
+
+    # Set up IPython startup directory with auto-logging script
+    _setup_ipython_startup()
+
     with _FileLock(_config.lock_file):
         stdout_file, stderr_file = _open_logs()
         try:
@@ -310,6 +367,10 @@ def start(
                 f"--ServerApp.notebook_dir={notebook_dir.absolute()}",
             ]
 
+            # Set IPYTHONDIR to use stanza's managed IPython configuration
+            env = os.environ.copy()
+            env["IPYTHONDIR"] = str(_config.ipython_dir.absolute())
+
             def preexec_fn() -> None:
                 os.setsid()
                 signal.signal(signal.SIGHUP, signal.SIG_IGN)
@@ -318,6 +379,7 @@ def start(
                 cmd,
                 stdout=stdout_file,
                 stderr=stderr_file,
+                env=env,
                 preexec_fn=preexec_fn,
             )
 
@@ -347,7 +409,11 @@ def start(
 
 
 def stop() -> None:
-    """Stop the jupyter server."""
+    """Stop the Jupyter server using escalating shutdown strategies.
+
+    Attempts graceful shutdown via REST API, then SIGTERM, then SIGKILL if necessary.
+    Cleans up state files when complete.
+    """
     state = _read_state()
     if not state:
         return
@@ -371,6 +437,11 @@ def stop() -> None:
 
 
 def status() -> dict[str, Any] | None:
+    """Get the current Jupyter server status including uptime.
+
+    Returns a dict with keys: pid, url, uptime_seconds, root_dir.
+    Returns None if no server is running or state is stale.
+    """
     state = _read_state()
     if not state:
         return None
