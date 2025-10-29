@@ -10,11 +10,7 @@ from typing import TYPE_CHECKING, Any
 
 from bokeh.plotting import output_notebook
 from IPython.display import display
-
-try:
-    from jupyter_bokeh.widgets import BokehModel  # type: ignore[import-untyped]
-except ImportError:
-    BokehModel = None
+from jupyter_bokeh.widgets import BokehModel  # type: ignore[import-untyped]
 
 from stanza.plotter.backends.utils import (
     PlotState,
@@ -36,10 +32,6 @@ class InlineBackend:
 
     def start(self) -> None:
         """Initialize Bokeh notebook output."""
-        if BokehModel is None:
-            raise ImportError(
-                "jupyter_bokeh is not installed. Install with: pip install jupyter_bokeh"
-            )
         output_notebook()
 
     def stop(self) -> None:
