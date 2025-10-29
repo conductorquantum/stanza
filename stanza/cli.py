@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import json
+import webbrowser
 from datetime import datetime
 from pathlib import Path
 from typing import Any, cast
 
 import click
 
-from stanza import __version__
+from stanza import __version__, jupyter
 from stanza.context import StanzaSession
 
 
@@ -159,6 +160,125 @@ def live_plot_status() -> None:
     click.echo(f"Live plotting: enabled ({backend} backend)")
     if backend == "server":
         click.echo(f"  Port: {port}")
+
+
+@cli.group(name="jupyter")
+def jupyter_cli() -> None:
+    """Manage Jupyter notebook server."""
+    pass
+
+
+@jupyter_cli.command(name="start")
+@click.argument(
+    "notebook_dir",
+    type=click.Path(exists=True, file_okay=False, dir_okay=True, path_type=Path),
+    required=False,
+    default=".",
+)
+@click.option(
+    "--port",
+    type=int,
+    default=8888,
+    help="Port for Jupyter server (default: 8888)",
+)
+def jupyter_start(notebook_dir: Path, port: int) -> None:
+    """Start Jupyter notebook server in background.
+
+    Examples:
+        stanza jupyter start
+        stanza jupyter start /path/to/notebooks --port 8889
+    """
+    try:
+        notebook_dir = notebook_dir.resolve()
+        click.echo(f"Starting Jupyter server in {notebook_dir}...")
+
+        state = jupyter.start(notebook_dir, port=port)
+
+        click.echo("✓ Jupyter server started successfully")
+        click.echo(f"  PID: {state['pid']}")
+        click.echo(f"  URL: {state['url']}")
+        click.echo(f"  Root: {state['root_dir']}")
+        click.echo()
+        click.echo("Server is running in background and will survive terminal closure.")
+        click.echo("Use 'stanza jupyter stop' to shut down the server.")
+
+    except RuntimeError as e:
+        click.echo(f"✗ Error: {e}", err=True)
+        raise click.Abort() from e
+    except Exception as e:
+        click.echo(f"✗ Unexpected error: {e}", err=True)
+        raise click.Abort() from e
+
+
+@jupyter_cli.command(name="stop")
+def jupyter_stop() -> None:
+    """Stop Jupyter notebook server gracefully.
+    Uses escalating shutdown: REST API -> SIGTERM -> SIGKILL
+    Examples:
+        stanza jupyter stop
+    """
+    try:
+        click.echo("Stopping Jupyter server...")
+        jupyter.stop()
+        click.echo("✓ Jupyter server stopped successfully")
+
+    except Exception as e:
+        click.echo(f"✗ Error: {e}", err=True)
+        raise click.Abort() from e
+
+
+@jupyter_cli.command(name="status")
+def jupyter_status() -> None:
+    """Show Jupyter server status.
+    Displays PID, URL, uptime, and root directory if server is running.
+    Examples:
+        stanza jupyter status
+    """
+    try:
+        state = jupyter.status()
+
+        if state is None:
+            click.echo("No Jupyter server is currently running")
+            click.echo()
+            click.echo("Start a server with: stanza jupyter start")
+            return
+
+        uptime_hours = state["uptime_seconds"] / 3600
+        uptime_mins = (state["uptime_seconds"] % 3600) / 60
+
+        click.echo("Jupyter server is running")
+        click.echo(f"  PID: {state['pid']}")
+        click.echo(f"  URL: {state['url']}")
+        click.echo(f"  Uptime: {int(uptime_hours)}h {int(uptime_mins)}m")
+        click.echo(f"  Root: {state['root_dir']}")
+
+    except Exception as e:
+        click.echo(f"✗ Error: {e}", err=True)
+        raise click.Abort() from e
+
+
+@jupyter_cli.command(name="open")
+def jupyter_open() -> None:
+    """Open Jupyter in browser.
+    Opens the Jupyter URL with authentication token in your default browser.
+    Examples:
+        stanza jupyter open
+    """
+    try:
+        state = jupyter.status()
+
+        if state is None:
+            click.echo("✗ Error: No Jupyter server is currently running", err=True)
+            click.echo()
+            click.echo("Start a server with: stanza jupyter start")
+            raise click.Abort()
+
+        webbrowser.open(state["url"])
+        click.echo(f"✓ Opened {state['url']}")
+
+    except Exception as e:
+        click.echo(f"✗ Error: {e}", err=True)
+        raise click.Abort() from e
 
 
 def main() -> None:

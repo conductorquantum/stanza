@@ -143,8 +143,8 @@ class _FileLock:
                 if time.time() - start > self.timeout:
                     self.fd.close()
                     raise RuntimeError(
-                        "Could not acquire lock (another process may be starting). "
-                        "Wait a moment and try again."
+                        f"Lock timeout after {self.timeout}s. Another stanza process "
+                        f"is accessing the Jupyter server. Try again in a moment."
                     ) from None
                 time.sleep(0.1)
 
@@ -158,14 +158,18 @@ class _FileLock:
             self.fd.close()
 
 
-def _open_logs() -> tuple[TextIO, TextIO]:
+def _open_logs(tail_bytes: int = 50000) -> tuple[TextIO, TextIO]:
     """Open the logs."""
     _config.state_dir.mkdir(parents=True, exist_ok=True)
 
     for log_file in [_config.stdout_log, _config.stderr_log]:
         if log_file.exists() and log_file.stat().st_size > _config.log_max_size:
-            content = log_file.read_bytes()
-            log_file.write_bytes(b"[...truncated...]\n" + content[-50000:])
+            with open(log_file, "rb") as f:
+                file_size = f.seek(0, os.SEEK_END)
+                seek_pos = max(0, file_size - tail_bytes)
+                f.seek(seek_pos, os.SEEK_SET)
+                tail = f.read()
+            log_file.write_bytes(b"[...truncated...]\n" + tail)
 
     stdout = open(_config.stdout_log, "a")
     stderr = open(_config.stderr_log, "a")
@@ -179,13 +183,25 @@ def _tail_log(log_file: Path, lines: int = 20) -> str:
         return ""
 
     try:
-        content = log_file.read_text()
-        return "\n".join(content.splitlines()[-lines:])
+        with open(log_file, "rb") as f:
+            file_size = f.seek(0, os.SEEK_END)
+            if file_size == 0:
+                return ""
+
+            # Read last 4KB or whole file, whichever is smaller
+            chunk_size = min(4096, file_size)
+            f.seek(-chunk_size, os.SEEK_END)
+            tail_bytes = f.read()
+
+        tail_text = tail_bytes.decode("utf-8", errors="replace")
+        return "\n".join(tail_text.splitlines()[-lines:])
     except (OSError, UnicodeDecodeError):
         return ""
 
 
-def _discover_runtime(pid: int, timeout: float = 10.0) -> RuntimeInfo:
+def _discover_runtime(
+    pid: int, timeout: float = 10.0, poll_interval: float = 0.2
+) -> RuntimeInfo:
     """Discover the jupyter runtime."""
     runtime_dir = Path(jupyter_runtime_dir())
     runtime_file = runtime_dir / f"jpserver-{pid}.json"
@@ -213,7 +229,7 @@ def _discover_runtime(pid: int, timeout: float = 10.0) -> RuntimeInfo:
             except (json.JSONDecodeError, KeyError, OSError):
                 pass
 
-        time.sleep(0.2)
+        time.sleep(poll_interval)
 
     raise RuntimeError(
         f"Jupyter runtime file not found after {timeout}s. "
@@ -221,7 +237,9 @@ def _discover_runtime(pid: int, timeout: float = 10.0) -> RuntimeInfo:
     )
 
 
-def _shutdown(state: ServerState) -> None:
+def _shutdown(
+    state: ServerState, timeout: float = 5.0, poll_interval: float = 0.2
+) -> None:
     """Shutdown the jupyter server."""
     try:
         token = state.url.split("token=")[1] if "token=" in state.url else ""
@@ -233,25 +251,27 @@ def _shutdown(state: ServerState) -> None:
                 timeout=2,
             )
 
-            for _ in range(25):
+            max_polls = int(timeout / poll_interval)
+            for _ in range(max_polls):
                 if not _is_alive(state.pid):
                     _clear_state()
                     return
-                time.sleep(0.2)
+                time.sleep(poll_interval)
 
     except (requests.RequestException, KeyError, IndexError):
         pass
 
 
-def _kill(pid: int) -> None:
+def _kill(pid: int, timeout: float = 5.0, poll_interval: float = 0.2) -> None:
     """Kill the jupyter server."""
     try:
         os.kill(pid, signal.SIGTERM)
-        for _ in range(25):
+        max_polls = int(timeout / poll_interval)
+        for _ in range(max_polls):
             if not _is_alive(pid):
                 _clear_state()
                 return
-            time.sleep(0.2)
+            time.sleep(poll_interval)
     except (OSError, ProcessLookupError):
         pass
 
@@ -265,7 +285,9 @@ def _force_kill(pid: int) -> None:
         pass
 
 
-def start(notebook_dir: Path) -> dict[str, Any]:
+def start(
+    notebook_dir: Path, port: int = 8888, startup_wait: float = 0.5
+) -> dict[str, Any]:
     """Start the jupyter server."""
     state = _read_state()
     if state and _is_alive(state.pid):
@@ -284,7 +306,7 @@ def start(notebook_dir: Path) -> dict[str, Any]:
                 "jupyter_server",
                 "--no-browser",
                 "--ServerApp.ip=127.0.0.1",
-                "--ServerApp.port=8888",
+                f"--ServerApp.port={port}",
                 f"--ServerApp.notebook_dir={notebook_dir.absolute()}",
             ]
 
@@ -301,7 +323,7 @@ def start(notebook_dir: Path) -> dict[str, Any]:
 
             pid = proc.pid
 
-            time.sleep(0.5)
+            time.sleep(startup_wait)
             if not _is_alive(pid):
                 stderr_tail = _tail_log(_config.stderr_log, lines=10)
                 raise RuntimeError(
@@ -313,7 +335,7 @@ def start(notebook_dir: Path) -> dict[str, Any]:
             state = ServerState(
                 pid=pid,
                 url=runtime.url,
-                started_at=time.strftime("%Y-%m-%d %H:%M:%S"),
+                started_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                 root_dir=str(notebook_dir.absolute()),
             )
             _write_state(state)
