@@ -391,3 +391,372 @@ class TestCLIIntegration:
             assert status_result.exit_code == 0
             assert "_second" in status_result.output
             assert "_first" not in status_result.output
+
+
+class TestJupyterStartCommand:
+    """Test suite for 'stanza jupyter start' command."""
+
+    def test_starts_server_with_default_params(self, tmp_path):
+        """Test starts server in current directory with default port."""
+        runner = CliRunner()
+        mock_state = {
+            "pid": 12345,
+            "url": "http://localhost:8888/?token=abc",
+            "root_dir": str(tmp_path),
+            "port": 8888,
+        }
+        with (
+            runner.isolated_filesystem(temp_dir=tmp_path),
+            patch("stanza.cli.jupyter.start", return_value=mock_state),
+        ):
+            result = runner.invoke(cli, ["jupyter", "start"])
+            assert result.exit_code == 0
+            assert "Jupyter server started successfully" in result.output
+            assert "PID: 12345" in result.output
+            assert "http://localhost:8888" in result.output
+
+    def test_starts_server_with_custom_port(self, tmp_path):
+        """Test starts server with custom port parameter."""
+        runner = CliRunner()
+        mock_state = {
+            "pid": 12345,
+            "url": "http://localhost:9999/?token=abc",
+            "root_dir": str(tmp_path),
+            "port": 9999,
+        }
+        with (
+            runner.isolated_filesystem(temp_dir=tmp_path),
+            patch("stanza.cli.jupyter.start", return_value=mock_state) as mock_start,
+        ):
+            result = runner.invoke(cli, ["jupyter", "start", "--port", "9999"])
+            assert result.exit_code == 0
+            mock_start.assert_called_once()
+            assert mock_start.call_args[1]["port"] == 9999
+
+    def test_starts_server_with_custom_directory(self, tmp_path):
+        """Test starts server in custom directory."""
+        runner = CliRunner()
+        custom_dir = tmp_path / "notebooks"
+        custom_dir.mkdir()
+        mock_state = {
+            "pid": 12345,
+            "url": "http://localhost:8888/?token=abc",
+            "root_dir": str(custom_dir),
+            "port": 8888,
+        }
+        with patch("stanza.cli.jupyter.start", return_value=mock_state) as mock_start:
+            result = runner.invoke(cli, ["jupyter", "start", str(custom_dir)])
+            assert result.exit_code == 0
+            mock_start.assert_called_once()
+
+    def test_handles_runtime_error(self, tmp_path):
+        """Test handles RuntimeError from jupyter.start."""
+        runner = CliRunner()
+        with (
+            runner.isolated_filesystem(temp_dir=tmp_path),
+            patch("stanza.cli.jupyter.start", side_effect=RuntimeError("Port in use")),
+        ):
+            result = runner.invoke(cli, ["jupyter", "start"])
+            assert result.exit_code == 1
+            assert "Error: Port in use" in result.output
+
+    def test_handles_unexpected_error(self, tmp_path):
+        """Test handles unexpected Exception from jupyter.start."""
+        runner = CliRunner()
+        with (
+            runner.isolated_filesystem(temp_dir=tmp_path),
+            patch("stanza.cli.jupyter.start", side_effect=ValueError("Unexpected")),
+        ):
+            result = runner.invoke(cli, ["jupyter", "start"])
+            assert result.exit_code == 1
+            assert "Unexpected error" in result.output
+
+
+class TestJupyterStopCommand:
+    """Test suite for 'stanza jupyter stop' command."""
+
+    def test_stops_running_server(self):
+        """Test stops running server successfully."""
+        runner = CliRunner()
+        with patch("stanza.cli.jupyter.stop") as mock_stop:
+            result = runner.invoke(cli, ["jupyter", "stop"])
+            assert result.exit_code == 0
+            assert "Jupyter server stopped successfully" in result.output
+            mock_stop.assert_called_once()
+
+    def test_handles_stop_error(self):
+        """Test handles Exception from jupyter.stop."""
+        runner = CliRunner()
+        with patch("stanza.cli.jupyter.stop", side_effect=RuntimeError("No server")):
+            result = runner.invoke(cli, ["jupyter", "stop"])
+            assert result.exit_code == 1
+            assert "Error: No server" in result.output
+
+
+class TestJupyterStatusCommand:
+    """Test suite for 'stanza jupyter status' command."""
+
+    def test_shows_running_server_status(self):
+        """Test displays server status when running."""
+        runner = CliRunner()
+        mock_state = {
+            "pid": 12345,
+            "url": "http://localhost:8888/?token=abc",
+            "root_dir": "/path/to/notebooks",
+            "uptime_seconds": 7265,
+        }
+        with patch("stanza.cli.jupyter.status", return_value=mock_state):
+            result = runner.invoke(cli, ["jupyter", "status"])
+            assert result.exit_code == 0
+            assert "Jupyter server is running" in result.output
+            assert "PID: 12345" in result.output
+            assert "http://localhost:8888" in result.output
+            assert "2h 1m" in result.output
+            assert "/path/to/notebooks" in result.output
+
+    def test_shows_no_server_running(self):
+        """Test displays message when no server running."""
+        runner = CliRunner()
+        with patch("stanza.cli.jupyter.status", return_value=None):
+            result = runner.invoke(cli, ["jupyter", "status"])
+            assert result.exit_code == 0
+            assert "No Jupyter server is currently running" in result.output
+            assert "stanza jupyter start" in result.output
+
+    def test_handles_status_error(self):
+        """Test handles Exception from jupyter.status."""
+        runner = CliRunner()
+        with patch("stanza.cli.jupyter.status", side_effect=RuntimeError("Error")):
+            result = runner.invoke(cli, ["jupyter", "status"])
+            assert result.exit_code == 1
+            assert "Error: Error" in result.output
+
+
+class TestJupyterOpenCommand:
+    """Test suite for 'stanza jupyter open' command."""
+
+    def test_opens_browser_with_url(self):
+        """Test opens webbrowser with server URL."""
+        runner = CliRunner()
+        mock_state = {
+            "pid": 12345,
+            "url": "http://localhost:8888/?token=abc",
+            "root_dir": "/path/to/notebooks",
+        }
+        with (
+            patch("stanza.cli.jupyter.status", return_value=mock_state),
+            patch("stanza.cli.webbrowser.open") as mock_open,
+        ):
+            result = runner.invoke(cli, ["jupyter", "open"])
+            assert result.exit_code == 0
+            assert "✓ Opened http://localhost:8888" in result.output
+            mock_open.assert_called_once_with("http://localhost:8888/?token=abc")
+
+    def test_fails_when_no_server(self):
+        """Test aborts when no server running."""
+        runner = CliRunner()
+        with patch("stanza.cli.jupyter.status", return_value=None):
+            result = runner.invoke(cli, ["jupyter", "open"])
+            assert result.exit_code == 1
+            assert "No Jupyter server is currently running" in result.output
+
+    def test_handles_open_error(self):
+        """Test handles Exception from webbrowser.open."""
+        runner = CliRunner()
+        mock_state = {"url": "http://localhost:8888"}
+        with (
+            patch("stanza.cli.jupyter.status", return_value=mock_state),
+            patch("stanza.cli.webbrowser.open", side_effect=RuntimeError("No browser")),
+        ):
+            result = runner.invoke(cli, ["jupyter", "open"])
+            assert result.exit_code == 1
+
+
+class TestJupyterListCommand:
+    """Test suite for 'stanza jupyter list' command."""
+
+    def test_lists_active_sessions(self):
+        """Test displays active session notebook names."""
+        runner = CliRunner()
+        mock_sessions = [
+            {"notebook_path": "/path/to/notebook1.ipynb"},
+            {"notebook_path": "/path/to/notebook2.ipynb"},
+        ]
+        with (
+            patch("stanza.cli.jupyter.status", return_value={"pid": 123}),
+            patch("stanza.cli.jupyter.list_sessions", return_value=mock_sessions),
+        ):
+            result = runner.invoke(cli, ["jupyter", "list"])
+            assert result.exit_code == 0
+            assert "notebook1.ipynb" in result.output
+            assert "notebook2.ipynb" in result.output
+
+    def test_shows_no_sessions_message(self):
+        """Test displays message when no sessions active."""
+        runner = CliRunner()
+        with (
+            patch("stanza.cli.jupyter.status", return_value={"pid": 123}),
+            patch("stanza.cli.jupyter.list_sessions", return_value=[]),
+        ):
+            result = runner.invoke(cli, ["jupyter", "list"])
+            assert result.exit_code == 0
+            assert "No active sessions" in result.output
+
+    def test_requires_running_server(self):
+        """Test aborts when no server running."""
+        runner = CliRunner()
+        with patch("stanza.cli.jupyter.status", return_value=None):
+            result = runner.invoke(cli, ["jupyter", "list"])
+            assert result.exit_code == 1
+            assert "No Jupyter server running" in result.output
+
+
+class TestJupyterLogsCommand:
+    """Test suite for 'stanza jupyter logs' command."""
+
+    def test_lists_all_logs_without_notebook_arg(self):
+        """Test shows all log files with metadata."""
+        runner = CliRunner()
+        mock_sessions = [
+            {
+                "notebook_path": "/path/to/notebook1.ipynb",
+                "log_path": "/path/to/notebook1.log",
+                "size_bytes": 2048,
+                "line_count": 100,
+            },
+            {
+                "notebook_path": "/path/to/notebook2.ipynb",
+                "log_path": "/path/to/notebook2.log",
+                "size_bytes": 4096,
+                "line_count": 200,
+            },
+        ]
+        with (
+            patch("stanza.cli.jupyter.status", return_value={"pid": 123}),
+            patch("stanza.cli.jupyter.list_sessions", return_value=mock_sessions),
+        ):
+            result = runner.invoke(cli, ["jupyter", "logs"])
+            assert result.exit_code == 0
+            assert "notebook1.ipynb" in result.output
+            assert "notebook2.ipynb" in result.output
+            assert "100 lines" in result.output
+            assert "200 lines" in result.output
+
+    def test_tails_specific_notebook_log(self):
+        """Test follows log for specific notebook."""
+        runner = CliRunner()
+        mock_session = {
+            "notebook_path": "/path/to/test.ipynb",
+            "log_path": "/path/to/test.log",
+        }
+        with (
+            patch("stanza.cli.jupyter.status", return_value={"pid": 123}),
+            patch("stanza.cli.jupyter.list_sessions", return_value=[mock_session]),
+            patch("stanza.cli.log_stream.follow") as mock_follow,
+        ):
+            result = runner.invoke(cli, ["jupyter", "logs", "test"])
+            assert result.exit_code == 0
+            assert "Tailing test.ipynb" in result.output
+            mock_follow.assert_called_once()
+
+    def test_shows_no_sessions_message(self):
+        """Test displays message when no sessions active."""
+        runner = CliRunner()
+        with (
+            patch("stanza.cli.jupyter.status", return_value={"pid": 123}),
+            patch("stanza.cli.jupyter.list_sessions", return_value=[]),
+        ):
+            result = runner.invoke(cli, ["jupyter", "logs"])
+            assert result.exit_code == 0
+            assert "No active sessions" in result.output
+
+    def test_requires_running_server(self):
+        """Test aborts when no server running."""
+        runner = CliRunner()
+        with patch("stanza.cli.jupyter.status", return_value=None):
+            result = runner.invoke(cli, ["jupyter", "logs"])
+            assert result.exit_code == 1
+            assert "No Jupyter server running" in result.output
+
+    def test_handles_nonexistent_notebook(self):
+        """Test aborts when notebook not found."""
+        runner = CliRunner()
+        mock_session = {"notebook_path": "/path/to/other.ipynb"}
+        with (
+            patch("stanza.cli.jupyter.status", return_value={"pid": 123}),
+            patch("stanza.cli.jupyter.list_sessions", return_value=[mock_session]),
+        ):
+            result = runner.invoke(cli, ["jupyter", "logs", "nonexistent"])
+            assert result.exit_code == 1
+            assert "No notebook matching 'nonexistent'" in result.output
+
+    def test_handles_ambiguous_notebook_name(self):
+        """Test aborts when multiple notebooks match."""
+        runner = CliRunner()
+        mock_sessions = [
+            {"notebook_path": "/path/to/test1.ipynb"},
+            {"notebook_path": "/path/to/test2.ipynb"},
+        ]
+        with (
+            patch("stanza.cli.jupyter.status", return_value={"pid": 123}),
+            patch("stanza.cli.jupyter.list_sessions", return_value=mock_sessions),
+        ):
+            result = runner.invoke(cli, ["jupyter", "logs", "test"])
+            assert result.exit_code == 1
+            assert "Multiple notebooks match 'test'" in result.output
+
+
+class TestJupyterAttachCommand:
+    """Test suite for 'stanza jupyter attach' command."""
+
+    def test_attaches_to_notebook(self):
+        """Test attaches to log with kill callback."""
+        runner = CliRunner()
+        mock_session = {
+            "notebook_path": "/path/to/test.ipynb",
+            "log_path": "/path/to/test.log",
+        }
+        with (
+            patch("stanza.cli.jupyter.status", return_value={"pid": 123}),
+            patch("stanza.cli.jupyter.list_sessions", return_value=[mock_session]),
+            patch("stanza.cli.log_stream.attach") as mock_attach,
+        ):
+            result = runner.invoke(cli, ["jupyter", "attach", "test"])
+            assert result.exit_code == 0
+            assert "Attached to test.ipynb" in result.output
+            mock_attach.assert_called_once()
+
+    def test_requires_running_server(self):
+        """Test aborts when no server running."""
+        runner = CliRunner()
+        with patch("stanza.cli.jupyter.status", return_value=None):
+            result = runner.invoke(cli, ["jupyter", "attach", "test"])
+            assert result.exit_code == 1
+            assert "No Jupyter server running" in result.output
+
+    def test_handles_nonexistent_notebook(self):
+        """Test aborts when notebook not found."""
+        runner = CliRunner()
+        mock_session = {"notebook_path": "/path/to/other.ipynb"}
+        with (
+            patch("stanza.cli.jupyter.status", return_value={"pid": 123}),
+            patch("stanza.cli.jupyter.list_sessions", return_value=[mock_session]),
+        ):
+            result = runner.invoke(cli, ["jupyter", "attach", "nonexistent"])
+            assert result.exit_code == 1
+            assert "No notebook matching 'nonexistent'" in result.output
+
+    def test_handles_ambiguous_notebook_name(self):
+        """Test aborts when multiple notebooks match."""
+        runner = CliRunner()
+        mock_sessions = [
+            {"notebook_path": "/path/to/test1.ipynb"},
+            {"notebook_path": "/path/to/test2.ipynb"},
+        ]
+        with (
+            patch("stanza.cli.jupyter.status", return_value={"pid": 123}),
+            patch("stanza.cli.jupyter.list_sessions", return_value=mock_sessions),
+        ):
+            result = runner.invoke(cli, ["jupyter", "attach", "test"])
+            assert result.exit_code == 1
+            assert "Multiple notebooks match 'test'" in result.output
