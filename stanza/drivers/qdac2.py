@@ -10,6 +10,7 @@ from stanza.base.channels import (
     ControlChannel,
     MeasurementChannel,
     Parameter,
+    TriggerChannel,
 )
 from stanza.base.instruments import BaseInstrument
 from stanza.models import BaseInstrumentConfig
@@ -113,6 +114,39 @@ class QDAC2MeasurementChannel(MeasurementChannel):
         self.add_parameter(measurement_nplc)
 
 
+class QDAC2TriggerChannel(TriggerChannel):
+    def __init__(
+        self,
+        name: str,
+        channel_id: int,
+        trigger_port: str,
+        config: ChannelConfig,
+        driver: PyVisaDriver,
+    ):
+        self.name = name
+        self.channel_id = channel_id
+        self.driver = driver
+        self.trigger_port = trigger_port
+        super().__init__(config)
+
+    def _setup_parameters(self) -> None:
+        """Setup QDAC2-specific trigger parameters with hardware integration."""
+        super()._setup_parameters()
+
+        input_trigger_param = self.get_parameter("input_trigger")
+        input_trigger_param.setter = lambda t: self.driver.write(
+            f"sour{self.channel_id}:dc:trig:sour {t}"
+        )
+        input_trigger_param.getter = lambda: self.trigger_port
+
+        try:
+            input_trigger = getattr(self.config, "input_trigger", None)
+            if input_trigger is not None:
+                input_trigger_param.set(self.trigger_port)
+        except Exception as e:
+            logger.warning(f"Could not set initial input trigger: {e}")
+
+
 class QDAC2(BaseInstrument):
     def __init__(
         self,
@@ -188,6 +222,21 @@ class QDAC2(BaseInstrument):
                     QDAC2MeasurementChannel(
                         channel_config.name,
                         channel_config.measure_channel,
+                        channel_config,
+                        self.driver,
+                    ),
+                )
+            if (
+                channel_config.trigger_channel is not None
+                and self.instrument_config.trigger_ports is not None
+                and channel_config.name in self.instrument_config.trigger_ports
+            ):
+                self.add_channel(
+                    f"trigger_{channel_config.name}",
+                    QDAC2TriggerChannel(
+                        channel_config.name,
+                        channel_config.trigger_channel,
+                        self.instrument_config.trigger_ports[channel_config.name],
                         channel_config,
                         self.driver,
                     ),

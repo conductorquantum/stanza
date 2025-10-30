@@ -139,6 +139,7 @@ class BaseInstrumentConfig(BaseModelWithConfig):
     port: int | None = None
     type: InstrumentType
     breakout_line: int | None = None
+    trigger_ports: dict[str, str] | None = None
     driver: str | None = Field(
         None,
         description="Driver file name (e.g., 'qdac2' maps to stanza.drivers.qdac2.QDAC2)",

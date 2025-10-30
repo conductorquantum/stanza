@@ -16,6 +16,8 @@ class ChannelConfig:
         voltage_range: Min and max voltage limits (V)
         control_channel: Physical control channel number
         measure_channel: Physical measurement channel number
+        breakout_channel: Physical breakout channel number
+        trigger_channel: Physical trigger channel number
         output_mode: Output mode (dc, ac, etc.)
         enabled: Whether channel is enabled
         unit: Channel units
@@ -29,6 +31,7 @@ class ChannelConfig:
     control_channel: int | None = None
     measure_channel: int | None = None
     breakout_channel: int | None = None
+    trigger_channel: int | None = None
     output_mode: str = "dc"
     enabled: bool = True
     unit: str = "V"
@@ -219,6 +222,39 @@ class ControlChannel(InstrumentChannel):
             validator=Validators.range_validator(0.001, 1000.0),
         )
         self.add_parameter(slew_rate_param)
+
+
+class TriggerChannel(InstrumentChannel):
+    """Standard trigger channel implementation with trigger parameters.
+
+    Provides trigger functionality with trigger parameters.
+    """
+
+    def __init__(self, config: ChannelConfig):
+        super().__init__(config)
+        self.channel_id = config.trigger_channel
+
+    def _setup_parameters(self) -> None:
+        """Setup trigger parameters with validation."""
+        input_trigger_param = Parameter(
+            name="input_trigger",
+            value=None,
+            unit="bool",
+            getter=None,
+            setter=None,
+            metadata={"description": "Input trigger state"},
+        )
+        self.add_parameter(input_trigger_param)
+
+        output_trigger_param = Parameter(
+            name="output_trigger",
+            value=None,
+            unit="bool",
+            getter=None,
+            setter=None,
+            metadata={"description": "Output trigger state"},
+        )
+        self.add_parameter(output_trigger_param)
 
 
 class MeasurementChannel(InstrumentChannel):

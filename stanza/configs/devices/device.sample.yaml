@@ -40,6 +40,9 @@ instruments:
     sample_time: 10e-6
     slew_rate: 100.0
     breakout_line: 9
+    trigger_ports:
+      IN: EXT1
+      OUT: EXT2
 
   - name: qswitch
     type: BREAKOUT_BOX
