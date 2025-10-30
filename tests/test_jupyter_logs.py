@@ -7,7 +7,56 @@ from unittest.mock import Mock, mock_open, patch
 
 import pytest
 
-from stanza.jupyter.logs import _stream_log, _wait_for_log, attach, follow
+from stanza.jupyter.logs import _print_tail, _stream_log, _wait_for_log, attach, follow
+
+
+class TestPrintTail:
+    """Test suite for _print_tail function."""
+
+    def test_prints_nothing_for_empty_log(self, tmp_path, capsys):
+        """Test _print_tail prints nothing for empty log file."""
+        log_file = tmp_path / "empty.log"
+        log_file.write_text("")
+        _print_tail(log_file, lines=10)
+        captured = capsys.readouterr()
+        assert captured.out == ""
+
+    def test_prints_tail_with_proper_line_endings(self, tmp_path, capsys):
+        """Test _print_tail uses \\r\\n line endings."""
+        log_file = tmp_path / "test.log"
+        log_file.write_text("line1\nline2\nline3")
+        _print_tail(log_file, lines=10)
+        captured = capsys.readouterr()
+        assert "line1\r\n" in captured.out
+        assert "line2\r\n" in captured.out
+        assert "line3\r\n" in captured.out
+
+    def test_cleans_carriage_returns_in_tail(self, tmp_path, capsys):
+        """Test _print_tail cleans carriage return artifacts."""
+        log_file = tmp_path / "test.log"
+        log_file.write_text("old\rnew\nline2")
+        _print_tail(log_file, lines=10)
+        captured = capsys.readouterr()
+        assert "old" not in captured.out
+        assert "new" in captured.out
+
+    def test_respects_line_limit(self, tmp_path, capsys):
+        """Test _print_tail respects line limit parameter."""
+        log_file = tmp_path / "test.log"
+        lines = "\n".join([f"line{i}" for i in range(20)])
+        log_file.write_text(lines)
+        _print_tail(log_file, lines=5)
+        captured = capsys.readouterr()
+        assert "line15" in captured.out
+        assert "line19" in captured.out
+        assert "line10" not in captured.out
+
+    def test_handles_nonexistent_file_gracefully(self, tmp_path, capsys):
+        """Test _print_tail handles non-existent file gracefully."""
+        log_file = tmp_path / "nonexistent.log"
+        _print_tail(log_file, lines=10)
+        captured = capsys.readouterr()
+        assert captured.out == ""
 
 
 class TestWaitForLog:
@@ -28,7 +77,10 @@ class TestWaitForLog:
             call_count[0] += 1
             return call_count[0] > 2
 
-        with patch.object(Path, "exists", side_effect=create_after_delay):
+        with (
+            patch.object(Path, "exists", side_effect=create_after_delay),
+            patch("stanza.jupyter.logs.time.sleep"),
+        ):
             log_file.write_text("test")
             _wait_for_log(log_file, timeout=2.0)
 
@@ -56,13 +108,61 @@ class TestStreamLog:
         captured = capsys.readouterr()
         assert "test line" in captured.out
 
+    def test_uses_crlf_line_endings(self, tmp_path, capsys):
+        """Test _stream_log outputs \\r\\n line endings."""
+        log_file = tmp_path / "test.log"
+        log_file.write_text("test\n")
+        mock_file = mock_open(read_data="test line\n")()
+        _stream_log(mock_file, 0.1, log_file)
+        captured = capsys.readouterr()
+        assert "test line\r\n" in captured.out
+
+    def test_strips_carriage_returns_from_input(self, tmp_path, capsys):
+        """Test _stream_log strips \\r artifacts from progress bars."""
+        log_file = tmp_path / "test.log"
+        log_file.write_text("test\n")
+        mock_file = mock_open(read_data="old_text\rnew_text\n")()
+        _stream_log(mock_file, 0.1, log_file)
+        captured = capsys.readouterr()
+        assert "old_text" not in captured.out
+        assert "new_text" in captured.out
+
+    def test_handles_multiple_carriage_returns(self, tmp_path, capsys):
+        """Test _stream_log keeps only final text after multiple \\r."""
+        log_file = tmp_path / "test.log"
+        log_file.write_text("test\n")
+        mock_file = mock_open(read_data="first\rsecond\rthird\n")()
+        _stream_log(mock_file, 0.1, log_file)
+        captured = capsys.readouterr()
+        assert "first" not in captured.out
+        assert "second" not in captured.out
+        assert "third" in captured.out
+
+    def test_skips_empty_lines(self, tmp_path, capsys):
+        """Test _stream_log skips empty lines."""
+        log_file = tmp_path / "test.log"
+        log_file.write_text("test\n")
+        mock_file = mock_open(read_data="\n")()
+        _stream_log(mock_file, 0.1, log_file)
+        captured = capsys.readouterr()
+        assert captured.out == ""
+
+    def test_skips_whitespace_only_lines(self, tmp_path, capsys):
+        """Test _stream_log skips whitespace-only lines."""
+        log_file = tmp_path / "test.log"
+        log_file.write_text("test\n")
+        mock_file = mock_open(read_data="   \n")()
+        _stream_log(mock_file, 0.1, log_file)
+        captured = capsys.readouterr()
+        assert captured.out == ""
+
     def test_sleeps_when_no_new_data(self, tmp_path):
         """Test _stream_log sleeps when no new data."""
         log_file = tmp_path / "test.log"
         log_file.write_text("")
         mock_file = mock_open(read_data="")()
         mock_file.readline.return_value = ""
-        with patch("time.sleep") as mock_sleep:
+        with patch("stanza.jupyter.logs.time.sleep") as mock_sleep:
             _stream_log(mock_file, 0.5, log_file)
             mock_sleep.assert_called_once_with(0.5)
 

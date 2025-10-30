@@ -2,7 +2,70 @@
 
 from unittest.mock import patch
 
-from stanza.jupyter.utils import format_size, tail_log
+from stanza.jupyter.utils import clean_carriage_returns, format_size, tail_log
+
+
+class TestCleanCarriageReturns:
+    """Test suite for clean_carriage_returns function."""
+
+    def test_empty_string_returns_empty(self):
+        """Test clean_carriage_returns returns empty string for empty input."""
+        assert clean_carriage_returns("") == ""
+
+    def test_no_carriage_returns_unchanged(self):
+        """Test clean_carriage_returns leaves text without \\r unchanged."""
+        text = "line1\nline2\nline3"
+        assert clean_carriage_returns(text) == text
+
+    def test_single_carriage_return_keeps_last_segment(self):
+        """Test clean_carriage_returns keeps only text after \\r on single line."""
+        text = "old_text\rnew_text"
+        assert clean_carriage_returns(text) == "new_text"
+
+    def test_multiple_carriage_returns_keeps_final_segment(self):
+        """Test clean_carriage_returns keeps only final segment with multiple \\r."""
+        text = "first\rsecond\rthird"
+        assert clean_carriage_returns(text) == "third"
+
+    def test_progress_bar_artifact_cleaned(self):
+        """Test clean_carriage_returns removes progress bar artifacts."""
+        text = "old_text\r                              new_text"
+        assert clean_carriage_returns(text) == "new_text"
+
+    def test_multiline_with_carriage_returns(self):
+        """Test clean_carriage_returns handles multiple lines with \\r."""
+        text = "line1\nold\rnew\nline3"
+        expected = "line1\nnew\nline3"
+        assert clean_carriage_returns(text) == expected
+
+    def test_empty_lines_removed(self):
+        """Test clean_carriage_returns removes empty lines."""
+        text = "line1\n\nline3"
+        assert clean_carriage_returns(text) == "line1\nline3"
+
+    def test_whitespace_only_lines_removed(self):
+        """Test clean_carriage_returns removes whitespace-only lines."""
+        text = "line1\n   \nline3"
+        assert clean_carriage_returns(text) == "line1\nline3"
+
+    def test_carriage_return_at_line_end(self):
+        """Test clean_carriage_returns handles \\r at end of line."""
+        text = "text1\r\ntext2"
+        assert clean_carriage_returns(text) == "text2"
+
+    def test_real_world_log_example(self):
+        """Test clean_carriage_returns with real world log scenario."""
+        text = (
+            "stanza.logger - INFO - Message 1\n"
+            "Progress: 0%\rProgress: 50%\rProgress: 100%\n"
+            "stanza.logger - INFO - Message 2"
+        )
+        expected = (
+            "stanza.logger - INFO - Message 1\n"
+            "Progress: 100%\n"
+            "stanza.logger - INFO - Message 2"
+        )
+        assert clean_carriage_returns(text) == expected
 
 
 class TestTailLog:

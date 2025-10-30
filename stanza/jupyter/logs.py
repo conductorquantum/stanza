@@ -10,7 +10,7 @@ import tty
 from collections.abc import Callable
 from pathlib import Path
 
-from stanza.jupyter.utils import tail_log
+from stanza.jupyter.utils import clean_carriage_returns, tail_log
 
 
 def _wait_for_log(log_file: Path, timeout: float = 30.0) -> None:
@@ -18,23 +18,41 @@ def _wait_for_log(log_file: Path, timeout: float = 30.0) -> None:
     if log_file.exists():
         return
 
-    print(f"Waiting for {log_file.name}...", file=sys.stderr)
+    sys.stderr.write(f"Waiting for {log_file.name}...\r\n")
+    sys.stderr.flush()
     start = time.time()
     while not log_file.exists():
         if time.time() - start > timeout:
-            print(f"Timeout after {timeout}s", file=sys.stderr)
+            sys.stderr.write(f"Timeout after {timeout}s\r\n")
+            sys.stderr.flush()
             sys.exit(1)
         time.sleep(0.1)
 
 
+def _print_tail(log_file: Path, lines: int) -> None:
+    """Print last N lines from log file with proper terminal alignment."""
+    tail = clean_carriage_returns(tail_log(log_file, lines))
+    if tail:
+        sys.stdout.write(tail.replace("\n", "\r\n") + "\r\n")
+        sys.stdout.flush()
+
+
 def _stream_log(f: object, poll_interval: float, log_file: Path) -> None:
-    """Read and print new log lines."""
+    """Read and print new log lines with proper terminal alignment."""
     line = f.readline()  # type: ignore[attr-defined]
     if line:
-        print(line, end="")
-        sys.stdout.flush()
+        # Strip \r artifacts from progress bars - keep only final visible text
+        if "\r" in line:
+            line = line.split("\r")[-1]
+        line = line.rstrip()
+
+        if line:
+            # Use \r\n instead of \n to reset cursor to column 0
+            sys.stdout.write(line + "\r\n")
+            sys.stdout.flush()
     elif not log_file.exists():
-        print("\nLog deleted", file=sys.stderr)
+        sys.stderr.write("\r\nLog deleted\r\n")
+        sys.stderr.flush()
         sys.exit(1)
     else:
         time.sleep(poll_interval)
@@ -45,15 +63,12 @@ def follow(log_file: Path, lines: int = 10, poll_interval: float = 0.1) -> None:
     _wait_for_log(log_file)
 
     def sigint_handler(_sig: int, _frame: object) -> None:
-        print(f"\nDetached from {log_file.name}", file=sys.stderr)
+        sys.stderr.write(f"\r\nDetached from {log_file.name}\r\n")
+        sys.stderr.flush()
         sys.exit(0)
 
     signal.signal(signal.SIGINT, sigint_handler)
-
-    tail = tail_log(log_file, lines)
-    if tail:
-        print(tail)
-        sys.stdout.flush()
+    _print_tail(log_file, lines)
 
     with open(log_file, encoding="utf-8", errors="replace") as f:
         f.seek(0, os.SEEK_END)
@@ -69,11 +84,7 @@ def attach(
 ) -> None:
     """Stream log file. Ctrl+C kills kernel, ESC exits without killing."""
     _wait_for_log(log_file)
-
-    tail = tail_log(log_file, lines)
-    if tail:
-        print(tail)
-        sys.stdout.flush()
+    _print_tail(log_file, lines)
 
     old_settings = termios.tcgetattr(sys.stdin)
     try:
@@ -88,20 +99,25 @@ def attach(
 
                 if sys.stdin in ready:
                     key = sys.stdin.read(1)
-                    if key == "\x03":
-                        print("\n\nKilling kernel...", file=sys.stderr)
+                    if key == "\x03":  # Ctrl+C
+                        sys.stderr.write("\r\033[K\r\n\r\nKilling kernel...\r\n")
+                        sys.stderr.flush()
                         try:
                             kill_callback()
-                            print("Kernel killed", file=sys.stderr)
+                            sys.stderr.write("Kernel killed\r\n")
+                            sys.stderr.flush()
                         except Exception as e:
-                            print(f"Error: {e}", file=sys.stderr)
+                            sys.stderr.write(f"Error: {e}\r\n")
+                            sys.stderr.flush()
                         sys.exit(0)
-                    elif key == "\x1b":
+                    elif key == "\x1b":  # ESC
                         if esc_pressed:
-                            print("\nExited", file=sys.stderr)
+                            sys.stderr.write("\r\033[KExited\r\n")
+                            sys.stderr.flush()
                             sys.exit(0)
                         esc_pressed = True
-                        print("\nPress ESC again to exit", file=sys.stderr)
+                        sys.stderr.write("\r\033[K\r\nPress ESC again to exit\r\n")
+                        sys.stderr.flush()
                     else:
                         esc_pressed = False
 
