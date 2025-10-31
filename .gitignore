@@ -31,5 +31,5 @@ archive.zip
 # macOS
 .DS_Store
 
-# uv 
+# uv
 uv.lock

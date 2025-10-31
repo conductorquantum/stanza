@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 set -e
-set -x 
+set -x
 
 mypy stanza
 ruff check stanza tests scripts
