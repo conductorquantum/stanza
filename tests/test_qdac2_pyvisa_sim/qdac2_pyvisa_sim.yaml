@@ -13,7 +13,7 @@ devices:
         r: "\n"
       TCPIP SOCKET:
         q: "\n"
-        r: "\n"  
+        r: "\n"
       GPIB INSTR:
         q: "\n"
         r: "\n"
