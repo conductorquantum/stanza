@@ -6,6 +6,7 @@ from stanza.analysis.fitting import (
     _compute_initial_params,
     _compute_parameter_bounds,
     _map_index_to_voltage,
+    compute_cutoff_from_threshold,
     derivative_extrema_indices,
     fit_pinchoff_parameters,
     pinchoff_curve,
@@ -145,6 +146,64 @@ class TestMapIndexToVoltage:
         voltages = np.array([1.0, 2.0, 3.0])
         assert _map_index_to_voltage(3, voltages) is None
         assert _map_index_to_voltage(10, voltages) is None
+
+
+class TestComputeCutoffFromThreshold:
+    def test_basic_threshold_normal_curve(self):
+        """Test threshold detection on normal (increasing) curve."""
+        fitted_current = np.array([0.0, 0.1, 0.5, 0.9, 1.0])
+        cutoff_idx = compute_cutoff_from_threshold(fitted_current, 0.05)
+        assert isinstance(cutoff_idx, int)
+        assert 0 <= cutoff_idx < len(fitted_current)
+        assert fitted_current[cutoff_idx] >= 0.05
+
+    def test_basic_threshold_inverted_curve(self):
+        """Test threshold detection on inverted (decreasing) curve."""
+        fitted_current = np.array([1.0, 0.9, 0.5, 0.1, 0.0])
+        cutoff_idx = compute_cutoff_from_threshold(fitted_current, 0.05)
+        assert isinstance(cutoff_idx, int)
+        assert 0 <= cutoff_idx < len(fitted_current)
+        assert fitted_current[cutoff_idx] <= 0.95
+
+    def test_threshold_with_tanh_curve(self):
+        """Test threshold on realistic tanh-based pinchoff curve."""
+        x = np.linspace(-3, 3, 300)
+        fitted_current = 0.5 * (1 + np.tanh(2.0 * x + 1.0))
+        cutoff_idx = compute_cutoff_from_threshold(fitted_current, 0.03)
+        # For this curve, 3% threshold should detect cutoff early
+        assert cutoff_idx < len(fitted_current) / 3
+
+    def test_different_threshold_values(self):
+        """Test that higher thresholds give later cutoff indices."""
+        x = np.linspace(-3, 3, 300)
+        fitted_current = 0.5 * (1 + np.tanh(2.0 * x + 1.0))
+        idx_3pct = compute_cutoff_from_threshold(fitted_current, 0.03)
+        idx_5pct = compute_cutoff_from_threshold(fitted_current, 0.05)
+        idx_10pct = compute_cutoff_from_threshold(fitted_current, 0.10)
+        assert idx_3pct < idx_5pct < idx_10pct
+
+    def test_inverted_curve_threshold_ordering(self):
+        """Test that higher thresholds give earlier cutoff for inverted curves."""
+        x = np.linspace(-3, 3, 300)
+        fitted_current = 1.0 - 0.5 * (1 + np.tanh(2.0 * x + 1.0))
+        idx_3pct = compute_cutoff_from_threshold(fitted_current, 0.03)
+        idx_5pct = compute_cutoff_from_threshold(fitted_current, 0.05)
+        idx_10pct = compute_cutoff_from_threshold(fitted_current, 0.10)
+        # For inverted, higher threshold detects cutoff earlier
+        assert idx_3pct > idx_5pct > idx_10pct
+
+    def test_zero_threshold(self):
+        """Test with 0% threshold (should find first point)."""
+        fitted_current = np.linspace(0, 1, 100)
+        cutoff_idx = compute_cutoff_from_threshold(fitted_current, 0.0)
+        assert cutoff_idx == 0
+
+    def test_full_threshold(self):
+        """Test with 100% threshold (should find last point or close to it)."""
+        fitted_current = np.linspace(0, 1, 100)
+        cutoff_idx = compute_cutoff_from_threshold(fitted_current, 1.0)
+        # Should be near the end
+        assert cutoff_idx >= len(fitted_current) - 2
 
 
 class TestPinchoffFitResult:
@@ -343,6 +402,110 @@ class TestFitPinchoffParameters:
 
         param_uncertainties = np.sqrt(np.diag(result.pcov))
         assert np.all(param_uncertainties < 0.1), "Expected low parameter uncertainties"
+
+    def test_percent_threshold_parameter(self):
+        """Test that percent_threshold parameter changes cutoff voltage."""
+        voltages = np.linspace(-3, 3, 300)
+        currents = pinchoff_curve(voltages, 0.5, 2.0, 1.0)
+        currents += np.random.normal(0, 0.02, len(currents))
+
+        result_derivative = fit_pinchoff_parameters(voltages, currents)
+        result_threshold = fit_pinchoff_parameters(
+            voltages, currents, percent_threshold=0.05
+        )
+
+        assert result_threshold.v_cut_off != result_derivative.v_cut_off
+        # Transition and saturation should remain the same
+        assert result_threshold.v_transition == result_derivative.v_transition
+        assert result_threshold.v_saturation == result_derivative.v_saturation
+
+    def test_percent_threshold_multiple_values(self):
+        """Test that different threshold values produce different cutoffs."""
+        voltages = np.linspace(-3, 3, 300)
+        currents = pinchoff_curve(voltages, 0.5, 2.0, 1.0)
+
+        result_3pct = fit_pinchoff_parameters(
+            voltages, currents, percent_threshold=0.03
+        )
+        result_4pct = fit_pinchoff_parameters(
+            voltages, currents, percent_threshold=0.04
+        )
+        result_5pct = fit_pinchoff_parameters(
+            voltages, currents, percent_threshold=0.05
+        )
+
+        # Higher thresholds should give later (higher) cutoff voltages for normal curves
+        assert result_3pct.v_cut_off < result_4pct.v_cut_off < result_5pct.v_cut_off
+
+    def test_percent_threshold_vs_derivative_comparison(self):
+        """Test that threshold method detects cutoff earlier than derivative method."""
+        voltages = np.linspace(-3, 3, 300)
+        currents = pinchoff_curve(voltages, 0.5, 2.0, 1.0)
+        currents += np.random.normal(0, 0.02, len(currents))
+
+        result_derivative = fit_pinchoff_parameters(voltages, currents)
+        result_threshold = fit_pinchoff_parameters(
+            voltages, currents, percent_threshold=0.03
+        )
+
+        # Threshold method should typically detect cutoff earlier (lower voltage)
+        assert result_threshold.v_cut_off < result_derivative.v_cut_off
+
+    def test_percent_threshold_inverted_curve(self):
+        """Test threshold method on inverted pinchoff curve."""
+        voltages = np.linspace(-3, 3, 300)
+        currents = pinchoff_curve(voltages, 0.5, -2.0, 1.0)
+
+        result_derivative = fit_pinchoff_parameters(voltages, currents)
+        result_threshold = fit_pinchoff_parameters(
+            voltages, currents, percent_threshold=0.05
+        )
+
+        assert result_threshold.v_cut_off is not None
+        assert result_threshold.v_cut_off != result_derivative.v_cut_off
+        # For inverted curves, cutoff should be at higher voltage
+        assert result_threshold.v_cut_off > result_derivative.v_saturation
+
+    def test_percent_threshold_with_noise(self):
+        """Test threshold method robustness with noisy data."""
+        voltages = np.linspace(-3, 3, 300)
+        currents = pinchoff_curve(voltages, 0.5, 2.0, 1.0)
+        noisy_currents = currents + np.random.normal(0, 0.05, len(currents))
+
+        result = fit_pinchoff_parameters(
+            voltages, noisy_currents, percent_threshold=0.04
+        )
+
+        assert result.v_cut_off is not None
+        assert voltages.min() <= result.v_cut_off <= voltages.max()
+
+    def test_percent_threshold_preserves_fit_parameters(self):
+        """Test that threshold parameter doesn't affect fitted parameters."""
+        voltages = np.linspace(-3, 3, 300)
+        currents = pinchoff_curve(voltages, 0.5, 2.0, 1.0)
+
+        result_derivative = fit_pinchoff_parameters(voltages, currents)
+        result_threshold = fit_pinchoff_parameters(
+            voltages, currents, percent_threshold=0.05
+        )
+
+        # Fitted parameters should be identical
+        np.testing.assert_allclose(result_derivative.popt, result_threshold.popt)
+        np.testing.assert_allclose(result_derivative.pcov, result_threshold.pcov)
+
+    def test_percent_threshold_none_uses_derivative(self):
+        """Test that None threshold uses derivative method (default behavior)."""
+        voltages = np.linspace(-3, 3, 300)
+        currents = pinchoff_curve(voltages, 0.5, 2.0, 1.0)
+
+        result_default = fit_pinchoff_parameters(voltages, currents)
+        result_explicit_none = fit_pinchoff_parameters(
+            voltages, currents, percent_threshold=None
+        )
+
+        assert result_default.v_cut_off == result_explicit_none.v_cut_off
+        assert result_default.v_transition == result_explicit_none.v_transition
+        assert result_default.v_saturation == result_explicit_none.v_saturation
 
 
 class TestNormalize:
