@@ -204,26 +204,51 @@ def _map_index_to_voltage(index: int, voltages: np.ndarray) -> float | None:
     return voltages[index] if index < len(voltages) else None
 
 
-def compute_cutoff_from_threshold(
+def compute_indices_from_threshold(
     fitted_current: np.ndarray, percent_threshold: float
-) -> int:
-    """Find cutoff index where fitted current crosses a threshold percentage.
+) -> tuple[int, int]:
+    """Find cutoff and saturation indices based on threshold percentages.
+
+    Computes two thresholds: a lower threshold (min + percent_threshold * range)
+    and an upper threshold (max - percent_threshold * range). Returns the indices
+    where the fitted current first crosses these thresholds.
+
+    For normal curves (increasing current), returns where current rises above each threshold.
+    For inverted curves (decreasing current), returns where current falls below each threshold.
 
     Args:
         fitted_current: Fitted current values (normalized or unnormalized)
-        percent_threshold: Percentage (0 to 1) above minimum current
+        percent_threshold: Percentage (0 to 1) defining distance from min/max.
+            For example, 0.1 means thresholds at 10% and 90% of the range.
 
     Returns:
-        Index where current first crosses threshold
+        Tuple of (cutoff_index, saturation_index) where:
+            - cutoff_index: Index where current enters the transition region from cutoff
+            - saturation_index: Index where current enters the saturation region
     """
-    threshold = fitted_current.min() + percent_threshold * (
+    min_threshold = fitted_current.min() + percent_threshold * (
         fitted_current.max() - fitted_current.min()
     )
+    max_threshold = fitted_current.max() - percent_threshold * (
+        fitted_current.max() - fitted_current.min()
+    )
+
     is_inverted = fitted_current[-1] < fitted_current[0]
-    return int(
-        np.argmax(
-            fitted_current <= threshold if is_inverted else fitted_current >= threshold
-        )
+    return (
+        int(
+            np.argmax(
+                fitted_current <= min_threshold
+                if is_inverted
+                else fitted_current >= min_threshold
+            )
+        ),
+        int(
+            np.argmax(
+                fitted_current <= max_threshold
+                if is_inverted
+                else fitted_current >= max_threshold
+            )
+        ),
     )
 
 
@@ -269,7 +294,9 @@ def fit_pinchoff_parameters(
     )
 
     if percent_threshold is not None:
-        cut_off_v_ind = compute_cutoff_from_threshold(i_fit, percent_threshold)
+        cut_off_v_ind, saturation_v_ind = compute_indices_from_threshold(
+            i_fit, percent_threshold
+        )
 
     return PinchoffFitResult(
         v_cut_off=_map_index_to_voltage(cut_off_v_ind, voltages),
