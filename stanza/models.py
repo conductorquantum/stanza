@@ -320,10 +320,19 @@ class DeviceConfig(BaseModel):
                         f"Group '{group_name}' references unknown gate '{gate}'"
                     )
                 if gate in gate_assignments:
-                    raise ValueError(
-                        f"Gate '{gate}' referenced by group '{group_name}' already assigned to group '{gate_assignments[gate]}'"
-                    )
-                gate_assignments[gate] = group_name
+                    # Allow RESERVOIR gates to be shared between groups
+                    gate_obj = self.gates[gate]
+                    if gate_obj.type != GateType.RESERVOIR:
+                        raise ValueError(
+                            f"Gate '{gate}' referenced by group '{group_name}' already assigned to group '{gate_assignments[gate]}'. "
+                            f"Only RESERVOIR gates can be shared between groups."
+                        )
+                    # For RESERVOIR gates, track multiple assignments
+                    if not isinstance(gate_assignments[gate], list):
+                        gate_assignments[gate] = [gate_assignments[gate]]
+                    gate_assignments[gate].append(group_name)
+                else:
+                    gate_assignments[gate] = group_name
 
             for contact in group.contacts:
                 if contact not in contact_names:

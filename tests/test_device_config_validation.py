@@ -711,3 +711,109 @@ def test_device_config_allows_routines_without_groups_when_no_groups_defined():
 
     assert device.name == "test_device"
     assert len(device.routines) == 1
+
+
+def test_device_config_allows_shared_reservoir_gates():
+    """Test that RESERVOIR type gates can be shared between groups."""
+    reservoir_gate = Gate(
+        type=GateType.RESERVOIR,
+        control_channel=1,
+        v_lower_bound=0.0,
+        v_upper_bound=1.0,
+    )
+    plunger_gate = Gate(
+        type=GateType.PLUNGER,
+        control_channel=2,
+        v_lower_bound=0.0,
+        v_upper_bound=1.0,
+    )
+    barrier_gate = Gate(
+        type=GateType.BARRIER,
+        control_channel=3,
+        v_lower_bound=0.0,
+        v_upper_bound=1.0,
+    )
+
+    control_instrument = ControlInstrumentConfig(
+        name="control",
+        type=InstrumentType.CONTROL,
+        ip_addr="192.168.1.1",
+        slew_rate=1.0,
+    )
+    measurement_instrument = MeasurementInstrumentConfig(
+        name="measurement",
+        type=InstrumentType.MEASUREMENT,
+        ip_addr="192.168.1.2",
+        measurement_duration=1.0,
+        sample_time=0.5,
+    )
+
+    # Should NOT raise error - RESERVOIR gates can be shared
+    device = DeviceConfig(
+        name="test_device",
+        gates={"res1": reservoir_gate, "p1": plunger_gate, "b1": barrier_gate},
+        contacts={},
+        groups={
+            "control": {"gates": ["res1", "p1"]},
+            "sensor": {"gates": ["res1", "b1"]},
+        },
+        routines=[
+            RoutineConfig(name="test_routine1", group="control"),
+            RoutineConfig(name="test_routine2", group="sensor"),
+        ],
+        instruments=[control_instrument, measurement_instrument],
+    )
+
+    assert device.name == "test_device"
+    assert "res1" in device.groups["control"].gates
+    assert "res1" in device.groups["sensor"].gates
+
+
+def test_device_config_rejects_shared_non_reservoir_gates():
+    """Test that non-RESERVOIR gates cannot be shared between groups."""
+    plunger_gate = Gate(
+        type=GateType.PLUNGER,
+        control_channel=1,
+        v_lower_bound=0.0,
+        v_upper_bound=1.0,
+    )
+    barrier_gate = Gate(
+        type=GateType.BARRIER,
+        control_channel=2,
+        v_lower_bound=0.0,
+        v_upper_bound=1.0,
+    )
+
+    control_instrument = ControlInstrumentConfig(
+        name="control",
+        type=InstrumentType.CONTROL,
+        ip_addr="192.168.1.1",
+        slew_rate=1.0,
+    )
+    measurement_instrument = MeasurementInstrumentConfig(
+        name="measurement",
+        type=InstrumentType.MEASUREMENT,
+        ip_addr="192.168.1.2",
+        measurement_duration=1.0,
+        sample_time=0.5,
+    )
+
+    # Should raise error - PLUNGER gates cannot be shared
+    with pytest.raises(
+        ValueError,
+        match="Gate 'p1' referenced by group 'sensor' already assigned to group 'control'. Only RESERVOIR gates can be shared",
+    ):
+        DeviceConfig(
+            name="test_device",
+            gates={"p1": plunger_gate, "b1": barrier_gate},
+            contacts={},
+            groups={
+                "control": {"gates": ["p1"]},
+                "sensor": {"gates": ["p1", "b1"]},
+            },
+            routines=[
+                RoutineConfig(name="test_routine1", group="control"),
+                RoutineConfig(name="test_routine2", group="sensor"),
+            ],
+            instruments=[control_instrument, measurement_instrument],
+        )

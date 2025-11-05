@@ -58,6 +58,7 @@ def noise_floor_measurement(
     ctx: RoutineContext,
     measure_electrode: str,
     num_points: int = 100,
+    zero_other_groups: bool = False,
     session: LoggerSession | None = None,
     **kwargs: Any,
 ) -> dict[str, float]:
@@ -72,6 +73,8 @@ def noise_floor_measurement(
         ctx: Routine context containing device resources and previous results.
         measure_electrode: Name of the electrode to measure current from.
         num_points: Number of current measurements to collect for statistical analysis. Default is 100.
+        zero_other_groups: If True, zeros all gates from other groups (excluding shared gates)
+            before starting the routine. Default is False.
         session: Optional logger session for recording measurements and analysis results.
 
     Returns:
@@ -117,6 +120,7 @@ def leakage_test(
     leakage_threshold_resistance: int,
     leakage_threshold_count: int = 0,
     num_points: int = 10,
+    zero_other_groups: bool = False,
     session: LoggerSession | None = None,
     **kwargs: Any,
 ) -> dict[str, float]:
@@ -144,6 +148,8 @@ def leakage_test(
         leakage_threshold_count: Maximum number of leaky gate pairs allowed before failing the test.
                                 Default is 0 (any leakage causes failure).
         num_points: Number of voltage steps to test in each direction. Default is 10.
+        zero_other_groups: If True, zeros all gates from other groups (excluding shared gates)
+            before starting the routine. Default is False.
         session: Optional logger session for recording leakage matrices and analysis results.
 
     Returns:
@@ -253,6 +259,7 @@ def global_accumulation(
     bias_gate: str,
     bias_voltage: float,
     charge_carrier_type: str,
+    zero_other_groups: bool = False,
     session: LoggerSession | None = None,
     **kwargs: Any,
 ) -> dict[str, float]:
@@ -277,6 +284,8 @@ def global_accumulation(
         charge_carrier_type: The mobile charge particle type. Must be "electron" or "hole".
                            For electrons: sweeps from 0V toward max_safe_voltage_bound (positive).
                            For holes: sweeps from 0V toward min_safe_voltage_bound (negative).
+        zero_other_groups: If True, zeros all gates from other groups (excluding shared gates)
+            before starting the routine. Default is False.
         session: Optional logger session for recording sweep measurements and analysis results.
 
     Returns:
@@ -347,6 +356,7 @@ def reservoir_characterization(
     bias_gate: str,
     bias_voltage: float,
     charge_carrier_type: str = "electron",
+    zero_other_groups: bool = False,
     session: LoggerSession | None = None,
     **kwargs: Any,
 ) -> dict[str, dict[str, Any]]:
@@ -372,6 +382,8 @@ def reservoir_characterization(
                                         toward accumulation (max_safe_voltage_bound, positive).
                            For holes: sweeps from depletion (10% of max_safe_voltage_bound, positive)
                                     toward accumulation (min_safe_voltage_bound, negative).
+        zero_other_groups: If True, zeros all gates from other groups (excluding shared gates)
+            before starting the routine. Default is False.
         session: Optional logger session for recording sweep measurements and analysis results.
 
     Returns:
@@ -472,6 +484,7 @@ def finger_gate_characterization(
     bias_gate: str,
     bias_voltage: float,
     charge_carrier_type: str = "electron",
+    zero_other_groups: bool = False,
     session: LoggerSession | None = None,
     **kwargs: Any,
 ) -> dict[str, dict[str, Any]]:
@@ -497,6 +510,8 @@ def finger_gate_characterization(
                                         toward accumulation (max_safe_voltage_bound, positive).
                            For holes: sweeps from depletion (10% of max_safe_voltage_bound, positive)
                                     toward accumulation (min_safe_voltage_bound, negative).
+        zero_other_groups: If True, zeros all gates from other groups (excluding shared gates)
+            before starting the routine. Default is False.
         session: Optional logger session for recording sweep measurements and analysis results.
 
     Returns:

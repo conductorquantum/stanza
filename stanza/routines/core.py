@@ -295,6 +295,19 @@ class RoutineRunner:
                 self.resources._resources["device"] = filtered_device
                 logger.info(f"Filtering device to group: {group_name}")
 
+                # Handle zero_other_groups parameter
+                zero_other_groups = merged_params.get("zero_other_groups", False)
+                if zero_other_groups and hasattr(original_device, "get_other_group_gates"):
+                    try:
+                        gates_to_zero = original_device.get_other_group_gates(group_name)
+                        if gates_to_zero:
+                            logger.info(
+                                f"Zeroing gates from other groups: {gates_to_zero}"
+                            )
+                            original_device.zero_gates(gates_to_zero)
+                    except Exception as e:
+                        logger.warning(f"Failed to zero other group gates: {e}")
+
         # Create logger session if logger exists and has create_session method
         data_logger = getattr(self.resources, "logger", None)
         session = None

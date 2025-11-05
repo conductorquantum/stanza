@@ -226,6 +226,110 @@ class Device:
             breakout_box_instrument=self.breakout_box_instrument,
         )
 
+    def get_shared_gates(self) -> list[str]:
+        """Get list of gates that are shared between multiple groups.
+
+        Returns:
+            List of gate names that appear in more than one group. This typically
+            includes RESERVOIR gates that are used by multiple device regions.
+
+        Example:
+            >>> shared = device.get_shared_gates()
+            >>> # Returns ["G9", "G10"] if these reservoir gates are in multiple groups
+        """
+        if not self.device_config.groups:
+            return []
+
+        gate_group_count: dict[str, int] = {}
+
+        # Count how many groups each gate appears in
+        for group in self.device_config.groups.values():
+            for gate in group.gates:
+                gate_group_count[gate] = gate_group_count.get(gate, 0) + 1
+
+        # Return gates that appear in more than one group
+        return [gate for gate, count in gate_group_count.items() if count > 1]
+
+    def get_other_group_gates(self, current_group: str) -> list[str]:
+        """Get list of non-shared gates from groups other than the current group.
+
+        Args:
+            current_group: Name of the current group to exclude.
+
+        Returns:
+            List of gate names that belong to other groups but are NOT shared
+            (i.e., not in the current group).
+
+        Raises:
+            DeviceError: If the specified group does not exist.
+
+        Example:
+            >>> other_gates = device.get_other_group_gates("control")
+            >>> # Returns sensor group gates that aren't shared with control
+        """
+        if not self.device_config.groups:
+            return []
+
+        # Validate group exists
+        _ = self._get_group(current_group)
+
+        # Get shared gates (should not be zeroed)
+        shared_gates = set(self.get_shared_gates())
+
+        # Get gates from current group
+        current_group_gates = set(self.group_gates(current_group))
+
+        # Get all gates from other groups
+        other_group_gates = set()
+        for group_name, group in self.device_config.groups.items():
+            if group_name != current_group:
+                other_group_gates.update(group.gates)
+
+        # Return gates that are:
+        # - In other groups
+        # - NOT shared
+        # - Have control channels (can be controlled)
+        control_gate_set = set(self.control_gates)
+        result = (other_group_gates - current_group_gates - shared_gates) & control_gate_set
+
+        return list(result)
+
+    def zero_gates(self, gate_list: list[str]) -> None:
+        """Set specific gates to 0V.
+
+        Safely brings specified gates to ground voltage (0V) with settling
+        time and verification. Similar to zero() but accepts an explicit list
+        of gate names.
+
+        Args:
+            gate_list: List of gate names to zero.
+
+        Raises:
+            DeviceError: If any gate fails to reach 0V within tolerance (1e-6V)
+                after the operation, or if any gate in the list is not a valid
+                control gate.
+
+        Example:
+            >>> device.zero_gates(["G1", "G2", "G3"])
+        """
+        if not gate_list:
+            return
+
+        # Validate all gates are controllable
+        control_gate_set = set(self.control_gates)
+        invalid_gates = [g for g in gate_list if g not in control_gate_set]
+        if invalid_gates:
+            raise DeviceError(
+                f"Cannot zero gates {invalid_gates}: not controllable or not found in device"
+            )
+
+        gate_voltages = dict.fromkeys(gate_list, 0.0)
+        self.jump(gate_voltages, wait_for_settling=True)
+
+        actual_voltages = self.check(gate_list)
+        if not np.allclose(actual_voltages, [0.0] * len(actual_voltages), atol=1e-6):
+            raise DeviceError(f"Failed to set gates {gate_list} to 0V")
+
     def get_gates_by_type(self, gate_type: str | GateType) -> list[str]:
         """Get the gate electrodes of a given type.
 
