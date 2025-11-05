@@ -35,6 +35,13 @@ groups:
     gpios: [MUX2, SENSOR_ENABLE]
 
 routines:
+  # Example: Routine without group specification receives full unfiltered device
+  # Can manually filter inside routine: ctx.resources.device.filter_by_group("control")
+  - name: cross_group_calibration
+    parameters:
+      note: "This routine runs without a group and can access all gates/contacts"
+
+  # Example: Routine with group specification receives filtered device
   - name: health_check
     group: control
     routines:

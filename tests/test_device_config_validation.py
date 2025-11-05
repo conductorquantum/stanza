@@ -561,43 +561,6 @@ def test_routine_config_handles_scientific_notation_strings():
     assert isinstance(routine.parameters["integer_scientific"], int)
 
 
-def test_device_config_requires_group_on_routines_when_groups_defined():
-    """Test that routines must specify a group when device has groups defined."""
-    gate = Gate(
-        type=GateType.PLUNGER,
-        control_channel=1,
-        v_lower_bound=0.0,
-        v_upper_bound=1.0,
-    )
-    control_instrument = ControlInstrumentConfig(
-        name="control",
-        type=InstrumentType.CONTROL,
-        ip_addr="192.168.1.1",
-        slew_rate=1.0,
-    )
-    measurement_instrument = MeasurementInstrumentConfig(
-        name="measurement",
-        type=InstrumentType.MEASUREMENT,
-        ip_addr="192.168.1.2",
-        measurement_duration=1.0,
-        sample_time=0.5,
-    )
-
-    # Test that routine without group raises error when groups are defined
-    with pytest.raises(
-        ValueError,
-        match="Routine 'test_routine' must specify a group when device has groups defined",
-    ):
-        DeviceConfig(
-            name="test_device",
-            gates={"g1": gate},
-            contacts={},
-            groups={"control": {"gates": ["g1"]}},
-            routines=[RoutineConfig(name="test_routine")],
-            instruments=[control_instrument, measurement_instrument],
-        )
-
-
 def test_device_config_validates_routine_group_exists():
     """Test that routine group must exist in device groups."""
     gate = Gate(
@@ -631,49 +594,6 @@ def test_device_config_validates_routine_group_exists():
             contacts={},
             groups={"control": {"gates": ["g1"]}},
             routines=[RoutineConfig(name="test_routine", group="sensor")],
-            instruments=[control_instrument, measurement_instrument],
-        )
-
-
-def test_device_config_validates_nested_routine_groups():
-    """Test that nested routines must also specify groups."""
-    gate = Gate(
-        type=GateType.PLUNGER,
-        control_channel=1,
-        v_lower_bound=0.0,
-        v_upper_bound=1.0,
-    )
-    control_instrument = ControlInstrumentConfig(
-        name="control",
-        type=InstrumentType.CONTROL,
-        ip_addr="192.168.1.1",
-        slew_rate=1.0,
-    )
-    measurement_instrument = MeasurementInstrumentConfig(
-        name="measurement",
-        type=InstrumentType.MEASUREMENT,
-        ip_addr="192.168.1.2",
-        measurement_duration=1.0,
-        sample_time=0.5,
-    )
-
-    # Test that nested routine without group raises error
-    with pytest.raises(
-        ValueError,
-        match="Routine 'parent/child' must specify a group",
-    ):
-        DeviceConfig(
-            name="test_device",
-            gates={"g1": gate},
-            contacts={},
-            groups={"control": {"gates": ["g1"]}},
-            routines=[
-                RoutineConfig(
-                    name="parent",
-                    group="control",
-                    routines=[RoutineConfig(name="child")],
-                )
-            ],
             instruments=[control_instrument, measurement_instrument],
         )
 

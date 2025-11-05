@@ -71,6 +71,48 @@ instruments:
     slew_rate: 1.0
 ```
 
+### Device Groups
+
+Group definitions let you carve a device into logical regions for per-routine isolation. Add a `groups` section that lists the gates, contacts, and GPIOs that belong to each group. By default every routine receives the full, unfiltered device; if you set `group` on a routine entry, Stanza hands that routine a filtered view containing only the group’s pads.
+
+- Reservoir-style gates are the only gates that can appear in multiple groups. Sharing them is useful when two regions need access to the same bus or measurement reservoir while everything else stays isolated.
+- Contacts (and GPIOs) can be shared freely between groups. Shared contacts make it easy to measure a combined signal from multiple groups without redefining channel hardware.
+
+If you need to bias two groups at once and measure through a shared contact, define the routine without a `group` parameter and filter the groups manually:
+
+```yaml
+routines:
+  # Receives the full device; routine chooses how to partition it
+  - name: cross_group_calibration
+    parameters:
+      bias_voltage: 0.3
+      control_group: control
+      sensor_group: sensor
+      measure_contact: OUT
+
+  # Receives only the control group view
+  - name: health_check
+    group: control
+```
+
+```python
+@routine
+def cross_group_calibration(ctx, bias_voltage, control_group, sensor_group, measure_contact):
+    device = ctx.resources.device
+    control_device = device.filter_by_group(control_group)
+    sensor_device = device.filter_by_group(sensor_group)
+
+    # Bias each group independently
+    control_device.jump({gate: bias_voltage for gate in control_device.control_gates})
+    sensor_device.jump({gate: bias_voltage / 2 for gate in sensor_device.control_gates})
+
+    # Measure through the shared contact on the original device
+    reading = device.measure(measure_contact)
+    return {"current": reading}
+```
+
+With this pattern you can mix and match group-specific routines (which set `group`) and cross-group routines (which omit it) in the same configuration.
+
 ### Write a Routine
 
 Routine parameters from YAML are passed as kwargs. You can override them at runtime:

@@ -363,7 +363,12 @@ class DeviceConfig(BaseModel):
 
     @model_validator(mode="after")
     def validate_routine_groups(self) -> "DeviceConfig":
-        """Validate that routines specify groups when groups are defined."""
+        """Validate that routine groups exist if specified.
+
+        Routines can optionally specify a group field. If specified, the group
+        must exist in the device's groups. If omitted, the routine receives the
+        full unfiltered device.
+        """
         if not self.groups:
             return self
 
@@ -372,13 +377,8 @@ class DeviceConfig(BaseModel):
         def check_routine(routine: RoutineConfig, parent_path: str = "") -> None:
             routine_path = f"{parent_path}/{routine.name}" if parent_path else routine.name
 
-            if routine.group is None:
-                raise ValueError(
-                    f"Routine '{routine_path}' must specify a group when device has groups defined. "
-                    f"Available groups: {', '.join(sorted(available_groups))}"
-                )
-
-            if routine.group not in available_groups:
+            # Only validate that specified group exists (if provided)
+            if routine.group is not None and routine.group not in available_groups:
                 raise ValueError(
                     f"Routine '{routine_path}' references unknown group '{routine.group}'. "
                     f"Available groups: {', '.join(sorted(available_groups))}"
