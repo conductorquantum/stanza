@@ -309,7 +309,7 @@ class DeviceConfig(BaseModel):
         contact_names = set(self.contacts.keys())
         gpio_names = set(self.gpios.keys())
 
-        gate_assignments: dict[str, str] = {}
+        gate_assignments: dict[str, str | list[str]] = {}
         contact_assignments: dict[str, str] = {}
         gpio_assignments: dict[str, str] = {}
 
@@ -323,14 +323,17 @@ class DeviceConfig(BaseModel):
                     # Allow RESERVOIR gates to be shared between groups
                     gate_obj = self.gates[gate]
                     if gate_obj.type != GateType.RESERVOIR:
+                        existing_group = gate_assignments[gate]
+                        if isinstance(existing_group, list):
+                            existing_group = existing_group[0]
                         raise ValueError(
-                            f"Gate '{gate}' referenced by group '{group_name}' already assigned to group '{gate_assignments[gate]}'. "
+                            f"Gate '{gate}' referenced by group '{group_name}' already assigned to group '{existing_group}'. "
                             f"Only RESERVOIR gates can be shared between groups."
                         )
                     # For RESERVOIR gates, track multiple assignments
                     if not isinstance(gate_assignments[gate], list):
-                        gate_assignments[gate] = [gate_assignments[gate]]
-                    gate_assignments[gate].append(group_name)
+                        gate_assignments[gate] = [gate_assignments[gate]]  # type: ignore[list-item]
+                    gate_assignments[gate].append(group_name)  # type: ignore[union-attr]
                 else:
                     gate_assignments[gate] = group_name
 
