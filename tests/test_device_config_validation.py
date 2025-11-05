@@ -244,6 +244,8 @@ def test_device_config_groups_enforce_unique_assignments():
         sample_time=0.5,
     )
 
+    routine = RoutineConfig(name="test_exp", group="control")
+
     with pytest.raises(
         ValueError,
         match="Gate 'g1' referenced by group 'sensor' already assigned to group 'control'",
@@ -257,26 +259,25 @@ def test_device_config_groups_enforce_unique_assignments():
                 "control": {"gates": ["g1"], "contacts": ["c1"], "gpios": ["gpio1"]},
                 "sensor": {"gates": ["g1"]},
             },
-            routines=[RoutineConfig(name="test_exp")],
+            routines=[routine],
             instruments=[control_instrument, measurement_instrument],
         )
 
-    with pytest.raises(
-        ValueError,
-        match="Contact 'c1' referenced by group 'sensor' already assigned to group 'control'",
-    ):
-        DeviceConfig(
-            name="test_device",
-            gates={"g1": gate},
-            contacts={"c1": contact},
-            gpios={"gpio1": gpio},
-            groups={
-                "control": {"contacts": ["c1"]},
-                "sensor": {"contacts": ["c1"]},
-            },
-            routines=[RoutineConfig(name="test_exp")],
-            instruments=[control_instrument, measurement_instrument],
-        )
+    shared_contact_device = DeviceConfig(
+        name="test_device",
+        gates={"g1": gate},
+        contacts={"c1": contact},
+        gpios={"gpio1": gpio},
+        groups={
+            "control": {"contacts": ["c1"]},
+            "sensor": {"contacts": ["c1"]},
+        },
+        routines=[routine],
+        instruments=[control_instrument, measurement_instrument],
+    )
+
+    assert shared_contact_device.groups["control"].contacts == ["c1"]
+    assert shared_contact_device.groups["sensor"].contacts == ["c1"]
 
     with pytest.raises(
         ValueError,
@@ -291,7 +292,7 @@ def test_device_config_groups_enforce_unique_assignments():
                 "control": {"gpios": ["gpio1"]},
                 "sensor": {"gpios": ["gpio1"]},
             },
-            routines=[RoutineConfig(name="test_exp")],
+            routines=[routine],
             instruments=[control_instrument, measurement_instrument],
         )
 

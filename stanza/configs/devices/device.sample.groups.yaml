@@ -16,15 +16,23 @@ gates:
   G9: {type: RESERVOIR, control_channel: 11, measure_channel: 11, breakout_channel: 11, v_lower_bound: -3.0, v_upper_bound: 3.0}
   G10: {type: RESERVOIR, control_channel: 12, measure_channel: 12, breakout_channel: 12, v_lower_bound: -3.0, v_upper_bound: 3.0}
 
+gpios:
+  MUX1: {type: OUTPUT, control_channel: 30, breakout_channel: 30, v_lower_bound: 0.0, v_upper_bound: 5.0}
+  MUX2: {type: OUTPUT, control_channel: 31, breakout_channel: 31, v_lower_bound: 0.0, v_upper_bound: 5.0}
+  SENSOR_ENABLE: {type: OUTPUT, control_channel: 32, breakout_channel: 32, v_lower_bound: 0.0, v_upper_bound: 5.0}
+
 groups:
   control:
     name: "Control DUT"
     gates: [G1, G2, G3, G4, G5, G9, G10]
     contacts: [IN, OUT]
+    gpios: [MUX1]
+
   sensor:
     name: "Charge Sensor"
     gates: [G6, G7, G8, G9, G10]
     contacts: [IN, OUT]
+    gpios: [MUX2, SENSOR_ENABLE]
 
 routines:
   - name: health_check

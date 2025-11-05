@@ -310,7 +310,7 @@ class DeviceConfig(BaseModel):
         gpio_names = set(self.gpios.keys())
 
         gate_assignments: dict[str, str | list[str]] = {}
-        contact_assignments: dict[str, str] = {}
+        contact_assignments: dict[str, list[str]] = {}
         gpio_assignments: dict[str, str] = {}
 
         for group_name, group in self.groups.items():
@@ -343,10 +343,10 @@ class DeviceConfig(BaseModel):
                         f"Group '{group_name}' references unknown contact '{contact}'"
                     )
                 if contact in contact_assignments:
-                    raise ValueError(
-                        f"Contact '{contact}' referenced by group '{group_name}' already assigned to group '{contact_assignments[contact]}'"
-                    )
-                contact_assignments[contact] = group_name
+                    if group_name not in contact_assignments[contact]:
+                        contact_assignments[contact].append(group_name)
+                else:
+                    contact_assignments[contact] = [group_name]
 
             for gpio in group.gpios:
                 if gpio not in gpio_names:
