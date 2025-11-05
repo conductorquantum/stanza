@@ -375,7 +375,9 @@ class DeviceConfig(BaseModel):
         available_groups = set(self.groups.keys())
 
         def check_routine(routine: RoutineConfig, parent_path: str = "") -> None:
-            routine_path = f"{parent_path}/{routine.name}" if parent_path else routine.name
+            routine_path = (
+                f"{parent_path}/{routine.name}" if parent_path else routine.name
+            )
 
             # Only validate that specified group exists (if provided)
             if routine.group is not None and routine.group not in available_groups:

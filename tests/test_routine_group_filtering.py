@@ -5,7 +5,12 @@ import pytest
 from stanza.device import Device
 from stanza.exceptions import DeviceError
 from stanza.models import DeviceConfig, DeviceGroup, GateType
-from stanza.routines import RoutineContext, RoutineRunner, clear_routine_registry, routine
+from stanza.routines import (
+    RoutineContext,
+    RoutineRunner,
+    clear_routine_registry,
+    routine,
+)
 from stanza.utils import generate_channel_configs
 from tests.conftest import (
     MockControlInstrument,
@@ -198,7 +203,6 @@ class TestZeroOtherGroupsParameter:
         def simple_routine(ctx: RoutineContext, **kwargs) -> dict:
             return {}
 
-
         # Run with control group and zero_other_groups=True
         runner.run("test_routine", __group__="control", zero_other_groups=True)
 
@@ -221,7 +225,6 @@ class TestZeroOtherGroupsParameter:
         @routine(name="test_routine")
         def simple_routine(ctx: RoutineContext, **kwargs) -> dict:
             return {}
-
 
         # Run with control group but zero_other_groups=False (default)
         runner.run("test_routine", __group__="control", zero_other_groups=False)
@@ -246,7 +249,6 @@ class TestZeroOtherGroupsParameter:
             routine_executed = True
             return {}
 
-
         # This should log a warning but continue
         runner.run("test_routine", __group__="control", zero_other_groups=True)
 
@@ -255,7 +257,8 @@ class TestZeroOtherGroupsParameter:
 
         # Check that warning was logged
         assert any(
-            "Failed to zero other group gates" in record.message for record in caplog.records
+            "Failed to zero other group gates" in record.message
+            for record in caplog.records
         )
 
 
@@ -271,7 +274,6 @@ class TestDeviceRestoration:
         @routine(name="test_routine")
         def simple_routine(ctx: RoutineContext, **kwargs) -> dict:
             return {}
-
 
         # Run routine with group filtering
         runner.run("test_routine", __group__="control")
@@ -290,7 +292,6 @@ class TestDeviceRestoration:
         @routine(name="failing_routine")
         def failing_routine(ctx: RoutineContext) -> dict:
             raise RuntimeError("Routine failed")
-
 
         # Run routine with group filtering - should raise error
         with pytest.raises(RuntimeError, match="Routine failed"):
@@ -318,7 +319,6 @@ class TestDeviceRestoration:
                 }
             )
             return {}
-
 
         # Run with control group
         runner.run("test_routine", __group__="control")
@@ -366,7 +366,6 @@ class TestGroupFilteringInstrumentSharing:
                 "measurement": ctx.resources.device.measurement_instrument,
             }
             return {}
-
 
         runner.run("test_routine", __group__="control")
 

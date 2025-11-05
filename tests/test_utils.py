@@ -169,7 +169,9 @@ class TestGetConfigResource:
 
 class TestLoadDeviceConfig:
     def test_loads_sample_device_config(self):
-        result = load_device_config("devices/device.sample.groups.yaml", is_stanza_config=True)
+        result = load_device_config(
+            "devices/device.sample.groups.yaml", is_stanza_config=True
+        )
 
         assert result.name == "Sample Device"
         assert len(result.gates) == 10
@@ -185,7 +187,15 @@ class TestLoadDeviceConfig:
         assert result.contacts["IN"].measure_channel == 1
         assert result.contacts["IN"].breakout_channel == 1
         assert set(result.groups.keys()) == {"control", "sensor"}
-        assert result.groups["control"].gates == ["G1", "G2", "G3", "G4", "G5", "G9", "G10"]
+        assert result.groups["control"].gates == [
+            "G1",
+            "G2",
+            "G3",
+            "G4",
+            "G5",
+            "G9",
+            "G10",
+        ]
         assert result.groups["control"].contacts == ["IN", "OUT"]
         assert result.groups["sensor"].contacts == ["IN", "OUT"]
         assert result.groups["control"].gpios == ["MUX1"]

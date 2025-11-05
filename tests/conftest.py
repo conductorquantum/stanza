@@ -156,7 +156,9 @@ def make_contact(
     )
 
 
-def standard_instrument_configs() -> list[ControlInstrumentConfig | MeasurementInstrumentConfig]:
+def standard_instrument_configs() -> list[
+    ControlInstrumentConfig | MeasurementInstrumentConfig
+]:
     """Helper function to create standard instrument configurations for testing."""
     return [
         ControlInstrumentConfig(

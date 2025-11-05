@@ -290,7 +290,9 @@ class Device:
         # - NOT shared
         # - Have control channels (can be controlled)
         control_gate_set = set(self.control_gates)
-        result = (other_group_gates - current_group_gates - shared_gates) & control_gate_set
+        result = (
+            other_group_gates - current_group_gates - shared_gates
+        ) & control_gate_set
 
         return list(result)
 

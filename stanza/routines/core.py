@@ -299,9 +299,13 @@ class RoutineRunner:
 
                 # Handle zero_other_groups parameter
                 zero_other_groups = merged_params.get("zero_other_groups", False)
-                if zero_other_groups and hasattr(original_device, "get_other_group_gates"):
+                if zero_other_groups and hasattr(
+                    original_device, "get_other_group_gates"
+                ):
                     try:
-                        gates_to_zero = original_device.get_other_group_gates(group_name)
+                        gates_to_zero = original_device.get_other_group_gates(
+                            group_name
+                        )
                         if gates_to_zero:
                             logger.info(
                                 "Zeroing gates from other groups: %s",

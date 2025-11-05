@@ -29,7 +29,15 @@ def test_device_from_yaml():
         assert len(device.contacts) == 2
         assert len(device.gpios) == 3
         assert set(device.group_names()) == {"control", "sensor"}
-        assert set(device.group_gates("control")) == {"G1", "G2", "G3", "G4", "G5", "G9", "G10"}
+        assert set(device.group_gates("control")) == {
+            "G1",
+            "G2",
+            "G3",
+            "G4",
+            "G5",
+            "G9",
+            "G10",
+        }
         assert set(device.group_contacts("control")) == {"IN", "OUT"}
         assert set(device.group_contacts("sensor")) == {"IN", "OUT"}
         assert set(device.group_gpios("control")) == {"MUX1"}
