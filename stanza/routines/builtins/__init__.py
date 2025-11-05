@@ -7,8 +7,10 @@ from stanza.routines.builtins.health_check import (
     noise_floor_measurement,
     reservoir_characterization,
 )
+from stanza.routines.builtins.setup import setup_models_sdk
 
 __all__ = [
+    "setup_models_sdk",
     "noise_floor_measurement",
     "leakage_test",
     "global_accumulation",
