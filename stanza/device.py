@@ -13,7 +13,7 @@ from stanza.base.protocols import (
 )
 from stanza.exceptions import DeviceError
 from stanza.logger.session import LoggerSession
-from stanza.models import ContactType, DeviceConfig, GateType, PadType
+from stanza.models import ContactType, DeviceConfig, DeviceGroup, GateType, PadType
 
 
 class Device:
@@ -160,6 +160,71 @@ class Device:
             if channel.pad_type == PadType.CONTACT
             and channel.measure_channel is not None
         ]
+
+    def group_names(self) -> list[str]:
+        """List of configured device group names."""
+        return list(self.device_config.groups.keys())
+
+    def _get_group(self, group_name: str) -> DeviceGroup:
+        try:
+            return self.device_config.groups[group_name]
+        except KeyError as exc:
+            raise DeviceError(f"Group '{group_name}' not found") from exc
+
+    def group_gates(self, group_name: str) -> list[str]:
+        """List of gate pad names associated with a specific group."""
+        return list(self._get_group(group_name).gates)
+
+    def group_contacts(self, group_name: str) -> list[str]:
+        """List of contact pad names associated with a specific group."""
+        return list(self._get_group(group_name).contacts)
+
+    def group_gpios(self, group_name: str) -> list[str]:
+        """List of GPIO pad names associated with a specific group."""
+        return list(self._get_group(group_name).gpios)
+
+    def filter_by_group(self, group_name: str) -> "Device":
+        """Create a new Device instance containing only electrodes from the specified group.
+
+        This method returns a new Device object that shares the same instrument instances
+        but has filtered channel_configs to include only the pads (gates, contacts, gpios)
+        that belong to the specified group. All Device properties (e.g., .gates, .contacts,
+        .control_gates) will automatically respect this filtering.
+
+        Args:
+            group_name: Name of the group to filter by. Must exist in device_config.groups.
+
+        Returns:
+            A new Device instance with filtered channel configurations.
+
+        Raises:
+            DeviceError: If the specified group does not exist.
+
+        Example:
+            >>> control_device = device.filter_by_group("control")
+            >>> control_device.gates  # Returns only gates in "control" group
+        """
+        group = self._get_group(group_name)
+
+        # Collect all pad names that belong to this group
+        group_pad_names = set(group.gates + group.contacts + group.gpios)
+
+        # Filter channel_configs to only include group members
+        filtered_channel_configs = {
+            pad_name: config
+            for pad_name, config in self.channel_configs.items()
+            if pad_name in group_pad_names
+        }
+
+        # Create new Device with same instruments but filtered channels
+        return Device(
+            name=f"{self.name}_{group_name}",
+            device_config=self.device_config,  # Keep full config for reference
+            channel_configs=filtered_channel_configs,
+            control_instrument=self.control_instrument,
+            measurement_instrument=self.measurement_instrument,
+            breakout_box_instrument=self.breakout_box_instrument,
+        )
 
     def get_gates_by_type(self, gate_type: str | GateType) -> list[str]:
         """Get the gate electrodes of a given type.

@@ -110,6 +110,7 @@ class GPIO(Electrode):
 
 class RoutineConfig(BaseModelWithConfig):
     name: str
+    group: str | None = None
     parameters: dict[str, Any] | None = None
     routines: list["RoutineConfig"] | None = None
 
@@ -229,6 +230,15 @@ InstrumentConfig = Annotated[
 ]
 
 
+class DeviceGroup(BaseModel):
+    """Logical grouping of pads within a device."""
+
+    name: str | None = None
+    gates: list[str] = Field(default_factory=list)
+    contacts: list[str] = Field(default_factory=list)
+    gpios: list[str] = Field(default_factory=list)
+
+
 class DeviceConfig(BaseModel):
     """Configuration for a quantum device (Device Under Test)."""
 
@@ -238,6 +248,7 @@ class DeviceConfig(BaseModel):
     gates: dict[str, Gate] = {}
     contacts: dict[str, Contact] = {}
     gpios: dict[str, GPIO] = {}
+    groups: dict[str, DeviceGroup] = {}
     routines: list[RoutineConfig] = []
     instruments: list[InstrumentConfig]
 
@@ -286,6 +297,88 @@ class DeviceConfig(BaseModel):
 
         if duplicates:
             raise ValueError(f"Duplicate channels found: {', '.join(duplicates)}")
+
+        return self
+
+    @model_validator(mode="after")
+    def validate_groups(self) -> "DeviceConfig":
+        if not self.groups:
+            return self
+
+        gate_names = set(self.gates.keys())
+        contact_names = set(self.contacts.keys())
+        gpio_names = set(self.gpios.keys())
+
+        gate_assignments: dict[str, str] = {}
+        contact_assignments: dict[str, str] = {}
+        gpio_assignments: dict[str, str] = {}
+
+        for group_name, group in self.groups.items():
+            for gate in group.gates:
+                if gate not in gate_names:
+                    raise ValueError(
+                        f"Group '{group_name}' references unknown gate '{gate}'"
+                    )
+                if gate in gate_assignments:
+                    raise ValueError(
+                        f"Gate '{gate}' referenced by group '{group_name}' already assigned to group '{gate_assignments[gate]}'"
+                    )
+                gate_assignments[gate] = group_name
+
+            for contact in group.contacts:
+                if contact not in contact_names:
+                    raise ValueError(
+                        f"Group '{group_name}' references unknown contact '{contact}'"
+                    )
+                if contact in contact_assignments:
+                    raise ValueError(
+                        f"Contact '{contact}' referenced by group '{group_name}' already assigned to group '{contact_assignments[contact]}'"
+                    )
+                contact_assignments[contact] = group_name
+
+            for gpio in group.gpios:
+                if gpio not in gpio_names:
+                    raise ValueError(
+                        f"Group '{group_name}' references unknown gpio '{gpio}'"
+                    )
+                if gpio in gpio_assignments:
+                    raise ValueError(
+                        f"GPIO '{gpio}' referenced by group '{group_name}' already assigned to group '{gpio_assignments[gpio]}'"
+                    )
+                gpio_assignments[gpio] = group_name
+
+        return self
+
+    @model_validator(mode="after")
+    def validate_routine_groups(self) -> "DeviceConfig":
+        """Validate that routines specify groups when groups are defined."""
+        if not self.groups:
+            return self
+
+        available_groups = set(self.groups.keys())
+
+        def check_routine(routine: RoutineConfig, parent_path: str = "") -> None:
+            routine_path = f"{parent_path}/{routine.name}" if parent_path else routine.name
+
+            if routine.group is None:
+                raise ValueError(
+                    f"Routine '{routine_path}' must specify a group when device has groups defined. "
+                    f"Available groups: {', '.join(sorted(available_groups))}"
+                )
+
+            if routine.group not in available_groups:
+                raise ValueError(
+                    f"Routine '{routine_path}' references unknown group '{routine.group}'. "
+                    f"Available groups: {', '.join(sorted(available_groups))}"
+                )
+
+            # Recursively check nested routines
+            if routine.routines:
+                for nested_routine in routine.routines:
+                    check_routine(nested_routine, routine_path)
+
+        for routine in self.routines:
+            check_routine(routine)
 
         return self
 

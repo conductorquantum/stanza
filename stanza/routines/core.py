@@ -198,8 +198,15 @@ class RoutineRunner:
             routine_config: The routine configuration to extract from
             routine_configs: Dictionary to store extracted parameters
         """
+        # Store parameters and group information
+        config_data: dict[str, Any] = {}
         if routine_config.parameters:
-            routine_configs[routine_config.name] = routine_config.parameters
+            config_data.update(routine_config.parameters)
+        if hasattr(routine_config, "group") and routine_config.group is not None:
+            config_data["__group__"] = routine_config.group
+
+        if config_data:
+            routine_configs[routine_config.name] = config_data
 
         if routine_config.routines:
             current_path = (
@@ -271,8 +278,22 @@ class RoutineRunner:
         config = self.configs.get(routine_name, {})
         merged_params = {**parent_params, **config, **params}
 
+        # Extract group information if present (not passed to routine as parameter)
+        group_name = merged_params.pop("__group__", None)
+
         # Get the routine function from global registry
         routine_func = _routine_registry[routine_name]
+
+        # Filter device by group if specified
+        original_device = None
+        if group_name is not None:
+            device = getattr(self.resources, "device", None)
+            if device is not None and hasattr(device, "filter_by_group"):
+                original_device = device
+                filtered_device = device.filter_by_group(group_name)
+                # Temporarily replace device in resources
+                self.resources._resources["device"] = filtered_device
+                logger.info(f"Filtering device to group: {group_name}")
 
         # Create logger session if logger exists and has create_session method
         data_logger = getattr(self.resources, "logger", None)
@@ -297,6 +318,10 @@ class RoutineRunner:
             raise RuntimeError(f"Routine '{routine_name}' failed: {e}") from e
 
         finally:
+            # Restore original device if it was filtered
+            if original_device is not None:
+                self.resources._resources["device"] = original_device
+
             # Close logger session if it was created
             if session is not None and data_logger is not None:
                 session_id = self._get_routine_path(routine_name)

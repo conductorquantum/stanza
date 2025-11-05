@@ -136,6 +136,166 @@ def test_device_config_unique_channels():
         )
 
 
+def test_device_config_groups_require_known_pads():
+    gate = Gate(
+        type=GateType.PLUNGER,
+        control_channel=1,
+        v_lower_bound=0.0,
+        v_upper_bound=1.0,
+    )
+    contact = Contact(
+        type=ContactType.SOURCE,
+        measure_channel=2,
+        v_lower_bound=0.0,
+        v_upper_bound=1.0,
+    )
+    gpio = GPIO(
+        type=GPIOType.OUTPUT,
+        control_channel=3,
+        v_lower_bound=0.0,
+        v_upper_bound=3.3,
+    )
+
+    control_instrument = ControlInstrumentConfig(
+        name="control",
+        type=InstrumentType.CONTROL,
+        ip_addr="192.168.1.1",
+        slew_rate=1.0,
+    )
+    measurement_instrument = MeasurementInstrumentConfig(
+        name="measurement",
+        type=InstrumentType.MEASUREMENT,
+        ip_addr="192.168.1.2",
+        measurement_duration=1.0,
+        sample_time=0.5,
+    )
+
+    with pytest.raises(
+        ValueError, match="Group 'control' references unknown gate 'missing'"
+    ):
+        DeviceConfig(
+            name="test_device",
+            gates={"g1": gate},
+            contacts={"c1": contact},
+            gpios={"gpio1": gpio},
+            groups={"control": {"gates": ["missing"]}},
+            routines=[RoutineConfig(name="test_exp")],
+            instruments=[control_instrument, measurement_instrument],
+        )
+
+    with pytest.raises(
+        ValueError, match="Group 'control' references unknown contact 'missing'"
+    ):
+        DeviceConfig(
+            name="test_device",
+            gates={"g1": gate},
+            contacts={"c1": contact},
+            gpios={"gpio1": gpio},
+            groups={"control": {"contacts": ["missing"]}},
+            routines=[RoutineConfig(name="test_exp")],
+            instruments=[control_instrument, measurement_instrument],
+        )
+
+    with pytest.raises(
+        ValueError, match="Group 'control' references unknown gpio 'missing'"
+    ):
+        DeviceConfig(
+            name="test_device",
+            gates={"g1": gate},
+            contacts={"c1": contact},
+            gpios={"gpio1": gpio},
+            groups={"control": {"gpios": ["missing"]}},
+            routines=[RoutineConfig(name="test_exp")],
+            instruments=[control_instrument, measurement_instrument],
+        )
+
+
+def test_device_config_groups_enforce_unique_assignments():
+    gate = Gate(
+        type=GateType.PLUNGER,
+        control_channel=1,
+        v_lower_bound=0.0,
+        v_upper_bound=1.0,
+    )
+    contact = Contact(
+        type=ContactType.SOURCE,
+        measure_channel=2,
+        v_lower_bound=0.0,
+        v_upper_bound=1.0,
+    )
+    gpio = GPIO(
+        type=GPIOType.OUTPUT,
+        control_channel=3,
+        v_lower_bound=0.0,
+        v_upper_bound=3.3,
+    )
+
+    control_instrument = ControlInstrumentConfig(
+        name="control",
+        type=InstrumentType.CONTROL,
+        ip_addr="192.168.1.1",
+        slew_rate=1.0,
+    )
+    measurement_instrument = MeasurementInstrumentConfig(
+        name="measurement",
+        type=InstrumentType.MEASUREMENT,
+        ip_addr="192.168.1.2",
+        measurement_duration=1.0,
+        sample_time=0.5,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="Gate 'g1' referenced by group 'sensor' already assigned to group 'control'",
+    ):
+        DeviceConfig(
+            name="test_device",
+            gates={"g1": gate},
+            contacts={"c1": contact},
+            gpios={"gpio1": gpio},
+            groups={
+                "control": {"gates": ["g1"], "contacts": ["c1"], "gpios": ["gpio1"]},
+                "sensor": {"gates": ["g1"]},
+            },
+            routines=[RoutineConfig(name="test_exp")],
+            instruments=[control_instrument, measurement_instrument],
+        )
+
+    with pytest.raises(
+        ValueError,
+        match="Contact 'c1' referenced by group 'sensor' already assigned to group 'control'",
+    ):
+        DeviceConfig(
+            name="test_device",
+            gates={"g1": gate},
+            contacts={"c1": contact},
+            gpios={"gpio1": gpio},
+            groups={
+                "control": {"contacts": ["c1"]},
+                "sensor": {"contacts": ["c1"]},
+            },
+            routines=[RoutineConfig(name="test_exp")],
+            instruments=[control_instrument, measurement_instrument],
+        )
+
+    with pytest.raises(
+        ValueError,
+        match="GPIO 'gpio1' referenced by group 'sensor' already assigned to group 'control'",
+    ):
+        DeviceConfig(
+            name="test_device",
+            gates={"g1": gate},
+            contacts={"c1": contact},
+            gpios={"gpio1": gpio},
+            groups={
+                "control": {"gpios": ["gpio1"]},
+                "sensor": {"gpios": ["gpio1"]},
+            },
+            routines=[RoutineConfig(name="test_exp")],
+            instruments=[control_instrument, measurement_instrument],
+        )
+
+
 def test_device_config_required_instruments():
     gate = Gate(
         type=GateType.PLUNGER,
@@ -398,3 +558,156 @@ def test_routine_config_handles_scientific_notation_strings():
     # "1e3" becomes 1000.0, which has no fractional part, so it's converted to int
     assert routine.parameters["integer_scientific"] == 1000
     assert isinstance(routine.parameters["integer_scientific"], int)
+
+
+def test_device_config_requires_group_on_routines_when_groups_defined():
+    """Test that routines must specify a group when device has groups defined."""
+    gate = Gate(
+        type=GateType.PLUNGER,
+        control_channel=1,
+        v_lower_bound=0.0,
+        v_upper_bound=1.0,
+    )
+    control_instrument = ControlInstrumentConfig(
+        name="control",
+        type=InstrumentType.CONTROL,
+        ip_addr="192.168.1.1",
+        slew_rate=1.0,
+    )
+    measurement_instrument = MeasurementInstrumentConfig(
+        name="measurement",
+        type=InstrumentType.MEASUREMENT,
+        ip_addr="192.168.1.2",
+        measurement_duration=1.0,
+        sample_time=0.5,
+    )
+
+    # Test that routine without group raises error when groups are defined
+    with pytest.raises(
+        ValueError,
+        match="Routine 'test_routine' must specify a group when device has groups defined",
+    ):
+        DeviceConfig(
+            name="test_device",
+            gates={"g1": gate},
+            contacts={},
+            groups={"control": {"gates": ["g1"]}},
+            routines=[RoutineConfig(name="test_routine")],
+            instruments=[control_instrument, measurement_instrument],
+        )
+
+
+def test_device_config_validates_routine_group_exists():
+    """Test that routine group must exist in device groups."""
+    gate = Gate(
+        type=GateType.PLUNGER,
+        control_channel=1,
+        v_lower_bound=0.0,
+        v_upper_bound=1.0,
+    )
+    control_instrument = ControlInstrumentConfig(
+        name="control",
+        type=InstrumentType.CONTROL,
+        ip_addr="192.168.1.1",
+        slew_rate=1.0,
+    )
+    measurement_instrument = MeasurementInstrumentConfig(
+        name="measurement",
+        type=InstrumentType.MEASUREMENT,
+        ip_addr="192.168.1.2",
+        measurement_duration=1.0,
+        sample_time=0.5,
+    )
+
+    # Test that unknown group raises error
+    with pytest.raises(
+        ValueError,
+        match="Routine 'test_routine' references unknown group 'sensor'",
+    ):
+        DeviceConfig(
+            name="test_device",
+            gates={"g1": gate},
+            contacts={},
+            groups={"control": {"gates": ["g1"]}},
+            routines=[RoutineConfig(name="test_routine", group="sensor")],
+            instruments=[control_instrument, measurement_instrument],
+        )
+
+
+def test_device_config_validates_nested_routine_groups():
+    """Test that nested routines must also specify groups."""
+    gate = Gate(
+        type=GateType.PLUNGER,
+        control_channel=1,
+        v_lower_bound=0.0,
+        v_upper_bound=1.0,
+    )
+    control_instrument = ControlInstrumentConfig(
+        name="control",
+        type=InstrumentType.CONTROL,
+        ip_addr="192.168.1.1",
+        slew_rate=1.0,
+    )
+    measurement_instrument = MeasurementInstrumentConfig(
+        name="measurement",
+        type=InstrumentType.MEASUREMENT,
+        ip_addr="192.168.1.2",
+        measurement_duration=1.0,
+        sample_time=0.5,
+    )
+
+    # Test that nested routine without group raises error
+    with pytest.raises(
+        ValueError,
+        match="Routine 'parent/child' must specify a group",
+    ):
+        DeviceConfig(
+            name="test_device",
+            gates={"g1": gate},
+            contacts={},
+            groups={"control": {"gates": ["g1"]}},
+            routines=[
+                RoutineConfig(
+                    name="parent",
+                    group="control",
+                    routines=[RoutineConfig(name="child")],
+                )
+            ],
+            instruments=[control_instrument, measurement_instrument],
+        )
+
+
+def test_device_config_allows_routines_without_groups_when_no_groups_defined():
+    """Test that routines can omit group when device has no groups."""
+    gate = Gate(
+        type=GateType.PLUNGER,
+        control_channel=1,
+        v_lower_bound=0.0,
+        v_upper_bound=1.0,
+    )
+    control_instrument = ControlInstrumentConfig(
+        name="control",
+        type=InstrumentType.CONTROL,
+        ip_addr="192.168.1.1",
+        slew_rate=1.0,
+    )
+    measurement_instrument = MeasurementInstrumentConfig(
+        name="measurement",
+        type=InstrumentType.MEASUREMENT,
+        ip_addr="192.168.1.2",
+        measurement_duration=1.0,
+        sample_time=0.5,
+    )
+
+    # Should not raise error - no groups defined
+    device = DeviceConfig(
+        name="test_device",
+        gates={"g1": gate},
+        contacts={},
+        groups={},
+        routines=[RoutineConfig(name="test_routine")],
+        instruments=[control_instrument, measurement_instrument],
+    )
+
+    assert device.name == "test_device"
+    assert len(device.routines) == 1
