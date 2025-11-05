@@ -3,6 +3,7 @@ from collections.abc import Callable
 from typing import Any
 
 from stanza.context import StanzaSession
+from stanza.exceptions import DeviceError, InstrumentError
 from stanza.logger.data_logger import DataLogger
 from stanza.models import DeviceConfig
 from stanza.registry import ResourceRegistry, ResultsRegistry
@@ -51,7 +52,7 @@ def routine(
     def decorator(f: Callable[..., Any]) -> Callable[..., Any]:
         routine_name = name or f.__name__
         _routine_registry[routine_name] = f
-        logger.debug(f"Registered routine: {routine_name}")
+        logger.debug("Registered routine: %s", routine_name)
         return f
 
     if func is None:
@@ -132,7 +133,8 @@ class RoutineRunner:
         self.context = RoutineContext(self.resources, self.results)
 
         logger.info(
-            f"Initialized RoutineRunner with {len(self.resources.list_resources())} resources"
+            "Initialized RoutineRunner with %s resources",
+            len(self.resources.list_resources()),
         )
 
     def _build_resources_from_configs(
@@ -292,8 +294,8 @@ class RoutineRunner:
                 original_device = device
                 filtered_device = device.filter_by_group(group_name)
                 # Temporarily replace device in resources
-                self.resources._resources["device"] = filtered_device
-                logger.info(f"Filtering device to group: {group_name}")
+                self.resources.add("device", filtered_device)
+                logger.info("Filtering device to group: %s", group_name)
 
                 # Handle zero_other_groups parameter
                 zero_other_groups = merged_params.get("zero_other_groups", False)
@@ -302,11 +304,15 @@ class RoutineRunner:
                         gates_to_zero = original_device.get_other_group_gates(group_name)
                         if gates_to_zero:
                             logger.info(
-                                f"Zeroing gates from other groups: {gates_to_zero}"
+                                "Zeroing gates from other groups: %s",
+                                gates_to_zero,
                             )
                             original_device.zero_gates(gates_to_zero)
-                    except Exception as e:
-                        logger.warning(f"Failed to zero other group gates: {e}")
+                    except (DeviceError, InstrumentError) as e:
+                        logger.warning(
+                            "Failed to zero other group gates: %s",
+                            e,
+                        )
 
         # Create logger session if logger exists and has create_session method
         data_logger = getattr(self.resources, "logger", None)
@@ -317,23 +323,23 @@ class RoutineRunner:
             merged_params["session"] = session
 
         try:
-            logger.info(f"Running routine: {routine_name}")
+            logger.info("Running routine: %s", routine_name)
             result = routine_func(self.context, **merged_params)
 
             # Store result
             self.results.store(routine_name, result)
-            logger.info(f"Completed routine: {routine_name}")
+            logger.info("Completed routine: %s", routine_name)
 
             return result
 
         except Exception as e:
-            logger.error(f"Routine {routine_name} failed: {e}")
+            logger.error("Routine %s failed: %s", routine_name, e)
             raise RuntimeError(f"Routine '{routine_name}' failed: {e}") from e
 
         finally:
             # Restore original device if it was filtered
             if original_device is not None:
-                self.resources._resources["device"] = original_device
+                self.resources.add("device", original_device)
 
             # Close logger session if it was created
             if session is not None and data_logger is not None:
