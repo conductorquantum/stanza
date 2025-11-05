@@ -13,8 +13,8 @@ from stanza.models import (
     InstrumentType,
     MeasurementInstrumentConfig,
 )
-from stanza.utils import device_from_config
-
+from stanza.base.channels import ChannelConfig
+from stanza.models import PadType
 
 class MockControlInstrument:
     """Mock control instrument for testing."""
@@ -101,10 +101,6 @@ def test_device_filter_by_group_basic():
             ),
         ],
     )
-
-    # Create device with mock instruments
-    from stanza.base.channels import ChannelConfig
-    from stanza.models import PadType
 
     channel_configs = {
         "G1": ChannelConfig(
@@ -201,8 +197,7 @@ def test_device_filter_by_group_unknown_group():
         ],
     )
 
-    from stanza.base.channels import ChannelConfig
-    from stanza.models import PadType
+
 
     channel_configs = {
         "G1": ChannelConfig(
@@ -267,9 +262,6 @@ def test_device_filter_by_group_shares_instruments():
             ),
         ],
     )
-
-    from stanza.base.channels import ChannelConfig
-    from stanza.models import PadType
 
     channel_configs = {
         "G1": ChannelConfig(
@@ -362,9 +354,6 @@ def test_device_get_shared_gates():
             ),
         ],
     )
-
-    from stanza.base.channels import ChannelConfig
-    from stanza.models import PadType
 
     channel_configs = {
         "G1": ChannelConfig(
@@ -463,8 +452,6 @@ def test_device_get_other_group_gates():
         ],
     )
 
-    from stanza.base.channels import ChannelConfig
-    from stanza.models import PadType
 
     channel_configs = {
         "G1": ChannelConfig(
