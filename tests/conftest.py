@@ -121,6 +121,60 @@ class MockBreakoutBoxInstrument:
                 self.disconnected_calls.append((name, line_number))
 
 
+# Helper functions for test setup
+def make_gate(
+    gate_type: GateType = GateType.PLUNGER,
+    control_channel: int | None = None,
+    measure_channel: int | None = None,
+    v_lower_bound: float = 0.0,
+    v_upper_bound: float = 1.0,
+) -> Gate:
+    """Helper function to create Gate instances with common defaults."""
+    return Gate(
+        type=gate_type,
+        control_channel=control_channel,
+        measure_channel=measure_channel,
+        v_lower_bound=v_lower_bound,
+        v_upper_bound=v_upper_bound,
+    )
+
+
+def make_contact(
+    contact_type: ContactType = ContactType.SOURCE,
+    control_channel: int | None = None,
+    measure_channel: int | None = None,
+    v_lower_bound: float = 0.0,
+    v_upper_bound: float = 1.0,
+) -> Contact:
+    """Helper function to create Contact instances with common defaults."""
+    return Contact(
+        type=contact_type,
+        control_channel=control_channel,
+        measure_channel=measure_channel,
+        v_lower_bound=v_lower_bound,
+        v_upper_bound=v_upper_bound,
+    )
+
+
+def standard_instrument_configs() -> list[ControlInstrumentConfig | MeasurementInstrumentConfig]:
+    """Helper function to create standard instrument configurations for testing."""
+    return [
+        ControlInstrumentConfig(
+            name="control",
+            type=InstrumentType.CONTROL,
+            ip_addr="192.168.1.1",
+            slew_rate=1.0,
+        ),
+        MeasurementInstrumentConfig(
+            name="measurement",
+            type=InstrumentType.MEASUREMENT,
+            ip_addr="192.168.1.2",
+            measurement_duration=1.0,
+            sample_time=0.5,
+        ),
+    ]
+
+
 @pytest.fixture(autouse=True)
 def mock_time_sleep():
     """Automatically patch time.sleep for all tests to avoid actual delays."""

@@ -2,44 +2,15 @@ import pytest
 
 from stanza.device import Device
 from stanza.exceptions import DeviceError
-from stanza.models import (
-    Contact,
-    ContactType,
-    ControlInstrumentConfig,
-    DeviceConfig,
-    DeviceGroup,
-    Gate,
-    GateType,
-    InstrumentType,
-    MeasurementInstrumentConfig,
+from stanza.models import ContactType, DeviceConfig, DeviceGroup, GateType
+from stanza.utils import generate_channel_configs
+from tests.conftest import (
+    MockControlInstrument,
+    MockMeasurementInstrument,
+    make_contact,
+    make_gate,
+    standard_instrument_configs,
 )
-from stanza.base.channels import ChannelConfig
-from stanza.models import PadType
-
-class MockControlInstrument:
-    """Mock control instrument for testing."""
-
-    def __init__(self, *args, **kwargs):
-        pass
-
-    def set_voltage(self, channel_name: str, voltage: float) -> None:
-        pass
-
-    def get_voltage(self, channel_name: str) -> float:
-        return 0.0
-
-    def get_slew_rate(self, channel_name: str) -> float:
-        return 1.0
-
-
-class MockMeasurementInstrument:
-    """Mock measurement instrument for testing."""
-
-    def __init__(self, *args, **kwargs):
-        pass
-
-    def measure(self, channel_name: str) -> float:
-        return 0.0
 
 
 def test_device_filter_by_group_basic():
@@ -47,98 +18,23 @@ def test_device_filter_by_group_basic():
     device_config = DeviceConfig(
         name="test_device",
         gates={
-            "G1": Gate(
-                type=GateType.PLUNGER,
-                control_channel=1,
-                v_lower_bound=0.0,
-                v_upper_bound=1.0,
-            ),
-            "G2": Gate(
-                type=GateType.BARRIER,
-                control_channel=2,
-                v_lower_bound=0.0,
-                v_upper_bound=1.0,
-            ),
-            "G3": Gate(
-                type=GateType.PLUNGER,
-                control_channel=3,
-                v_lower_bound=0.0,
-                v_upper_bound=1.0,
-            ),
+            "G1": make_gate(GateType.PLUNGER, control_channel=1),
+            "G2": make_gate(GateType.BARRIER, control_channel=2),
+            "G3": make_gate(GateType.PLUNGER, control_channel=3),
         },
         contacts={
-            "IN": Contact(
-                type=ContactType.SOURCE,
-                measure_channel=1,
-                v_lower_bound=0.0,
-                v_upper_bound=1.0,
-            ),
-            "OUT": Contact(
-                type=ContactType.DRAIN,
-                measure_channel=2,
-                v_lower_bound=0.0,
-                v_upper_bound=1.0,
-            ),
+            "IN": make_contact(ContactType.SOURCE, measure_channel=1),
+            "OUT": make_contact(ContactType.DRAIN, measure_channel=2),
         },
         groups={
             "control": DeviceGroup(gates=["G1", "G2"], contacts=["IN"]),
             "sensor": DeviceGroup(gates=["G3"], contacts=["OUT"]),
         },
         routines=[],
-        instruments=[
-            ControlInstrumentConfig(
-                name="control",
-                type=InstrumentType.CONTROL,
-                ip_addr="192.168.1.1",
-                slew_rate=1.0,
-            ),
-            MeasurementInstrumentConfig(
-                name="measurement",
-                type=InstrumentType.MEASUREMENT,
-                ip_addr="192.168.1.2",
-                measurement_duration=1.0,
-                sample_time=0.5,
-            ),
-        ],
+        instruments=standard_instrument_configs(),
     )
 
-    channel_configs = {
-        "G1": ChannelConfig(
-            name="G1",
-            voltage_range=(0.0, 1.0),
-            pad_type=PadType.GATE,
-            electrode_type=GateType.PLUNGER,
-            control_channel=1,
-        ),
-        "G2": ChannelConfig(
-            name="G2",
-            voltage_range=(0.0, 1.0),
-            pad_type=PadType.GATE,
-            electrode_type=GateType.BARRIER,
-            control_channel=2,
-        ),
-        "G3": ChannelConfig(
-            name="G3",
-            voltage_range=(0.0, 1.0),
-            pad_type=PadType.GATE,
-            electrode_type=GateType.PLUNGER,
-            control_channel=3,
-        ),
-        "IN": ChannelConfig(
-            name="IN",
-            voltage_range=(0.0, 1.0),
-            pad_type=PadType.CONTACT,
-            electrode_type=ContactType.SOURCE,
-            measure_channel=1,
-        ),
-        "OUT": ChannelConfig(
-            name="OUT",
-            voltage_range=(0.0, 1.0),
-            pad_type=PadType.CONTACT,
-            electrode_type=ContactType.DRAIN,
-            measure_channel=2,
-        ),
-    }
+    channel_configs = generate_channel_configs(device_config)
 
     device = Device(
         name="test_device",
@@ -150,16 +46,12 @@ def test_device_filter_by_group_basic():
 
     # Filter by control group
     control_device = device.filter_by_group("control")
-
-    # Check that only control group gates and contacts are present
     assert set(control_device.gates) == {"G1", "G2"}
     assert set(control_device.contacts) == {"IN"}
     assert control_device.name == "test_device_control"
 
     # Filter by sensor group
     sensor_device = device.filter_by_group("sensor")
-
-    # Check that only sensor group gates and contacts are present
     assert set(sensor_device.gates) == {"G3"}
     assert set(sensor_device.contacts) == {"OUT"}
     assert sensor_device.name == "test_device_sensor"
@@ -169,45 +61,14 @@ def test_device_filter_by_group_unknown_group():
     """Test that filtering by unknown group raises error."""
     device_config = DeviceConfig(
         name="test_device",
-        gates={
-            "G1": Gate(
-                type=GateType.PLUNGER,
-                control_channel=1,
-                v_lower_bound=0.0,
-                v_upper_bound=1.0,
-            ),
-        },
+        gates={"G1": make_gate(GateType.PLUNGER, control_channel=1)},
         contacts={},
         groups={"control": DeviceGroup(gates=["G1"])},
         routines=[],
-        instruments=[
-            ControlInstrumentConfig(
-                name="control",
-                type=InstrumentType.CONTROL,
-                ip_addr="192.168.1.1",
-                slew_rate=1.0,
-            ),
-            MeasurementInstrumentConfig(
-                name="measurement",
-                type=InstrumentType.MEASUREMENT,
-                ip_addr="192.168.1.2",
-                measurement_duration=1.0,
-                sample_time=0.5,
-            ),
-        ],
+        instruments=standard_instrument_configs(),
     )
 
-
-
-    channel_configs = {
-        "G1": ChannelConfig(
-            name="G1",
-            voltage_range=(0.0, 1.0),
-            pad_type=PadType.GATE,
-            electrode_type=GateType.PLUNGER,
-            control_channel=1,
-        ),
-    }
+    channel_configs = generate_channel_configs(device_config)
 
     device = Device(
         name="test_device",
@@ -227,18 +88,8 @@ def test_device_filter_by_group_shares_instruments():
     device_config = DeviceConfig(
         name="test_device",
         gates={
-            "G1": Gate(
-                type=GateType.PLUNGER,
-                control_channel=1,
-                v_lower_bound=0.0,
-                v_upper_bound=1.0,
-            ),
-            "G2": Gate(
-                type=GateType.BARRIER,
-                control_channel=2,
-                v_lower_bound=0.0,
-                v_upper_bound=1.0,
-            ),
+            "G1": make_gate(GateType.PLUNGER, control_channel=1),
+            "G2": make_gate(GateType.BARRIER, control_channel=2),
         },
         contacts={},
         groups={
@@ -246,39 +97,10 @@ def test_device_filter_by_group_shares_instruments():
             "sensor": DeviceGroup(gates=["G2"]),
         },
         routines=[],
-        instruments=[
-            ControlInstrumentConfig(
-                name="control",
-                type=InstrumentType.CONTROL,
-                ip_addr="192.168.1.1",
-                slew_rate=1.0,
-            ),
-            MeasurementInstrumentConfig(
-                name="measurement",
-                type=InstrumentType.MEASUREMENT,
-                ip_addr="192.168.1.2",
-                measurement_duration=1.0,
-                sample_time=0.5,
-            ),
-        ],
+        instruments=standard_instrument_configs(),
     )
 
-    channel_configs = {
-        "G1": ChannelConfig(
-            name="G1",
-            voltage_range=(0.0, 1.0),
-            pad_type=PadType.GATE,
-            electrode_type=GateType.PLUNGER,
-            control_channel=1,
-        ),
-        "G2": ChannelConfig(
-            name="G2",
-            voltage_range=(0.0, 1.0),
-            pad_type=PadType.GATE,
-            electrode_type=GateType.BARRIER,
-            control_channel=2,
-        ),
-    }
+    channel_configs = generate_channel_configs(device_config)
 
     control_inst = MockControlInstrument()
     measure_inst = MockMeasurementInstrument()
@@ -307,30 +129,10 @@ def test_device_get_shared_gates():
     device_config = DeviceConfig(
         name="test_device",
         gates={
-            "G1": Gate(
-                type=GateType.PLUNGER,
-                control_channel=1,
-                v_lower_bound=0.0,
-                v_upper_bound=1.0,
-            ),
-            "G2": Gate(
-                type=GateType.BARRIER,
-                control_channel=2,
-                v_lower_bound=0.0,
-                v_upper_bound=1.0,
-            ),
-            "RES1": Gate(
-                type=GateType.RESERVOIR,
-                control_channel=3,
-                v_lower_bound=0.0,
-                v_upper_bound=1.0,
-            ),
-            "RES2": Gate(
-                type=GateType.RESERVOIR,
-                control_channel=4,
-                v_lower_bound=0.0,
-                v_upper_bound=1.0,
-            ),
+            "G1": make_gate(GateType.PLUNGER, control_channel=1),
+            "G2": make_gate(GateType.BARRIER, control_channel=2),
+            "RES1": make_gate(GateType.RESERVOIR, control_channel=3),
+            "RES2": make_gate(GateType.RESERVOIR, control_channel=4),
         },
         contacts={},
         groups={
@@ -338,53 +140,10 @@ def test_device_get_shared_gates():
             "sensor": DeviceGroup(gates=["G2", "RES1", "RES2"]),
         },
         routines=[],
-        instruments=[
-            ControlInstrumentConfig(
-                name="control",
-                type=InstrumentType.CONTROL,
-                ip_addr="192.168.1.1",
-                slew_rate=1.0,
-            ),
-            MeasurementInstrumentConfig(
-                name="measurement",
-                type=InstrumentType.MEASUREMENT,
-                ip_addr="192.168.1.2",
-                measurement_duration=1.0,
-                sample_time=0.5,
-            ),
-        ],
+        instruments=standard_instrument_configs(),
     )
 
-    channel_configs = {
-        "G1": ChannelConfig(
-            name="G1",
-            voltage_range=(0.0, 1.0),
-            pad_type=PadType.GATE,
-            electrode_type=GateType.PLUNGER,
-            control_channel=1,
-        ),
-        "G2": ChannelConfig(
-            name="G2",
-            voltage_range=(0.0, 1.0),
-            pad_type=PadType.GATE,
-            electrode_type=GateType.BARRIER,
-            control_channel=2,
-        ),
-        "RES1": ChannelConfig(
-            name="RES1",
-            voltage_range=(0.0, 1.0),
-            pad_type=PadType.GATE,
-            electrode_type=GateType.RESERVOIR,
-            control_channel=3,
-        ),
-        "RES2": ChannelConfig(
-            name="RES2",
-            voltage_range=(0.0, 1.0),
-            pad_type=PadType.GATE,
-            electrode_type=GateType.RESERVOIR,
-            control_channel=4,
-        ),
-    }
+    channel_configs = generate_channel_configs(device_config)
 
     device = Device(
         name="test_device",
@@ -404,30 +163,10 @@ def test_device_get_other_group_gates():
     device_config = DeviceConfig(
         name="test_device",
         gates={
-            "G1": Gate(
-                type=GateType.PLUNGER,
-                control_channel=1,
-                v_lower_bound=0.0,
-                v_upper_bound=1.0,
-            ),
-            "G2": Gate(
-                type=GateType.BARRIER,
-                control_channel=2,
-                v_lower_bound=0.0,
-                v_upper_bound=1.0,
-            ),
-            "G3": Gate(
-                type=GateType.PLUNGER,
-                control_channel=3,
-                v_lower_bound=0.0,
-                v_upper_bound=1.0,
-            ),
-            "RES1": Gate(
-                type=GateType.RESERVOIR,
-                control_channel=4,
-                v_lower_bound=0.0,
-                v_upper_bound=1.0,
-            ),
+            "G1": make_gate(GateType.PLUNGER, control_channel=1),
+            "G2": make_gate(GateType.BARRIER, control_channel=2),
+            "G3": make_gate(GateType.PLUNGER, control_channel=3),
+            "RES1": make_gate(GateType.RESERVOIR, control_channel=4),
         },
         contacts={},
         groups={
@@ -435,54 +174,10 @@ def test_device_get_other_group_gates():
             "sensor": DeviceGroup(gates=["G3", "RES1"]),
         },
         routines=[],
-        instruments=[
-            ControlInstrumentConfig(
-                name="control",
-                type=InstrumentType.CONTROL,
-                ip_addr="192.168.1.1",
-                slew_rate=1.0,
-            ),
-            MeasurementInstrumentConfig(
-                name="measurement",
-                type=InstrumentType.MEASUREMENT,
-                ip_addr="192.168.1.2",
-                measurement_duration=1.0,
-                sample_time=0.5,
-            ),
-        ],
+        instruments=standard_instrument_configs(),
     )
 
-
-    channel_configs = {
-        "G1": ChannelConfig(
-            name="G1",
-            voltage_range=(0.0, 1.0),
-            pad_type=PadType.GATE,
-            electrode_type=GateType.PLUNGER,
-            control_channel=1,
-        ),
-        "G2": ChannelConfig(
-            name="G2",
-            voltage_range=(0.0, 1.0),
-            pad_type=PadType.GATE,
-            electrode_type=GateType.BARRIER,
-            control_channel=2,
-        ),
-        "G3": ChannelConfig(
-            name="G3",
-            voltage_range=(0.0, 1.0),
-            pad_type=PadType.GATE,
-            electrode_type=GateType.PLUNGER,
-            control_channel=3,
-        ),
-        "RES1": ChannelConfig(
-            name="RES1",
-            voltage_range=(0.0, 1.0),
-            pad_type=PadType.GATE,
-            electrode_type=GateType.RESERVOIR,
-            control_channel=4,
-        ),
-    }
+    channel_configs = generate_channel_configs(device_config)
 
     device = Device(
         name="test_device",
