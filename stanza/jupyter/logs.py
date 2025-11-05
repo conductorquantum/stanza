@@ -14,7 +14,15 @@ from stanza.jupyter.utils import clean_carriage_returns, tail_log
 
 
 def _wait_for_log(log_file: Path, timeout: float = 30.0) -> None:
-    """Wait for log file to exist or timeout."""
+    """Wait for log file to exist or timeout.
+
+    Polls for the log file's existence, displaying a waiting message to stderr.
+    Exits with status 1 if the file doesn't appear within the timeout period.
+
+    Args:
+        log_file: Path to the log file to wait for
+        timeout: Maximum seconds to wait before exiting
+    """
     if log_file.exists():
         return
 
@@ -30,7 +38,12 @@ def _wait_for_log(log_file: Path, timeout: float = 30.0) -> None:
 
 
 def _print_tail(log_file: Path, lines: int) -> None:
-    """Print last N lines from log file with proper terminal alignment."""
+    """Print last N lines from log file with proper terminal alignment.
+
+    Args:
+        log_file: Path to the log file to read
+        lines: Number of lines to print from the end of the file
+    """
     tail = clean_carriage_returns(tail_log(log_file, lines))
     if tail:
         sys.stdout.write(tail.replace("\n", "\r\n") + "\r\n")
@@ -38,7 +51,16 @@ def _print_tail(log_file: Path, lines: int) -> None:
 
 
 def _stream_log(f: object, poll_interval: float, log_file: Path) -> None:
-    """Read and print new log lines with proper terminal alignment."""
+    """Read and print new log lines with proper terminal alignment.
+
+    Strips carriage return artifacts from progress bars and formats output
+    for proper terminal display. Exits if the log file is deleted.
+
+    Args:
+        f: Open file handle positioned at the current read position
+        poll_interval: Seconds to sleep when no new data is available
+        log_file: Path to the log file (for existence checking)
+    """
     line = f.readline()  # type: ignore[attr-defined]
     if line:
         # Strip \r artifacts from progress bars - keep only final visible text
@@ -59,10 +81,20 @@ def _stream_log(f: object, poll_interval: float, log_file: Path) -> None:
 
 
 def follow(log_file: Path, lines: int = 10, poll_interval: float = 0.1) -> None:
-    """Stream log file until Ctrl+C."""
+    """Stream log file until Ctrl+C.
+
+    Displays the last N lines of the log file, then continuously streams new
+    lines as they are written. Exits gracefully on Ctrl+C.
+
+    Args:
+        log_file: Path to the log file to follow
+        lines: Number of initial lines to display from the end of the file
+        poll_interval: Seconds to wait between checks for new content
+    """
     _wait_for_log(log_file)
 
     def sigint_handler(_sig: int, _frame: object) -> None:
+        """Handle Ctrl+C by displaying detach message and exiting."""
         sys.stderr.write(f"\r\nDetached from {log_file.name}\r\n")
         sys.stderr.flush()
         sys.exit(0)
@@ -82,7 +114,18 @@ def attach(
     lines: int = 10,
     poll_interval: float = 0.1,
 ) -> None:
-    """Stream log file. Ctrl+C kills kernel, ESC exits without killing."""
+    """Stream log file with active kernel control.
+
+    Displays the last N lines of the log file, then continuously streams new
+    lines. Ctrl+C kills the kernel via the callback. ESC exits without killing
+    (press twice for safety).
+
+    Args:
+        log_file: Path to the log file to follow
+        kill_callback: Function to call when Ctrl+C is pressed
+        lines: Number of initial lines to display from the end of the file
+        poll_interval: Seconds to wait between checks for new content
+    """
     _wait_for_log(log_file)
     _print_tail(log_file, lines)
 

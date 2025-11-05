@@ -7,10 +7,16 @@ from pathlib import Path
 def clean_carriage_returns(text: str) -> str:
     """Remove carriage return artifacts from logged output.
 
-    Terminal progress bars use \r to overwrite previous text. When logged to a file,
-    this creates lines like "old_text\r                              new_text".
-    We keep only the text after the last \r on each line, which is what would be
+    Terminal progress bars use \\r to overwrite previous text. When logged to a file,
+    this creates lines like "old_text\\r                              new_text".
+    We keep only the text after the last \\r on each line, which is what would be
     visible on a real terminal.
+
+    Args:
+        text: Raw text containing carriage return artifacts
+
+    Returns:
+        Cleaned text with only the final visible content from each line
     """
     if not text:
         return ""
@@ -33,6 +39,13 @@ def tail_log(log_file: Path, lines: int = 10) -> str:
 
     Only reads last 4KB to avoid loading large files into memory.
     Splits on \\n only to preserve \\r for carriage return processing.
+
+    Args:
+        log_file: Path to the log file to read
+        lines: Number of lines to return from the end of the file
+
+    Returns:
+        Last N lines from the log file, or empty string if file doesn't exist
     """
     if not log_file.exists():
         return ""
@@ -55,7 +68,14 @@ def tail_log(log_file: Path, lines: int = 10) -> str:
 
 
 def format_size(size_bytes: int) -> str:
-    """Format bytes to human-readable string."""
+    """Format bytes to human-readable string.
+
+    Args:
+        size_bytes: Size in bytes
+
+    Returns:
+        Human-readable string (e.g., "1.5 KB", "2.3 MB")
+    """
     kb = size_bytes / 1024
     if kb < 1:
         return f"{size_bytes} B"

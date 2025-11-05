@@ -552,13 +552,40 @@ class TestJupyterOpenCommand:
             assert "✓ Opened http://localhost:8888" in result.output
             mock_open.assert_called_once_with("http://localhost:8888/?token=abc")
 
-    def test_fails_when_no_server(self):
-        """Test aborts when no server running."""
+    def test_auto_starts_when_no_server(self):
+        """Test auto-starts server when none is running."""
         runner = CliRunner()
-        with patch("stanza.cli.jupyter.status", return_value=None):
+        mock_state = {
+            "pid": 12345,
+            "url": "http://localhost:8888/?token=abc",
+            "root_dir": "/path/to/notebooks",
+        }
+        with (
+            patch("stanza.cli.jupyter.status", return_value=None),
+            patch("stanza.cli.jupyter.start", return_value=mock_state) as mock_start,
+            patch("stanza.cli.webbrowser.open") as mock_open,
+        ):
+            result = runner.invoke(cli, ["jupyter", "open"])
+            assert result.exit_code == 0
+            assert "No Jupyter server running. Starting one..." in result.output
+            assert "✓ Jupyter server started successfully" in result.output
+            mock_start.assert_called_once()
+            mock_open.assert_called_once_with("http://localhost:8888/?token=abc")
+
+    def test_handles_auto_start_failure(self):
+        """Test handles failure when auto-starting server."""
+        runner = CliRunner()
+        with (
+            patch("stanza.cli.jupyter.status", return_value=None),
+            patch(
+                "stanza.cli.jupyter.start",
+                side_effect=RuntimeError("Server already running"),
+            ),
+        ):
             result = runner.invoke(cli, ["jupyter", "open"])
             assert result.exit_code == 1
-            assert "No Jupyter server is currently running" in result.output
+            assert "No Jupyter server running. Starting one..." in result.output
+            assert "✗ Error: Server already running" in result.output
 
     def test_handles_open_error(self):
         """Test handles Exception from webbrowser.open."""

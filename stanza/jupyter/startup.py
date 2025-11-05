@@ -19,7 +19,11 @@ from jupyter_server.utils import url_path_join
 
 
 def _get_ipython() -> Any | None:
-    """Get the current IPython instance if running in IPython, otherwise None."""
+    """Get the current IPython instance if running in IPython.
+
+    Returns:
+        IPython instance if available, None otherwise
+    """
     try:
         from IPython import get_ipython as _gi
 
@@ -29,7 +33,14 @@ def _get_ipython() -> Any | None:
 
 
 def _in_ipykernel(ip: Any) -> bool:
-    """Check if the IPython instance is running in a Jupyter kernel."""
+    """Check if the IPython instance is running in a Jupyter kernel.
+
+    Args:
+        ip: IPython instance to check
+
+    Returns:
+        True if running in a Jupyter kernel, False otherwise
+    """
     try:
         return bool(ip) and "IPKernelApp" in getattr(ip, "config", {})
     except Exception:
@@ -37,7 +48,14 @@ def _in_ipykernel(ip: Any) -> bool:
 
 
 def _kernel_id(ip: Any) -> str | None:
-    """Extract the kernel ID from the IPython kernel connection file."""
+    """Extract the kernel ID from the IPython kernel connection file.
+
+    Args:
+        ip: IPython instance containing kernel configuration
+
+    Returns:
+        Kernel ID string if found, None otherwise
+    """
     try:
         conn = ip.config["IPKernelApp"]["connection_file"]
         m = re.search(r"kernel-(.+)\.json", conn)
@@ -51,6 +69,12 @@ def _resolve_notebook_path(kernel_id: str) -> Path | None:
 
     Iterates through all running Jupyter servers and queries their sessions API
     to match the kernel ID with an active notebook session.
+
+    Args:
+        kernel_id: Kernel ID to search for
+
+    Returns:
+        Absolute path to the notebook file if found, None otherwise
     """
     for server in serverapp.list_running_servers():
         try:
@@ -74,7 +98,12 @@ def _resolve_notebook_path(kernel_id: str) -> Path | None:
 
 
 def _append(path: Path, text: str) -> None:
-    """Append text to the log file, silently ignoring write failures."""
+    """Append text to the log file, silently ignoring write failures.
+
+    Args:
+        path: Path to the log file
+        text: Text content to append
+    """
     try:
         with open(path, "a", encoding="utf-8") as f:
             f.write(text)
@@ -83,15 +112,31 @@ def _append(path: Path, text: str) -> None:
 
 
 class _Tee:
-    """Tee stream wrapper that duplicates writes to a log file."""
+    """Tee stream wrapper that duplicates writes to a log file.
+
+    Acts as a transparent proxy for a stream (like sys.stdout or sys.stderr)
+    while also writing all output to a log file.
+    """
 
     def __init__(self, original: Any, log_path: Path):
-        """Initialize tee with the original stream and log file path."""
+        """Initialize tee with the original stream and log file path.
+
+        Args:
+            original: Original stream to wrap (e.g., sys.stdout)
+            log_path: Path to the log file for duplicated output
+        """
         self._orig = original
         self._path = log_path
 
     def write(self, text: str) -> int:
-        """Write text to both the original stream and the log file."""
+        """Write text to both the original stream and the log file.
+
+        Args:
+            text: Text content to write
+
+        Returns:
+            Number of characters written to the original stream
+        """
         written: int = self._orig.write(text)
         _append(self._path, text)
         return written
@@ -104,7 +149,14 @@ class _Tee:
             pass
 
     def __getattr__(self, name: str) -> Any:
-        """Delegate attribute access to the original stream."""
+        """Delegate attribute access to the original stream.
+
+        Args:
+            name: Attribute name to access
+
+        Returns:
+            Value of the attribute from the original stream
+        """
         return getattr(self._orig, name)
 
 
@@ -114,6 +166,10 @@ def _install_logging(ip: Any, log_file: Path) -> None:
     Writes a header to the log file, wraps sys.stdout and sys.stderr with
     _Tee instances, and hooks IPython's showtraceback method to log exception
     tracebacks.
+
+    Args:
+        ip: IPython instance to install hooks on
+        log_file: Path to the log file for output
     """
     header = (
         f"\n{'=' * 60}\n"
@@ -129,6 +185,7 @@ def _install_logging(ip: Any, log_file: Path) -> None:
     original_show = getattr(ip, "showtraceback", None)
 
     def _showtraceback(*args: Any, **kwargs: Any) -> None:
+        """Custom showtraceback that logs exceptions to the log file."""
         if callable(original_show):
             try:
                 original_show(*args, **kwargs)

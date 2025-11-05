@@ -20,6 +20,7 @@ try:
 except ImportError:
 
     def _jupyter_not_available(*_args: Any, **_kwargs: Any) -> NoReturn:
+        """Raise ImportError when Jupyter dependencies are not installed."""
         raise ImportError(
             "Jupyter dependencies not installed. "
             "Install with: pip install cq-stanza[notebook]"
