@@ -204,6 +204,53 @@ result = runner.run("sweep_barrier")
 
 Plots automatically update as data is logged, supporting both 1D line plots and 2D heatmaps for real-time visualization of sweeps and measurements.
 
+## Jupyter Integration
+
+Stanza provides CLI commands to manage a Jupyter notebook server for interactive development and analysis.
+
+### Server Management
+
+Start a Jupyter server in the background that survives terminal closure:
+
+```bash
+# Start server in current directory on default port 8888
+stanza jupyter start
+
+# Start in specific directory with custom port
+stanza jupyter start /path/to/notebooks --port 8889
+
+# Check server status (shows PID, URL, uptime)
+stanza jupyter status
+
+# Open Jupyter in browser with authentication token
+stanza jupyter open
+
+# Stop the server gracefully
+stanza jupyter stop
+```
+
+### Notebook Monitoring
+
+Monitor and interact with running notebooks:
+
+```bash
+# List all active notebook sessions
+stanza jupyter list
+
+# View log files for active notebooks
+stanza jupyter logs
+
+# Tail a specific notebook's output (Ctrl+C to detach)
+stanza jupyter logs my_notebook.ipynb
+
+# Attach to a notebook with kernel control (Ctrl+C kills kernel, ESC exits)
+stanza jupyter attach my_notebook.ipynb
+```
+
+![Attaching to a Jupyter Notebook Kernel](docs/images/stanza_jupyter_notebook.gif)
+
+The `logs` command is useful for monitoring long-running experiments, while `attach` provides active control for debugging and development. Both commands support showing initial context with the `-n/--lines` option (default: 10 lines).
+
 ## Architecture
 
 Stanza separates concerns into three layers:
