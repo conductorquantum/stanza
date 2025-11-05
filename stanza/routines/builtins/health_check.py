@@ -769,7 +769,7 @@ def analyze_single_gate_heuristic(
         ValueError: If the curve fit quality is poor based on R² and NRMSE metrics.
     """
 
-    pinchoff_fit = fit_pinchoff_parameters(voltages, currents)
+    pinchoff_fit = fit_pinchoff_parameters(voltages, currents, percent_threshold=0.05)
     y_pred = pinchoff_fit.fit_curve(voltages)
     is_good_fit = fit_quality_criterion(voltages, currents, y_pred)
 

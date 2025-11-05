@@ -204,8 +204,59 @@ def _map_index_to_voltage(index: int, voltages: np.ndarray) -> float | None:
     return voltages[index] if index < len(voltages) else None
 
 
+def compute_indices_from_threshold(
+    fitted_current: np.ndarray, percent_threshold: float
+) -> tuple[int, int]:
+    """Find cutoff and saturation indices based on threshold percentages.
+
+    Computes two thresholds: a lower threshold (min + percent_threshold * range)
+    and an upper threshold (max - percent_threshold * range). Returns the indices
+    where the fitted current first crosses these thresholds.
+
+    For normal curves (increasing current), returns where current rises above each threshold.
+    For inverted curves (decreasing current), returns where current falls below each threshold.
+
+    Args:
+        fitted_current: Fitted current values (normalized or unnormalized)
+        percent_threshold: Percentage (0 to 1) defining distance from min/max.
+            For example, 0.1 means thresholds at 10% and 90% of the range.
+
+    Returns:
+        Tuple of (cutoff_index, saturation_index) where:
+            - cutoff_index: Index where current enters the transition region from cutoff
+            - saturation_index: Index where current enters the saturation region
+    """
+    min_threshold = fitted_current.min() + percent_threshold * (
+        fitted_current.max() - fitted_current.min()
+    )
+    max_threshold = fitted_current.max() - percent_threshold * (
+        fitted_current.max() - fitted_current.min()
+    )
+
+    is_inverted = fitted_current[-1] < fitted_current[0]
+    return (
+        int(
+            np.argmax(
+                fitted_current <= min_threshold
+                if is_inverted
+                else fitted_current >= min_threshold
+            )
+        ),
+        int(
+            np.argmax(
+                fitted_current <= max_threshold
+                if is_inverted
+                else fitted_current >= max_threshold
+            )
+        ),
+    )
+
+
 def fit_pinchoff_parameters(
-    voltages: np.ndarray, currents: np.ndarray, sigma: float = 2.0
+    voltages: np.ndarray,
+    currents: np.ndarray,
+    sigma: float = 2.0,
+    percent_threshold: float | None = None,
 ) -> PinchoffFitResult:
     """Fit the pinchoff parameters a, b, c of the pinchoff curve, and returns
     the cut-off, transition, and conducting voltages.
@@ -214,6 +265,9 @@ def fit_pinchoff_parameters(
         voltages (np.ndarray): Input voltages
         currents (np.ndarray): Input currents
         sigma (float): Gaussian filter bandwidth for smoothing
+        percent_threshold (float | None): If provided, use threshold-based cutoff
+            instead of derivative-based. Value between 0 and 1 representing
+            percentage above baseline tail of the fitted curve.
 
     Returns:
         PinchoffFitResult containing fitted voltages and parameters
@@ -238,6 +292,11 @@ def fit_pinchoff_parameters(
     transition_v_ind, saturation_v_ind, cut_off_v_ind = derivative_extrema_indices(
         v_norm, i_fit
     )
+
+    if percent_threshold is not None:
+        cut_off_v_ind, saturation_v_ind = compute_indices_from_threshold(
+            i_fit, percent_threshold
+        )
 
     return PinchoffFitResult(
         v_cut_off=_map_index_to_voltage(cut_off_v_ind, voltages),
