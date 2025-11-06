@@ -20,6 +20,26 @@ from tests.conftest import (
 )
 
 
+@pytest.fixture
+def create_device():
+    """Fixture that returns a function to create a Device from a DeviceConfig."""
+    def _create_device(
+        device_config: DeviceConfig,
+        control_instrument: MockControlInstrument | None = None,
+        measurement_instrument: MockMeasurementInstrument | None = None,
+    ) -> Device:
+        """Create a Device instance from a DeviceConfig."""
+        channel_configs = generate_channel_configs(device_config)
+        return Device(
+            name=device_config.name,
+            device_config=device_config,
+            channel_configs=channel_configs,
+            control_instrument=control_instrument or MockControlInstrument(),
+            measurement_instrument=measurement_instrument or MockMeasurementInstrument(),
+        )
+    return _create_device
+
+
 def make_gpio(
     gpio_type: GPIOType = GPIOType.INPUT,
     control_channel: int | None = None,
@@ -37,7 +57,7 @@ def make_gpio(
     )
 
 
-def test_device_filter_by_group_basic():
+def test_device_filter_by_group_basic(create_device):
     """Test basic device filtering by group."""
     device_config = DeviceConfig(
         name="test_device",
@@ -58,15 +78,7 @@ def test_device_filter_by_group_basic():
         instruments=standard_instrument_configs(),
     )
 
-    channel_configs = generate_channel_configs(device_config)
-
-    device = Device(
-        name="test_device",
-        device_config=device_config,
-        channel_configs=channel_configs,
-        control_instrument=MockControlInstrument(),
-        measurement_instrument=MockMeasurementInstrument(),
-    )
+    device = create_device(device_config)
 
     # Filter by control group
     control_device = device.filter_by_group("control")
@@ -81,7 +93,7 @@ def test_device_filter_by_group_basic():
     assert sensor_device.name == "test_device_sensor"
 
 
-def test_device_filter_by_group_unknown_group():
+def test_device_filter_by_group_unknown_group(create_device):
     """Test that filtering by unknown group raises error."""
     device_config = DeviceConfig(
         name="test_device",
@@ -92,22 +104,14 @@ def test_device_filter_by_group_unknown_group():
         instruments=standard_instrument_configs(),
     )
 
-    channel_configs = generate_channel_configs(device_config)
-
-    device = Device(
-        name="test_device",
-        device_config=device_config,
-        channel_configs=channel_configs,
-        control_instrument=MockControlInstrument(),
-        measurement_instrument=MockMeasurementInstrument(),
-    )
+    device = create_device(device_config)
 
     # Try to filter by unknown group
     with pytest.raises(DeviceError, match="Group 'unknown' not found"):
         device.filter_by_group("unknown")
 
 
-def test_device_filter_by_group_shares_instruments():
+def test_device_filter_by_group_shares_instruments(create_device):
     """Test that filtered devices share the same instrument instances."""
     device_config = DeviceConfig(
         name="test_device",
@@ -124,18 +128,10 @@ def test_device_filter_by_group_shares_instruments():
         instruments=standard_instrument_configs(),
     )
 
-    channel_configs = generate_channel_configs(device_config)
-
     control_inst = MockControlInstrument()
     measure_inst = MockMeasurementInstrument()
 
-    device = Device(
-        name="test_device",
-        device_config=device_config,
-        channel_configs=channel_configs,
-        control_instrument=control_inst,
-        measurement_instrument=measure_inst,
-    )
+    device = create_device(device_config, control_inst, measure_inst)
 
     # Filter by groups
     control_device = device.filter_by_group("control")
@@ -148,7 +144,7 @@ def test_device_filter_by_group_shares_instruments():
     assert sensor_device.measurement_instrument is measure_inst
 
 
-def test_device_get_shared_gates():
+def test_device_get_shared_gates(create_device):
     """Test getting list of shared gates."""
     device_config = DeviceConfig(
         name="test_device",
@@ -167,22 +163,14 @@ def test_device_get_shared_gates():
         instruments=standard_instrument_configs(),
     )
 
-    channel_configs = generate_channel_configs(device_config)
-
-    device = Device(
-        name="test_device",
-        device_config=device_config,
-        channel_configs=channel_configs,
-        control_instrument=MockControlInstrument(),
-        measurement_instrument=MockMeasurementInstrument(),
-    )
+    device = create_device(device_config)
 
     # Check shared gates
     shared_gates = device.get_shared_gates()
     assert set(shared_gates) == {"RES1", "RES2"}
 
 
-def test_device_get_other_group_gates():
+def test_device_get_other_group_gates(create_device):
     """Test getting gates from other groups (excluding shared)."""
     device_config = DeviceConfig(
         name="test_device",
@@ -201,15 +189,7 @@ def test_device_get_other_group_gates():
         instruments=standard_instrument_configs(),
     )
 
-    channel_configs = generate_channel_configs(device_config)
-
-    device = Device(
-        name="test_device",
-        device_config=device_config,
-        channel_configs=channel_configs,
-        control_instrument=MockControlInstrument(),
-        measurement_instrument=MockMeasurementInstrument(),
-    )
+    device = create_device(device_config)
 
     # Get gates from other groups (not in control, not shared)
     other_gates = device.get_other_group_gates("control")
@@ -225,7 +205,7 @@ def test_device_get_other_group_gates():
 class TestConditionalFiltering:
     """Tests for conditional filtering of GPIOs and contacts."""
 
-    def test_group_with_omitted_gpios_includes_all_device_gpios(self):
+    def test_group_with_omitted_gpios_includes_all_device_gpios(self, create_device):
         """Test that when gpios are omitted from group, ALL device GPIOs are included."""
         device_config = DeviceConfig(
             name="test_device",
@@ -251,14 +231,7 @@ class TestConditionalFiltering:
             instruments=standard_instrument_configs(),
         )
 
-        channel_configs = generate_channel_configs(device_config)
-        device = Device(
-            name="test_device",
-            device_config=device_config,
-            channel_configs=channel_configs,
-            control_instrument=MockControlInstrument(),
-            measurement_instrument=MockMeasurementInstrument(),
-        )
+        device = create_device(device_config)
 
         # Filter by control group
         filtered_device = device.filter_by_group("control")
@@ -270,7 +243,7 @@ class TestConditionalFiltering:
         # Should include ALL device GPIOs (not specified, so all included)
         assert set(filtered_device.gpios) == {"A0", "A1", "A2", "VDD"}
 
-    def test_group_with_omitted_contacts_includes_all_device_contacts(self):
+    def test_group_with_omitted_contacts_includes_all_device_contacts(self, create_device):
         """Test that when contacts are omitted from group, ALL device contacts are included."""
         device_config = DeviceConfig(
             name="test_device",
@@ -294,14 +267,7 @@ class TestConditionalFiltering:
             instruments=standard_instrument_configs(),
         )
 
-        channel_configs = generate_channel_configs(device_config)
-        device = Device(
-            name="test_device",
-            device_config=device_config,
-            channel_configs=channel_configs,
-            control_instrument=MockControlInstrument(),
-            measurement_instrument=MockMeasurementInstrument(),
-        )
+        device = create_device(device_config)
 
         # Filter by control group
         filtered_device = device.filter_by_group("control")
@@ -313,7 +279,7 @@ class TestConditionalFiltering:
         # Should include ALL device contacts (not specified, so all included)
         assert set(filtered_device.contacts) == {"IN_A", "OUT_A", "OUT_B"}
 
-    def test_group_with_explicit_gpios_includes_only_specified(self):
+    def test_group_with_explicit_gpios_includes_only_specified(self, create_device):
         """Test that when gpios are explicitly specified, ONLY those are included."""
         device_config = DeviceConfig(
             name="test_device",
@@ -338,14 +304,7 @@ class TestConditionalFiltering:
             instruments=standard_instrument_configs(),
         )
 
-        channel_configs = generate_channel_configs(device_config)
-        device = Device(
-            name="test_device",
-            device_config=device_config,
-            channel_configs=channel_configs,
-            control_instrument=MockControlInstrument(),
-            measurement_instrument=MockMeasurementInstrument(),
-        )
+        device = create_device(device_config)
 
         # Filter by control group
         filtered_device = device.filter_by_group("control")
@@ -360,7 +319,7 @@ class TestConditionalFiltering:
         assert "A2" not in filtered_device.gpios
         assert "VSS" not in filtered_device.gpios
 
-    def test_group_with_explicit_contacts_includes_only_specified(self):
+    def test_group_with_explicit_contacts_includes_only_specified(self, create_device):
         """Test that when contacts are explicitly specified, ONLY those are included."""
         device_config = DeviceConfig(
             name="test_device",
@@ -385,14 +344,7 @@ class TestConditionalFiltering:
             instruments=standard_instrument_configs(),
         )
 
-        channel_configs = generate_channel_configs(device_config)
-        device = Device(
-            name="test_device",
-            device_config=device_config,
-            channel_configs=channel_configs,
-            control_instrument=MockControlInstrument(),
-            measurement_instrument=MockMeasurementInstrument(),
-        )
+        device = create_device(device_config)
 
         # Filter by control group
         filtered_device = device.filter_by_group("control")
@@ -405,7 +357,7 @@ class TestConditionalFiltering:
         # Should NOT include OUT_B
         assert "OUT_B" not in filtered_device.contacts
 
-    def test_group_with_empty_contacts_and_gpios_includes_none(self):
+    def test_group_with_empty_contacts_and_gpios_includes_none(self, create_device):
         """Test that when contacts and gpios are explicitly empty lists, NONE are included."""
         device_config = DeviceConfig(
             name="test_device",
@@ -431,14 +383,7 @@ class TestConditionalFiltering:
             instruments=standard_instrument_configs(),
         )
 
-        channel_configs = generate_channel_configs(device_config)
-        device = Device(
-            name="test_device",
-            device_config=device_config,
-            channel_configs=channel_configs,
-            control_instrument=MockControlInstrument(),
-            measurement_instrument=MockMeasurementInstrument(),
-        )
+        device = create_device(device_config)
 
         # Filter by control group
         filtered_device = device.filter_by_group("control")
@@ -458,7 +403,7 @@ class TestConditionalFiltering:
         assert "VSS" not in filtered_device.gpios
         assert "A0" not in filtered_device.gpios
 
-    def test_mixed_groups_different_filtering_behavior(self):
+    def test_mixed_groups_different_filtering_behavior(self, create_device):
         """Test mixed scenario: one group with explicit gpios, one without."""
         device_config = DeviceConfig(
             name="test_device",
@@ -487,14 +432,7 @@ class TestConditionalFiltering:
             instruments=standard_instrument_configs(),
         )
 
-        channel_configs = generate_channel_configs(device_config)
-        device = Device(
-            name="test_device",
-            device_config=device_config,
-            channel_configs=channel_configs,
-            control_instrument=MockControlInstrument(),
-            measurement_instrument=MockMeasurementInstrument(),
-        )
+        device = create_device(device_config)
 
         # Filter by control group
         control_device = device.filter_by_group("control")
@@ -508,7 +446,7 @@ class TestConditionalFiltering:
         assert set(sensor_device.gpios) == {"A0", "A1", "VDD", "VSS"}  # All (omitted)
         assert set(sensor_device.contacts) == {"OUT_B"}  # Only specified
 
-    def test_gates_always_filter_explicitly(self):
+    def test_gates_always_filter_explicitly(self, create_device):
         """Test that gates ALWAYS filter explicitly regardless of omission."""
         device_config = DeviceConfig(
             name="test_device",
@@ -531,14 +469,7 @@ class TestConditionalFiltering:
             instruments=standard_instrument_configs(),
         )
 
-        channel_configs = generate_channel_configs(device_config)
-        device = Device(
-            name="test_device",
-            device_config=device_config,
-            channel_configs=channel_configs,
-            control_instrument=MockControlInstrument(),
-            measurement_instrument=MockMeasurementInstrument(),
-        )
+        device = create_device(device_config)
 
         # Filter by control group
         filtered_device = device.filter_by_group("control")
@@ -551,7 +482,7 @@ class TestConditionalFiltering:
         assert set(filtered_device.contacts) == {"IN"}
         assert set(filtered_device.gpios) == {"VDD"}
 
-    def test_gpios_can_be_explicitly_shared_between_groups(self):
+    def test_gpios_can_be_explicitly_shared_between_groups(self, create_device):
         """Test that GPIOs can be explicitly listed in multiple groups (like contacts)."""
         device_config = DeviceConfig(
             name="test_device",
@@ -576,14 +507,7 @@ class TestConditionalFiltering:
             instruments=standard_instrument_configs(),
         )
 
-        channel_configs = generate_channel_configs(device_config)
-        device = Device(
-            name="test_device",
-            device_config=device_config,
-            channel_configs=channel_configs,
-            control_instrument=MockControlInstrument(),
-            measurement_instrument=MockMeasurementInstrument(),
-        )
+        device = create_device(device_config)
 
         # Filter by control group
         control_device = device.filter_by_group("control")
@@ -617,7 +541,7 @@ class TestConditionalFiltering:
                 instruments=standard_instrument_configs(),
             )
 
-    def test_reservoir_gates_can_be_shared(self):
+    def test_reservoir_gates_can_be_shared(self, create_device):
         """Test that RESERVOIR gates can be explicitly shared between groups."""
         device_config = DeviceConfig(
             name="test_device",
@@ -635,14 +559,7 @@ class TestConditionalFiltering:
             instruments=standard_instrument_configs(),
         )
 
-        channel_configs = generate_channel_configs(device_config)
-        device = Device(
-            name="test_device",
-            device_config=device_config,
-            channel_configs=channel_configs,
-            control_instrument=MockControlInstrument(),
-            measurement_instrument=MockMeasurementInstrument(),
-        )
+        device = create_device(device_config)
 
         # Filter by control group
         control_device = device.filter_by_group("control")
@@ -652,7 +569,7 @@ class TestConditionalFiltering:
         sensor_device = device.filter_by_group("sensor")
         assert set(sensor_device.gates) == {"G2", "RES1"}
 
-    def test_contacts_can_be_explicitly_shared_between_groups(self):
+    def test_contacts_can_be_explicitly_shared_between_groups(self, create_device):
         """Test that contacts can be explicitly listed in multiple groups."""
         device_config = DeviceConfig(
             name="test_device",
@@ -675,14 +592,7 @@ class TestConditionalFiltering:
             instruments=standard_instrument_configs(),
         )
 
-        channel_configs = generate_channel_configs(device_config)
-        device = Device(
-            name="test_device",
-            device_config=device_config,
-            channel_configs=channel_configs,
-            control_instrument=MockControlInstrument(),
-            measurement_instrument=MockMeasurementInstrument(),
-        )
+        device = create_device(device_config)
 
         # Filter by control group
         control_device = device.filter_by_group("control")
