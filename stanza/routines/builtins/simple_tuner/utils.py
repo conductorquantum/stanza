@@ -1,7 +1,10 @@
 from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
 from numpy.typing import NDArray
+
+from stanza.models import GateType
 
 
 @dataclass
@@ -22,6 +25,27 @@ class GateIndices:
     plunger: list[int]
     reservoir: list[int]
     barrier: list[int]
+
+
+def build_gate_indices(gates: list[str], device: Any) -> GateIndices:  # noqa: ANN401
+    """Extract indices for each gate type from the gate list.
+
+    Args:
+        gates: List of gate electrode names
+        device: Device instance with get_gate_by_type method
+
+    Returns:
+        GateIndices with plunger, reservoir, and barrier indices
+    """
+    plunger_gates = device.get_gate_by_type(GateType.PLUNGER)
+    reservoir_gates = device.get_gate_by_type(GateType.RESERVOIR)
+    barrier_gates = device.get_gate_by_type(GateType.BARRIER)
+
+    return GateIndices(
+        plunger=[i for i, g in enumerate(gates) if g in plunger_gates],
+        reservoir=[i for i, g in enumerate(gates) if g in reservoir_gates],
+        barrier=[i for i, g in enumerate(gates) if g in barrier_gates],
+    )
 
 
 def generate_linear_sweep(
@@ -116,6 +140,42 @@ def build_voltage_array(
         voltages[:, idx] = reservoir_voltages[gates[idx]]
     for idx in gate_idx.barrier:
         voltages[:, idx] = barrier_voltages[gates[idx]]
+
+    return voltages
+
+
+def build_full_voltages(
+    sweep_voltages: NDArray[np.float64],
+    gates: list[str],
+    gate_idx: GateIndices,
+    reservoir_voltages: dict[str, float],
+    barrier_voltages: dict[str, float],
+) -> NDArray[np.float64]:
+    """Construct full voltage array from plunger sweep voltages.
+
+    Works with arbitrary-dimensional sweep arrays (1D, 2D, 3D, etc).
+
+    Args:
+        sweep_voltages: (..., 2) array of plunger voltages
+        gates: List of all gate names
+        gate_idx: Indices for each gate type
+        reservoir_voltages: Fixed voltages for reservoir gates
+        barrier_voltages: Fixed voltages for barrier gates
+
+    Returns:
+        (..., num_gates) array of voltages
+    """
+    shape = sweep_voltages.shape[:-1]  # All dims except last (plunger coords)
+    voltages = np.zeros(shape + (len(gates),))
+
+    # Plunger voltages
+    voltages[..., gate_idx.plunger] = sweep_voltages
+
+    # Fixed voltages
+    for idx in gate_idx.reservoir:
+        voltages[..., idx] = reservoir_voltages[gates[idx]]
+    for idx in gate_idx.barrier:
+        voltages[..., idx] = barrier_voltages[gates[idx]]
 
     return voltages
 
