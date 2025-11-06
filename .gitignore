@@ -37,3 +37,6 @@ uv.lock
 # AI Code Generation
 CLAUDE.md
 AGENTS.md
+temp/
+logs/
+data/

@@ -316,7 +316,7 @@ def global_accumulation(
 
     ctx.resources.device.jump({bias_gate: bias_voltage}, wait_for_settling=True)
 
-    num_points = max(2, int(voltage_bound / step_size))
+    num_points = max(2, int(abs(voltage_bound) / step_size))
     sweep_voltages = np.linspace(0, voltage_bound, num_points)
     _, currents = ctx.resources.device.sweep_all(
         voltages=sweep_voltages,
@@ -415,7 +415,7 @@ def reservoir_characterization(
 
     max_safe_voltage_bound = leakage_test_results["max_safe_voltage_bound"]
     min_safe_voltage_bound = leakage_test_results["min_safe_voltage_bound"]
-
+    print(f"max_safe_voltage_bound: {max_safe_voltage_bound}, min_safe_voltage_bound: {min_safe_voltage_bound}")
     voltage_left_bound = (
         0.1 * min_safe_voltage_bound
         if charge_carrier_type == "electron"
