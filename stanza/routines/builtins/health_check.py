@@ -522,8 +522,8 @@ def finger_gate_characterization(
     Notes:
         - Each finger gate is tested sequentially
         - Other finger gates are biased at min(1.2 * global_turn_on_voltage, max_voltage_bound)
-        - Target gate starts at 0V before sweeping
-        - 10 second settling time is used after setting target gate to 0V
+        - Target gate starts at voltage_left_bound before sweeping
+        - 10 second settling time is used after setting target gate to voltage_left_bound
         - Pinch-off analysis may raise ValueError if curve fit fails
         - Sweep direction depends on carrier type: electrons sweep toward positive, holes toward negative
     """
@@ -554,26 +554,22 @@ def finger_gate_characterization(
         if charge_carrier_type == "electron"
         else min_safe_voltage_bound
     )
-    voltage_cut_off = 1.2 * global_accumulation_results["global_turn_on_voltage"]
-
-    global_turn_on_voltage = (
-        min(voltage_cut_off, max_safe_voltage_bound)
-        if charge_carrier_type == "electron"
-        else max(voltage_cut_off, min_safe_voltage_bound)
-    )
+    global_turn_on_voltage = global_accumulation_results["global_turn_on_voltage"]
 
     finger_gate_characterization_results = {}
 
     plunger_gates = ctx.resources.device.get_gates_by_type(GateType.PLUNGER)
     barrier_gates = ctx.resources.device.get_gates_by_type(GateType.BARRIER)
+    reservoirs = ctx.resources.device.get_gates_by_type(GateType.RESERVOIR)
     finger_gates = plunger_gates + barrier_gates
+    gates_to_accumulate = finger_gates + reservoirs 
 
     for gate in finger_gates:
-        other_gates = [g for g in finger_gates if g != gate]
+        other_gates = [g for g in gates_to_accumulate if g != gate]
         ctx.resources.device.jump(
             dict.fromkeys(other_gates, global_turn_on_voltage), wait_for_settling=True
-        )
-        ctx.resources.device.jump({gate: 0.0}, wait_for_settling=True)
+        ) # Make sure the other gates are accumulated before sweeping the finger gate
+        ctx.resources.device.jump({gate: voltage_left_bound}, wait_for_settling=True)
         time.sleep(DEFAULT_SETTLING_TIME_S)
         num_points = max(2, int(abs(voltage_right_bound / step_size)))
         voltages, currents = ctx.resources.device.sweep_1d(
