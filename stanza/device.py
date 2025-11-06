@@ -323,11 +323,11 @@ class Device:
             if group_name != current_group:
                 other_group_gates.update(group.gates)
 
-        # Gates to zero: in other groups, NOT in current group, and controllable
+        # Gates in other groups, NOT in current group, and controllable
         control_gate_set = set(self.control_gates)
-        gates_to_zero = (other_group_gates - current_group_gates) & control_gate_set
+        gates_to_return = (other_group_gates - current_group_gates) & control_gate_set
 
-        return list(gates_to_zero)
+        return list(gates_to_return)
 
     def zero_gates(self, gate_list: list[str]) -> None:
         """Set specific gates to 0V.
@@ -568,7 +568,6 @@ class Device:
         voltages: list[float],
         measure_electrode: str,
         session: LoggerSession | None = None,
-        settling_time: float = 0.1,
     ) -> tuple[list[float], list[float]]:
         """Sweep a single gate electrode and measure the current of a single contact electrode.
 
@@ -582,10 +581,6 @@ class Device:
             measure_electrode: Name of the contact electrode to measure current from
             session: Optional LoggerSession to log the sweep data. If provided,
                 sweep results will be logged with metadata.
-            settling_time: Additional fixed settling time (seconds) to wait after each
-                voltage step for device physics to stabilize. The voltage ramp time is
-                automatically calculated. Default is 0.1 seconds. Set to 0 for faster
-                sweeps (may have transient artifacts).
 
         Returns:
             Tuple of (voltage_measurements, current_measurements) where:
@@ -599,8 +594,6 @@ class Device:
             # No logging - just collect data
             for voltage in voltages:
                 self.jump({gate_electrode: voltage}, wait_for_settling=True)
-                if settling_time > 0:
-                    time.sleep(settling_time)
                 v_actual = self.check(gate_electrode)
                 i_measured = self.measure(measure_electrode)
                 voltage_measurements.append(v_actual)
@@ -618,8 +611,6 @@ class Device:
                     self.jump(
                         {gate_electrode: voltage}, wait_for_settling=True
                     )
-                    if settling_time > 0:
-                        time.sleep(settling_time)
                     v_actual = self.check(gate_electrode)
                     i_measured = self.measure(measure_electrode)
                     voltage_measurements.append(v_actual)
@@ -706,7 +697,6 @@ class Device:
         voltages: list[float],
         measure_electrode: str,
         session: LoggerSession | None = None,
-        settling_time: float = 0.1,
     ) -> tuple[list[list[float]], list[float]]:
         """Sweep all gate electrodes and measure the current of a single contact electrode.
 
@@ -719,10 +709,6 @@ class Device:
             measure_electrode: Name of the contact electrode to measure current from
             session: Optional LoggerSession to log the sweep data. If provided,
                 sweep results will be logged with metadata.
-            settling_time: Additional fixed settling time (seconds) to wait after each
-                voltage step for device physics to stabilize. The voltage ramp time is
-                automatically calculated. Default is 0.1 seconds. Set to 0 for faster
-                sweeps (may have transient artifacts).
 
         Returns:
             Tuple of (voltage_measurements, current_measurements) where:
@@ -740,8 +726,7 @@ class Device:
                     dict.fromkeys(self.control_gates, voltage),
                     wait_for_settling=True,
                 )
-                if settling_time > 0:
-                    time.sleep(settling_time)
+
                 i_measured = self.measure(measure_electrode)
                 voltage_measurements.append([voltage])
                 current_measurements.append(i_measured)
@@ -759,8 +744,7 @@ class Device:
                         dict.fromkeys(self.control_gates, voltage),
                         wait_for_settling=True,
                     )
-                    if settling_time > 0:
-                        time.sleep(settling_time)
+
                     i_measured = self.measure(measure_electrode)
                     voltage_measurements.append([voltage])
                     current_measurements.append(i_measured)
@@ -799,11 +783,10 @@ class Device:
         voltage_measurements = []
         current_measurements = []
 
-        for i, voltage in enumerate(voltages):
-            should_settle = i == 0
+        for voltage in voltages:
             self.jump(
                 dict(zip(gate_electrodes, voltage, strict=True)),
-                wait_for_settling=should_settle,
+                wait_for_settling=True,
             )
 
             voltage_measurements.append(

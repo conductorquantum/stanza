@@ -137,6 +137,7 @@ def test_device_config_unique_channels():
 
 
 def test_device_config_groups_require_known_pads():
+    """Test that device config groups must reference existing gates, contacts, and gpios."""
     gate = Gate(
         type=GateType.PLUNGER,
         control_channel=1,
@@ -211,6 +212,7 @@ def test_device_config_groups_require_known_pads():
 
 
 def test_device_config_groups_enforce_unique_assignments():
+    """Test that gates cannot be shared between groups, but contacts and gpios can be shared."""
     gate = Gate(
         type=GateType.PLUNGER,
         control_channel=1,

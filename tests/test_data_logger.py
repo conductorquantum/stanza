@@ -479,6 +479,7 @@ class TestDataLogger:
             assert len(logger.active_sessions) == 0
 
     def test_creates_session_with_group_name(self):
+        """Test that creating a session with a group_name appends the group name to the session ID and stores it in metadata."""
         with tempfile.TemporaryDirectory() as tmpdir:
             logger = DataLogger(
                 routine_name="test_routine",
@@ -492,6 +493,7 @@ class TestDataLogger:
             logger.close_session(session.session_id)
 
     def test_creates_session_without_group_name(self):
+        """Test that creating a session without a group_name uses the session_id as-is and sets group_name to None in metadata."""
         with tempfile.TemporaryDirectory() as tmpdir:
             logger = DataLogger(
                 routine_name="test_routine",
@@ -505,6 +507,7 @@ class TestDataLogger:
             logger.close_session(session.session_id)
 
     def test_group_name_included_in_directory_path(self):
+        """Test that when a group_name is provided, the session directory path includes the group name as a suffix."""
         with tempfile.TemporaryDirectory() as tmpdir:
             logger = DataLogger(
                 routine_name="test_routine",
@@ -524,6 +527,7 @@ class TestDataLogger:
             logger.close_session(session.session_id)
 
     def test_group_name_persisted_in_session_metadata(self):
+        """Test that the group_name is correctly persisted in the session metadata JSON file after closing the session."""
         with tempfile.TemporaryDirectory() as tmpdir:
             logger = DataLogger(
                 routine_name="test_routine",
@@ -542,6 +546,7 @@ class TestDataLogger:
             assert metadata["session_id"] == "my_routine_control"
 
     def test_multiple_sessions_with_different_groups(self):
+        """Test that multiple sessions with the same session_id but different group_names create separate directories and data files."""
         with tempfile.TemporaryDirectory() as tmpdir:
             logger = DataLogger(
                 routine_name="test_routine",
