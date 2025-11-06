@@ -191,6 +191,11 @@ class Device:
         that belong to the specified group. All Device properties (e.g., .gates, .contacts,
         .control_gates) will automatically respect this filtering.
 
+        Filtering behavior:
+        - Gates: Always explicitly filtered (only listed gates included)
+        - Contacts: If specified in group, only those contacts. If omitted, ALL device contacts.
+        - GPIOs: If specified in group, only those GPIOs. If omitted, ALL device GPIOs.
+
         Args:
             group_name: Name of the group to filter by. Must exist in device_config.groups.
 
@@ -201,13 +206,44 @@ class Device:
             DeviceError: If the specified group does not exist.
 
         Example:
+            >>> # Group with explicit GPIO list
             >>> control_device = device.filter_by_group("control")
-            >>> control_device.gates  # Returns only gates in "control" group
+            >>> control_device.gpios  # Returns only ["MUX1"] if specified in group
+
+            >>> # Group without GPIO field
+            >>> sensor_device = device.filter_by_group("sensor")
+            >>> sensor_device.gpios  # Returns ALL device GPIOs
         """
         group = self._get_group(group_name)
 
-        # Collect all pad names that belong to this group
-        group_pad_names = set(group.gates + group.contacts + group.gpios)
+        # Gates: always explicitly filter
+        group_pad_names = set(group.gates)
+
+        # Contacts: conditional filtering
+        if "contacts" in group.model_fields_set:
+            # User explicitly specified contacts - include ONLY these
+            group_pad_names.update(group.contacts)
+        else:
+            # User didn't specify contacts - include ALL device contacts
+            all_contacts = [
+                name
+                for name, config in self.channel_configs.items()
+                if config.pad_type == PadType.CONTACT
+            ]
+            group_pad_names.update(all_contacts)
+
+        # GPIOs: conditional filtering
+        if "gpios" in group.model_fields_set:
+            # User explicitly specified gpios - include ONLY these
+            group_pad_names.update(group.gpios)
+        else:
+            # User didn't specify gpios - include ALL device GPIOs
+            all_gpios = [
+                name
+                for name, config in self.channel_configs.items()
+                if config.pad_type == PadType.GPIO
+            ]
+            group_pad_names.update(all_gpios)
 
         # Filter channel_configs to only include group members
         filtered_channel_configs = {
@@ -251,33 +287,35 @@ class Device:
         return [gate for gate, count in gate_group_count.items() if count > 1]
 
     def get_other_group_gates(self, current_group: str) -> list[str]:
-        """Get list of non-shared gates from groups other than the current group.
+        """Get list of gates from other groups that should be zeroed.
+
+        This method respects conditional filtering:
+        - Gates are ALWAYS explicitly filtered (only listed gates accessible)
+        - Contacts/GPIOs with conditional filtering are NOT zeroed (if omitted, all are accessible)
 
         Args:
-            current_group: Name of the current group to exclude.
+            current_group: Name of the current group.
 
         Returns:
-            List of gate names that belong to other groups but are NOT shared
-            (i.e., not in the current group).
+            List of gate names from other groups that are NOT accessible to current group
+            and can be safely zeroed.
 
         Raises:
             DeviceError: If the specified group does not exist.
 
         Example:
             >>> other_gates = device.get_other_group_gates("control")
-            >>> # Returns sensor group gates that aren't shared with control
+            >>> # Returns gates that are exclusively in other groups
         """
         if not self.device_config.groups:
             return []
 
         # Validate group exists
-        _ = self._get_group(current_group)
+        current_group_obj = self._get_group(current_group)
 
-        # Get shared gates (should not be zeroed)
-        shared_gates = set(self.get_shared_gates())
-
-        # Get gates from current group
-        current_group_gates = set(self.group_gates(current_group))
+        # Get all gates that ARE accessible to current group
+        # Gates are always explicitly filtered, so only listed gates are accessible
+        current_group_gates = set(current_group_obj.gates)
 
         # Get all gates from other groups
         other_group_gates = set()
@@ -285,16 +323,11 @@ class Device:
             if group_name != current_group:
                 other_group_gates.update(group.gates)
 
-        # Return gates that are:
-        # - In other groups
-        # - NOT shared
-        # - Have control channels (can be controlled)
+        # Gates to zero: in other groups, NOT in current group, and controllable
         control_gate_set = set(self.control_gates)
-        result = (
-            other_group_gates - current_group_gates - shared_gates
-        ) & control_gate_set
+        gates_to_zero = (other_group_gates - current_group_gates) & control_gate_set
 
-        return list(result)
+        return list(gates_to_zero)
 
     def zero_gates(self, gate_list: list[str]) -> None:
         """Set specific gates to 0V.
@@ -535,6 +568,7 @@ class Device:
         voltages: list[float],
         measure_electrode: str,
         session: LoggerSession | None = None,
+        settling_time: float = 0.1,
     ) -> tuple[list[float], list[float]]:
         """Sweep a single gate electrode and measure the current of a single contact electrode.
 
@@ -548,6 +582,10 @@ class Device:
             measure_electrode: Name of the contact electrode to measure current from
             session: Optional LoggerSession to log the sweep data. If provided,
                 sweep results will be logged with metadata.
+            settling_time: Additional fixed settling time (seconds) to wait after each
+                voltage step for device physics to stabilize. The voltage ramp time is
+                automatically calculated. Default is 0.1 seconds. Set to 0 for faster
+                sweeps (may have transient artifacts).
 
         Returns:
             Tuple of (voltage_measurements, current_measurements) where:
@@ -559,9 +597,10 @@ class Device:
 
         if session is None:
             # No logging - just collect data
-            for i, voltage in enumerate(voltages):
-                should_settle = i == 0
-                self.jump({gate_electrode: voltage}, wait_for_settling=should_settle)
+            for voltage in voltages:
+                self.jump({gate_electrode: voltage}, wait_for_settling=True)
+                if settling_time > 0:
+                    time.sleep(settling_time)
                 v_actual = self.check(gate_electrode)
                 i_measured = self.measure(measure_electrode)
                 voltage_measurements.append(v_actual)
@@ -575,11 +614,12 @@ class Device:
             with session.sweep(
                 f"{gate_electrode} sweep", "Voltage", "Current", metadata=metadata
             ) as s:
-                for i, voltage in enumerate(voltages):
-                    should_settle = i == 0
+                for voltage in voltages:
                     self.jump(
-                        {gate_electrode: voltage}, wait_for_settling=should_settle
+                        {gate_electrode: voltage}, wait_for_settling=True
                     )
+                    if settling_time > 0:
+                        time.sleep(settling_time)
                     v_actual = self.check(gate_electrode)
                     i_measured = self.measure(measure_electrode)
                     voltage_measurements.append(v_actual)
@@ -623,12 +663,11 @@ class Device:
 
         if session is None:
             # No logging - just collect data
-            for i, voltage_1 in enumerate(voltages_1):
-                for j, voltage_2 in enumerate(voltages_2):
-                    should_settle = i == 0 and j == 0
+            for voltage_1 in voltages_1:
+                for voltage_2 in voltages_2:
                     self.jump(
                         {gate_1: voltage_1, gate_2: voltage_2},
-                        wait_for_settling=should_settle,
+                        wait_for_settling=True,
                     )
                     v1_actual = self.check(gate_1)
                     v2_actual = self.check(gate_2)
@@ -647,12 +686,11 @@ class Device:
                 "Current",
                 metadata=metadata,
             ) as s:
-                for i, voltage_1 in enumerate(voltages_1):
-                    for j, voltage_2 in enumerate(voltages_2):
-                        should_settle = i == 0 and j == 0
+                for voltage_1 in voltages_1:
+                    for voltage_2 in voltages_2:
                         self.jump(
                             {gate_1: voltage_1, gate_2: voltage_2},
-                            wait_for_settling=should_settle,
+                            wait_for_settling=True,
                         )
                         v1_actual = self.check(gate_1)
                         v2_actual = self.check(gate_2)
@@ -668,6 +706,7 @@ class Device:
         voltages: list[float],
         measure_electrode: str,
         session: LoggerSession | None = None,
+        settling_time: float = 0.1,
     ) -> tuple[list[list[float]], list[float]]:
         """Sweep all gate electrodes and measure the current of a single contact electrode.
 
@@ -680,6 +719,10 @@ class Device:
             measure_electrode: Name of the contact electrode to measure current from
             session: Optional LoggerSession to log the sweep data. If provided,
                 sweep results will be logged with metadata.
+            settling_time: Additional fixed settling time (seconds) to wait after each
+                voltage step for device physics to stabilize. The voltage ramp time is
+                automatically calculated. Default is 0.1 seconds. Set to 0 for faster
+                sweeps (may have transient artifacts).
 
         Returns:
             Tuple of (voltage_measurements, current_measurements) where:
@@ -692,12 +735,13 @@ class Device:
 
         if session is None:
             # No logging - just collect data
-            for i, voltage in enumerate(voltages):
-                should_settle = i == 0
+            for voltage in voltages:
                 self.jump(
                     dict.fromkeys(self.control_gates, voltage),
-                    wait_for_settling=should_settle,
+                    wait_for_settling=True,
                 )
+                if settling_time > 0:
+                    time.sleep(settling_time)
                 i_measured = self.measure(measure_electrode)
                 voltage_measurements.append([voltage])
                 current_measurements.append(i_measured)
@@ -710,12 +754,13 @@ class Device:
             with session.sweep(
                 "all gates sweep", "Voltage", "Current", metadata=metadata
             ) as s:
-                for i, voltage in enumerate(voltages):
-                    should_settle = i == 0
+                for voltage in voltages:
                     self.jump(
                         dict.fromkeys(self.control_gates, voltage),
-                        wait_for_settling=should_settle,
+                        wait_for_settling=True,
                     )
+                    if settling_time > 0:
+                        time.sleep(settling_time)
                     i_measured = self.measure(measure_electrode)
                     voltage_measurements.append([voltage])
                     current_measurements.append(i_measured)

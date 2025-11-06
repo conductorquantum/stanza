@@ -279,22 +279,22 @@ def test_device_config_groups_enforce_unique_assignments():
     assert shared_contact_device.groups["control"].contacts == ["c1"]
     assert shared_contact_device.groups["sensor"].contacts == ["c1"]
 
-    with pytest.raises(
-        ValueError,
-        match="GPIO 'gpio1' referenced by group 'sensor' already assigned to group 'control'",
-    ):
-        DeviceConfig(
-            name="test_device",
-            gates={"g1": gate},
-            contacts={"c1": contact},
-            gpios={"gpio1": gpio},
-            groups={
-                "control": {"gpios": ["gpio1"]},
-                "sensor": {"gpios": ["gpio1"]},
-            },
-            routines=[routine],
-            instruments=[control_instrument, measurement_instrument],
-        )
+    # GPIOs can also be shared between groups (like contacts)
+    shared_gpio_device = DeviceConfig(
+        name="test_device",
+        gates={"g1": gate},
+        contacts={"c1": contact},
+        gpios={"gpio1": gpio},
+        groups={
+            "control": {"gpios": ["gpio1"]},
+            "sensor": {"gpios": ["gpio1"]},
+        },
+        routines=[routine],
+        instruments=[control_instrument, measurement_instrument],
+    )
+
+    assert shared_gpio_device.groups["control"].gpios == ["gpio1"]
+    assert shared_gpio_device.groups["sensor"].gpios == ["gpio1"]
 
 
 def test_device_config_required_instruments():

@@ -4,7 +4,7 @@ import pytest
 
 from stanza.device import Device
 from stanza.exceptions import DeviceError
-from stanza.models import DeviceConfig, DeviceGroup, GateType
+from stanza.models import ContactType, DeviceConfig, DeviceGroup, GateType
 from stanza.routines import (
     RoutineContext,
     RoutineRunner,
@@ -15,6 +15,7 @@ from stanza.utils import generate_channel_configs
 from tests.conftest import (
     MockControlInstrument,
     MockMeasurementInstrument,
+    make_contact,
     make_gate,
     standard_instrument_configs,
 )
@@ -260,6 +261,102 @@ class TestZeroOtherGroupsParameter:
             "Failed to zero other group gates" in record.message
             for record in caplog.records
         )
+
+    def test_zero_other_groups_respects_conditional_filtering(
+        self, registry_fixture
+    ):
+        """Test that zero_other_groups respects conditional filtering logic.
+
+        When GPIOs/contacts are omitted from group definition, they are accessible
+        to all groups (conditional filtering). Therefore, they should NOT be zeroed
+        by zero_other_groups.
+        """
+        from stanza.models import GPIO, GPIOType
+
+        # Create device with gates, contacts, and GPIOs
+        device_config = DeviceConfig(
+            name="device",
+            gates={
+                "G1": make_gate(GateType.PLUNGER, control_channel=1),
+                "G2": make_gate(GateType.BARRIER, control_channel=2),
+                "G3": make_gate(GateType.PLUNGER, control_channel=3),
+                "G4": make_gate(GateType.BARRIER, control_channel=4),
+            },
+            contacts={
+                "IN": make_contact(ContactType.SOURCE, measure_channel=1),
+                "OUT_A": make_contact(ContactType.DRAIN, measure_channel=2),
+                "OUT_B": make_contact(ContactType.DRAIN, measure_channel=3),
+            },
+            gpios={
+                "VDD": GPIO(
+                    type=GPIOType.INPUT,
+                    control_channel=10,
+                    v_lower_bound=-3.0,
+                    v_upper_bound=3.0,
+                ),
+                "VSS": GPIO(
+                    type=GPIOType.INPUT,
+                    control_channel=11,
+                    v_lower_bound=-3.0,
+                    v_upper_bound=3.0,
+                ),
+            },
+            groups={
+                # control group: omits gpios and contacts (conditional filtering)
+                "control": DeviceGroup(gates=["G1", "G2"]),
+                # sensor group: omits gpios and contacts (conditional filtering)
+                "sensor": DeviceGroup(gates=["G3", "G4"]),
+            },
+            routines=[],
+            instruments=standard_instrument_configs(),
+        )
+
+        channel_configs = generate_channel_configs(device_config)
+        control_inst = MockControlInstrument()
+        measure_inst = MockMeasurementInstrument()
+
+        device = Device(
+            name="device",
+            device_config=device_config,
+            channel_configs=channel_configs,
+            control_instrument=control_inst,
+            measurement_instrument=measure_inst,
+        )
+
+        runner = RoutineRunner(resources=[device])
+
+        # Set initial voltages on all pads
+        device.jump(
+            {
+                "G1": 0.5,
+                "G2": 0.5,
+                "G3": 0.5,
+                "G4": 0.5,
+                "VDD": 1.5,
+                "VSS": -1.5,
+            }
+        )
+
+        @routine(name="test_routine")
+        def simple_routine(ctx: RoutineContext, **kwargs) -> dict:
+            return {}
+
+        # Run with control group and zero_other_groups=True
+        runner.run("test_routine", __group__="control", zero_other_groups=True)
+
+        # Gates from sensor group should be zeroed
+        assert control_inst.voltages["G3"] == 0.0
+        assert control_inst.voltages["G4"] == 0.0
+
+        # Gates from control group should NOT be zeroed
+        assert control_inst.voltages["G1"] == 0.5
+        assert control_inst.voltages["G2"] == 0.5
+
+        # GPIOs should NOT be zeroed (accessible to control group via conditional filtering)
+        assert control_inst.voltages["VDD"] == 1.5
+        assert control_inst.voltages["VSS"] == -1.5
+
+        # Note: Contacts don't have control channels in this test, so they can't be zeroed
 
 
 class TestDeviceRestoration:

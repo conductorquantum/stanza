@@ -417,7 +417,7 @@ def reservoir_characterization(
     min_safe_voltage_bound = leakage_test_results["min_safe_voltage_bound"]
 
     voltage_left_bound = (
-        0.1 * min_safe_voltage_bound
+        min_safe_voltage_bound
         if charge_carrier_type == "electron"
         else max_safe_voltage_bound
     )
@@ -545,7 +545,7 @@ def finger_gate_characterization(
     min_safe_voltage_bound = leakage_test_results["min_safe_voltage_bound"]
 
     voltage_left_bound = (
-        0.1 * min_safe_voltage_bound
+        min_safe_voltage_bound
         if charge_carrier_type == "electron"
         else max_safe_voltage_bound
     )

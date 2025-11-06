@@ -311,7 +311,7 @@ class DeviceConfig(BaseModel):
 
         gate_assignments: dict[str, str | list[str]] = {}
         contact_assignments: dict[str, list[str]] = {}
-        gpio_assignments: dict[str, str] = {}
+        gpio_assignments: dict[str, list[str]] = {}
 
         for group_name, group in self.groups.items():
             for gate in group.gates:
@@ -353,11 +353,14 @@ class DeviceConfig(BaseModel):
                     raise ValueError(
                         f"Group '{group_name}' references unknown gpio '{gpio}'"
                     )
+                # Allow GPIOs to be shared between groups (like contacts)
+                # This is consistent with conditional filtering where omitted GPIOs
+                # are available to all groups
                 if gpio in gpio_assignments:
-                    raise ValueError(
-                        f"GPIO '{gpio}' referenced by group '{group_name}' already assigned to group '{gpio_assignments[gpio]}'"
-                    )
-                gpio_assignments[gpio] = group_name
+                    if group_name not in gpio_assignments[gpio]:
+                        gpio_assignments[gpio].append(group_name)
+                else:
+                    gpio_assignments[gpio] = [group_name]
 
         return self
 

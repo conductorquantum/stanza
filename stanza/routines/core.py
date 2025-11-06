@@ -386,12 +386,25 @@ class RoutineRunner:
             parent_params: Parameters from parent routine to inherit
         """
         if routine_config.name in _routine_registry:
+            # Extract group from routine_config if present
+            group_override = {}
+            if hasattr(routine_config, "group") and routine_config.group is not None:
+                group_override["__group__"] = routine_config.group
+
             if parent_params:
-                merged = {**parent_params, **(routine_config.parameters or {})}
+                merged = {**parent_params, **(routine_config.parameters or {}), **group_override}
                 result = self.run(routine_config.name, **merged)
             else:
-                result = self.run(routine_config.name)
-            results[routine_config.name] = result
+                # Merge config parameters with group override
+                merged = {**(routine_config.parameters or {}), **group_override}
+                if merged:
+                    result = self.run(routine_config.name, **merged)
+                else:
+                    result = self.run(routine_config.name)
+
+            # Store result with unique key if there's a group
+            result_key = f"{routine_config.name}_{routine_config.group}" if hasattr(routine_config, "group") and routine_config.group else routine_config.name
+            results[result_key] = result
 
         if routine_config.routines:
             current_params = routine_config.parameters or {}
