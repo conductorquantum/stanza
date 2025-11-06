@@ -405,6 +405,59 @@ class TestConditionalFiltering:
         # Should NOT include OUT_B
         assert "OUT_B" not in filtered_device.contacts
 
+    def test_group_with_empty_contacts_and_gpios_includes_none(self):
+        """Test that when contacts and gpios are explicitly empty lists, NONE are included."""
+        device_config = DeviceConfig(
+            name="test_device",
+            gates={
+                "G1": make_gate(GateType.PLUNGER, control_channel=1),
+                "G2": make_gate(GateType.BARRIER, control_channel=2),
+            },
+            contacts={
+                "IN": make_contact(ContactType.SOURCE, measure_channel=1),
+                "OUT_A": make_contact(ContactType.DRAIN, measure_channel=2),
+                "OUT_B": make_contact(ContactType.DRAIN, measure_channel=3),
+            },
+            gpios={
+                "VDD": make_gpio(GPIOType.INPUT, control_channel=10),
+                "VSS": make_gpio(GPIOType.INPUT, control_channel=11),
+                "A0": make_gpio(GPIOType.INPUT, control_channel=12),
+            },
+            groups={
+                # Group explicitly specifies empty lists for contacts and gpios
+                "control": DeviceGroup(gates=["G1", "G2"], contacts=[], gpios=[]),
+            },
+            routines=[],
+            instruments=standard_instrument_configs(),
+        )
+
+        channel_configs = generate_channel_configs(device_config)
+        device = Device(
+            name="test_device",
+            device_config=device_config,
+            channel_configs=channel_configs,
+            control_instrument=MockControlInstrument(),
+            measurement_instrument=MockMeasurementInstrument(),
+        )
+
+        # Filter by control group
+        filtered_device = device.filter_by_group("control")
+
+        # Should include specified gates
+        assert set(filtered_device.gates) == {"G1", "G2"}
+
+        # Should NOT include any contacts (empty list specified)
+        assert len(filtered_device.contacts) == 0
+        assert "IN" not in filtered_device.contacts
+        assert "OUT_A" not in filtered_device.contacts
+        assert "OUT_B" not in filtered_device.contacts
+
+        # Should NOT include any gpios (empty list specified)
+        assert len(filtered_device.gpios) == 0
+        assert "VDD" not in filtered_device.gpios
+        assert "VSS" not in filtered_device.gpios
+        assert "A0" not in filtered_device.gpios
+
     def test_mixed_groups_different_filtering_behavior(self):
         """Test mixed scenario: one group with explicit gpios, one without."""
         device_config = DeviceConfig(
