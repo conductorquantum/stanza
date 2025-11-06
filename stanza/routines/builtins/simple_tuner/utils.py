@@ -1,10 +1,11 @@
 from dataclasses import dataclass
-from typing import Any
 
 import numpy as np
 from numpy.typing import NDArray
 
+from stanza.device import Device
 from stanza.models import GateType
+from stanza.registry import ResultsRegistry
 
 
 @dataclass
@@ -27,7 +28,7 @@ class GateIndices:
     barrier: list[int]
 
 
-def build_gate_indices(gates: list[str], device: Any) -> GateIndices:  # noqa: ANN401
+def build_gate_indices(gates: list[str], device: Device) -> GateIndices:
     """Extract indices for each gate type from the gate list.
 
     Args:
@@ -37,9 +38,9 @@ def build_gate_indices(gates: list[str], device: Any) -> GateIndices:  # noqa: A
     Returns:
         GateIndices with plunger, reservoir, and barrier indices
     """
-    plunger_gates = device.get_gate_by_type(GateType.PLUNGER)
-    reservoir_gates = device.get_gate_by_type(GateType.RESERVOIR)
-    barrier_gates = device.get_gate_by_type(GateType.BARRIER)
+    plunger_gates = device.get_gates_by_type(GateType.PLUNGER)
+    reservoir_gates = device.get_gates_by_type(GateType.RESERVOIR)
+    barrier_gates = device.get_gates_by_type(GateType.BARRIER)
 
     return GateIndices(
         plunger=[i for i, g in enumerate(gates) if g in plunger_gates],
@@ -148,8 +149,7 @@ def build_full_voltages(
     sweep_voltages: NDArray[np.float64],
     gates: list[str],
     gate_idx: GateIndices,
-    reservoir_voltages: dict[str, float],
-    barrier_voltages: dict[str, float],
+    saturation_voltages: dict[str, float],
 ) -> NDArray[np.float64]:
     """Construct full voltage array from plunger sweep voltages.
 
@@ -159,8 +159,7 @@ def build_full_voltages(
         sweep_voltages: (..., 2) array of plunger voltages
         gates: List of all gate names
         gate_idx: Indices for each gate type
-        reservoir_voltages: Fixed voltages for reservoir gates
-        barrier_voltages: Fixed voltages for barrier gates
+        saturation_voltages: Fixed saturation voltages for all gates
 
     Returns:
         (..., num_gates) array of voltages
@@ -173,9 +172,9 @@ def build_full_voltages(
 
     # Fixed voltages
     for idx in gate_idx.reservoir:
-        voltages[..., idx] = reservoir_voltages[gates[idx]]
+        voltages[..., idx] = saturation_voltages[gates[idx]]
     for idx in gate_idx.barrier:
-        voltages[..., idx] = barrier_voltages[gates[idx]]
+        voltages[..., idx] = saturation_voltages[gates[idx]]
 
     return voltages
 
@@ -204,3 +203,48 @@ def compute_peak_spacings(
 
     # Inter-peak spacings
     return np.diff(distances)
+
+
+def get_voltages(
+    gates: list[str],
+    key: str,
+    results: ResultsRegistry,
+) -> dict[str, float]:
+    """Get voltages for all gates.
+
+    Args:
+        gates: List of gate names
+        key: Key to extract from characterization results, one of ["saturation_voltage", "cutoff_voltage", "transition_voltage"]
+        results: ResultsRegistry instance
+
+    Returns:
+        Dict mapping gate names to voltages
+    """
+    if not (res := results.get("reservoir_characterization")) or not (
+        fg := results.get("finger_gate_characterization")
+    ):
+        raise ValueError("Reservoir and finger gate characterization results not found")
+    return {g: {**res, **fg}[g][key] for g in gates}
+
+
+def get_plunger_gate_bounds(
+    plunger_gates: list[str], results: ResultsRegistry
+) -> dict[str, tuple[float, float]]:
+    """Get plunger bounds for all plunger gates.
+
+    Args:
+        plunger_gates: List of plunger gate names
+        results: ResultsRegistry instance
+
+    Returns:
+        Dict mapping plunger gate names to bounds
+    """
+    if not (res := results.get("reservoir_characterization")) or not (
+        fg := results.get("finger_gate_characterization")
+    ):
+        raise ValueError("Reservoir and finger gate characterization results not found")
+    v = {**res, **fg}
+    return {
+        g: tuple(sorted([v[g]["saturation_voltage"], v[g]["cutoff_voltage"]]))
+        for g in plunger_gates
+    }

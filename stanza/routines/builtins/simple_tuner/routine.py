@@ -17,6 +17,8 @@ from stanza.routines.builtins.simple_tuner.utils import (
     compute_peak_spacings,
     generate_linear_sweep,
     generate_random_sweep,
+    get_plunger_gate_bounds,
+    get_voltages,
 )
 from stanza.routines.core import RoutineContext, routine
 
@@ -31,15 +33,11 @@ def compute_peak_spacing(
     min_peak_spacing: float,
     max_peak_spacing: float,
     current_trace_points: int,
-    plunger_x_bounds: tuple[float, float],
-    plunger_y_bounds: tuple[float, float],
-    reservoir_voltages: dict[str, float],
-    barrier_voltages: dict[str, float],
     max_number_of_samples: int = 30,
     number_of_samples_for_scale_computation: int = 10,
     seed: int = 42,
     session: LoggerSession | None = None,
-) -> float:
+) -> dict[str, float]:
     """Compute peak spacing by analyzing Coulomb blockade patterns in random sweeps.
 
     Args:
@@ -49,10 +47,6 @@ def compute_peak_spacing(
         min_peak_spacing: Minimum voltage spacing to test (V)
         max_peak_spacing: Maximum voltage spacing to test (V)
         current_trace_points: Points per sweep trace
-        plunger_x_bounds: (min, max) voltage bounds for X plunger
-        plunger_y_bounds: (min, max) voltage bounds for Y plunger
-        reservoir_voltages: Fixed voltages for reservoir gates
-        barrier_voltages: Fixed voltages for barrier gates
         max_number_of_samples: Maximum sweep attempts per scale
         number_of_samples_for_scale_computation: Target successful samples per scale
         seed: Random seed for reproducibility
@@ -68,7 +62,13 @@ def compute_peak_spacing(
 
     device = ctx.resources.device
     client = ctx.resources.models_client
+    results = ctx.results
+
+    saturation_voltages = get_voltages(gates, "saturation_voltage", results)
     gate_idx = build_gate_indices(gates, device)
+    plunger_gates = [gates[i] for i in gate_idx.plunger]
+    plunger_gate_bounds = get_plunger_gate_bounds(plunger_gates, results)
+
     scales = np.linspace(min_peak_spacing, max_peak_spacing, 10)
 
     peak_spacings: list[float] = []
@@ -78,8 +78,10 @@ def compute_peak_spacing(
         logger.info(f"Testing scale {scale:.4f} V")
 
         for attempt in range(max_number_of_samples):
+            x_bounds = plunger_gate_bounds[plunger_gates[0]]
+            y_bounds = plunger_gate_bounds[plunger_gates[1]]
             sweep = generate_random_sweep(
-                plunger_x_bounds, plunger_y_bounds, scale, current_trace_points
+                x_bounds, y_bounds, scale, current_trace_points
             )
             if not sweep:
                 continue
@@ -94,8 +96,7 @@ def compute_peak_spacing(
                 sweep_voltages,
                 gates,
                 gate_idx,
-                reservoir_voltages,
-                barrier_voltages,
+                saturation_voltages,
             )
 
             # Measure
@@ -210,7 +211,9 @@ def compute_peak_spacing(
             },
         )
 
-    return result
+    return {
+        "peak_spacing": result,
+    }
 
 
 @routine
@@ -220,8 +223,6 @@ def run_dqd_search_fixed_barriers(
     measure_electrode: str,
     plunger_x_bounds: tuple[float, float],
     plunger_y_bounds: tuple[float, float],
-    reservoir_voltages: dict[str, float],
-    barrier_voltages: dict[str, float],
     peak_spacing: float,
     current_trace_points: int = 128,
     low_res_csd_points: int = 25,
@@ -240,8 +241,6 @@ def run_dqd_search_fixed_barriers(
         measure_electrode: Current measurement electrode
         plunger_x_bounds: (min, max) voltage bounds for X plunger
         plunger_y_bounds: (min, max) voltage bounds for Y plunger
-        reservoir_voltages: Fixed voltages for reservoir gates
-        barrier_voltages: Fixed voltages for barrier gates
         peak_spacing: Coulomb peak spacing in volts
         current_trace_points: Points in diagonal current trace
         low_res_csd_points: Points per axis in low-res charge stability diagram
@@ -259,6 +258,9 @@ def run_dqd_search_fixed_barriers(
 
     device = ctx.resources.device
     client = ctx.resources.models_client
+
+    saturation_voltages = get_voltages(gates, "saturation_voltage", ctx.results)
+    peak_spacing = ctx.results.get("compute_peak_spacing")["peak_spacing"]
     gate_idx = build_gate_indices(gates, device)
 
     # Setup grid
@@ -298,7 +300,7 @@ def run_dqd_search_fixed_barriers(
         # Generate voltage sweeps
         ct_sweep = generate_diagonal_sweep(corner, square_size, current_trace_points)
         ct_voltages = build_full_voltages(
-            ct_sweep, gates, gate_idx, reservoir_voltages, barrier_voltages
+            ct_sweep, gates, gate_idx, saturation_voltages
         )
 
         # Stage 1: Current trace
@@ -350,7 +352,7 @@ def run_dqd_search_fixed_barriers(
         if ct_classification:
             lr_sweep = generate_2d_sweep(corner, square_size, low_res_csd_points)
             lr_voltages = build_full_voltages(
-                lr_sweep, gates, gate_idx, reservoir_voltages, barrier_voltages
+                lr_sweep, gates, gate_idx, saturation_voltages
             )
             lr_currents = np.array(
                 device.sweep_nd(
@@ -399,7 +401,7 @@ def run_dqd_search_fixed_barriers(
             if lr_classification:
                 hr_sweep = generate_2d_sweep(corner, square_size, high_res_csd_points)
                 hr_voltages = build_full_voltages(
-                    hr_sweep, gates, gate_idx, reservoir_voltages, barrier_voltages
+                    hr_sweep, gates, gate_idx, saturation_voltages
                 )
                 hr_currents = np.array(
                     device.sweep_nd(
