@@ -179,6 +179,22 @@ def build_full_voltages(
     return voltages
 
 
+def check_voltages_in_bounds(
+    voltages: NDArray[np.float64], safe_bounds: tuple[float, float]
+) -> bool:
+    """Check if all voltages are within safe bounds.
+
+    Args:
+        voltages: Array of voltages of any shape (..., num_gates)
+        safe_bounds: (min, max) safe voltage bounds
+
+    Returns:
+        True if all voltages are within bounds, False otherwise
+    """
+    min_voltage, max_voltage = safe_bounds
+    return bool(np.all((voltages >= min_voltage) & (voltages <= max_voltage)))
+
+
 def compute_peak_spacings(
     peak_indices: NDArray[np.int64],
     sweep_voltages: NDArray[np.float64],
@@ -248,3 +264,20 @@ def get_plunger_gate_bounds(
         g: tuple(sorted([v[g]["saturation_voltage"], v[g]["cutoff_voltage"]]))
         for g in plunger_gates
     }
+
+
+def get_gate_safe_bounds(
+    _gates: list[str], results: ResultsRegistry
+) -> tuple[float, float]:
+    """Get safe bounds for all gates.
+
+    Args:
+        _gates: List of gate names (unused, kept for API consistency)
+        results: ResultsRegistry instance
+
+    Returns:
+        Tuple of (min, max) safe voltage bounds
+    """
+    if not (res := results.get("leakage_test")):
+        raise ValueError("Leakage test results not found")
+    return (res["min_safe_voltage_bound"], res["max_safe_voltage_bound"])

@@ -14,9 +14,11 @@ from stanza.routines.builtins.simple_tuner.grid_search import (
 from stanza.routines.builtins.simple_tuner.utils import (
     build_full_voltages,
     build_gate_indices,
+    check_voltages_in_bounds,
     compute_peak_spacings,
     generate_linear_sweep,
     generate_random_sweep,
+    get_gate_safe_bounds,
     get_plunger_gate_bounds,
     get_voltages,
 )
@@ -260,6 +262,7 @@ def run_dqd_search_fixed_barriers(
     client = ctx.resources.models_client
 
     saturation_voltages = get_voltages(gates, "saturation_voltage", ctx.results)
+    safe_bounds = get_gate_safe_bounds(gates, ctx.results)
     peak_spacing = ctx.results.get("compute_peak_spacing")["peak_spacing"]
     gate_idx = build_gate_indices(gates, device)
 
@@ -274,7 +277,9 @@ def run_dqd_search_fixed_barriers(
         max_samples = int(total_squares * 0.5)
 
     logger.info(
-        f"Grid: {n_x}x{n_y} squares, size={square_size * 1000:.3f}mV, max_samples={max_samples}"
+        f"Grid: {n_x}x{n_y} squares, size={square_size * 1000:.3f}mV, "
+        f"safe_bounds=[{safe_bounds[0]:.3f}, {safe_bounds[1]:.3f}]V, "
+        f"max_samples={max_samples}"
     )
 
     visited: list[SearchSquare] = []
@@ -297,13 +302,36 @@ def run_dqd_search_fixed_barriers(
 
         corner = grid_corners[grid_idx]
 
-        # Generate voltage sweeps
+        # Pre-validate: check if square violates bounds
+        test_sweep = generate_diagonal_sweep(corner, square_size, 8)
+        test_voltages = build_full_voltages(
+            test_sweep, gates, gate_idx, saturation_voltages
+        )
+        if not check_voltages_in_bounds(test_voltages, safe_bounds):
+            visited.append(
+                SearchSquare(
+                    grid_idx=grid_idx,
+                    current_trace_currents=np.array([]),
+                    current_trace_voltages=test_voltages,
+                    current_trace_score=0.0,
+                    current_trace_classification=False,
+                    low_res_csd_currents=None,
+                    low_res_csd_voltages=None,
+                    low_res_csd_score=0.0,
+                    low_res_csd_classification=False,
+                    high_res_csd_currents=None,
+                    high_res_csd_voltages=None,
+                    high_res_csd_score=0.0,
+                    high_res_csd_classification=False,
+                )
+            )
+            continue
+
+        # Stage 1: Current trace
         ct_sweep = generate_diagonal_sweep(corner, square_size, current_trace_points)
         ct_voltages = build_full_voltages(
             ct_sweep, gates, gate_idx, saturation_voltages
         )
-
-        # Stage 1: Current trace
         ct_currents = np.array(
             device.sweep_nd(gates, ct_voltages.tolist(), measure_electrode)
         )
@@ -348,7 +376,7 @@ def run_dqd_search_fixed_barriers(
         lr_score = hr_score = 0.0
         lr_classification = hr_classification = False
 
-        # Stage 2: Low-res CSD (if stage 1 passed)
+        # Stage 2: Low-res CSD
         if ct_classification:
             lr_sweep = generate_2d_sweep(corner, square_size, low_res_csd_points)
             lr_voltages = build_full_voltages(
@@ -397,54 +425,54 @@ def run_dqd_search_fixed_barriers(
                     routine_name="run_dqd_search_fixed_barriers",
                 )
 
-            # Stage 3: High-res CSD (if stage 2 passed)
-            if lr_classification:
-                hr_sweep = generate_2d_sweep(corner, square_size, high_res_csd_points)
-                hr_voltages = build_full_voltages(
-                    hr_sweep, gates, gate_idx, saturation_voltages
+        # Stage 3: High-res CSD
+        if lr_classification:
+            hr_sweep = generate_2d_sweep(corner, square_size, high_res_csd_points)
+            hr_voltages = build_full_voltages(
+                hr_sweep, gates, gate_idx, saturation_voltages
+            )
+            hr_currents = np.array(
+                device.sweep_nd(
+                    gates,
+                    hr_voltages.reshape(-1, len(gates)).tolist(),
+                    measure_electrode,
                 )
-                hr_currents = np.array(
-                    device.sweep_nd(
-                        gates,
-                        hr_voltages.reshape(-1, len(gates)).tolist(),
-                        measure_electrode,
-                    )
-                ).reshape(high_res_csd_points, high_res_csd_points)
+            ).reshape(high_res_csd_points, high_res_csd_points)
 
-                hr_id = str(uuid.uuid4())
-                if session:
-                    session.log_measurement(
-                        "dqd_search_high_res_csd",
-                        {
-                            "id": hr_id,
-                            "sample_idx": sample_idx,
-                            "grid_idx": grid_idx,
-                            "linked_low_res_csd_id": lr_id,
-                            "voltages": hr_voltages.tolist(),
-                            "currents": hr_currents.tolist(),
-                        },
-                        metadata=metadata,
-                        routine_name="run_dqd_search_fixed_barriers",
-                    )
+            hr_id = str(uuid.uuid4())
+            if session:
+                session.log_measurement(
+                    "dqd_search_high_res_csd",
+                    {
+                        "id": hr_id,
+                        "sample_idx": sample_idx,
+                        "grid_idx": grid_idx,
+                        "linked_low_res_csd_id": lr_id,
+                        "voltages": hr_voltages.tolist(),
+                        "currents": hr_currents.tolist(),
+                    },
+                    metadata=metadata,
+                    routine_name="run_dqd_search_fixed_barriers",
+                )
 
-                hr_result = client.models.execute(
-                    model="csd-dqd-classifier-v1", data=hr_currents
-                ).output
-                hr_classification = hr_result["classification"]
-                hr_score = hr_result.get("score", 0.0)
+            hr_result = client.models.execute(
+                model="csd-dqd-classifier-v1", data=hr_currents
+            ).output
+            hr_classification = hr_result["classification"]
+            hr_score = hr_result.get("score", 0.0)
 
-                if session:
-                    session.log_analysis(
-                        "dqd_search_classification",
-                        {
-                            "measurement_id": hr_id,
-                            "measurement_type": "high_res_csd",
-                            "classification": bool(hr_classification),
-                            "score": float(hr_score),
-                        },
-                        metadata=metadata,
-                        routine_name="run_dqd_search_fixed_barriers",
-                    )
+            if session:
+                session.log_analysis(
+                    "dqd_search_classification",
+                    {
+                        "measurement_id": hr_id,
+                        "measurement_type": "high_res_csd",
+                        "classification": bool(hr_classification),
+                        "score": float(hr_score),
+                    },
+                    metadata=metadata,
+                    routine_name="run_dqd_search_fixed_barriers",
+                )
 
         # Record results
         square = SearchSquare(
