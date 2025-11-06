@@ -10,6 +10,7 @@ from stanza.utils import device_from_config, device_from_yaml
 
 
 def test_device_from_yaml():
+    """Test that device can be loaded from yaml file."""
     with as_file(
         importlib.resources.files("tests.test_qdac2_pyvisa_sim").joinpath(
             "qdac2_pyvisa_sim.yaml"

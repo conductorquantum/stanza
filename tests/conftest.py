@@ -10,6 +10,8 @@ from stanza.models import (
     DeviceConfig,
     Gate,
     GateType,
+    GPIO,
+    GPIOType,
     InstrumentType,
     MeasurementInstrumentConfig,
     RoutineConfig,
@@ -175,6 +177,62 @@ def standard_instrument_configs() -> list[
             sample_time=0.5,
         ),
     ]
+
+
+@pytest.fixture
+def control_instrument_config():
+    """Fixture providing a standard ControlInstrumentConfig for testing."""
+    return ControlInstrumentConfig(
+        name="control",
+        type=InstrumentType.CONTROL,
+        ip_addr="192.168.1.1",
+        slew_rate=1.0,
+    )
+
+
+@pytest.fixture
+def measurement_instrument_config():
+    """Fixture providing a standard MeasurementInstrumentConfig for testing."""
+    return MeasurementInstrumentConfig(
+        name="measurement",
+        type=InstrumentType.MEASUREMENT,
+        ip_addr="192.168.1.2",
+        measurement_duration=1.0,
+        sample_time=0.5,
+    )
+
+
+@pytest.fixture
+def sample_gate():
+    """Fixture providing a standard Gate for testing."""
+    return Gate(
+        type=GateType.PLUNGER,
+        control_channel=1,
+        v_lower_bound=0.0,
+        v_upper_bound=1.0,
+    )
+
+
+@pytest.fixture
+def sample_contact():
+    """Fixture providing a standard Contact for testing."""
+    return Contact(
+        type=ContactType.SOURCE,
+        measure_channel=2,
+        v_lower_bound=0.0,
+        v_upper_bound=1.0,
+    )
+
+
+@pytest.fixture
+def sample_gpio():
+    """Fixture providing a standard GPIO for testing."""
+    return GPIO(
+        type=GPIOType.OUTPUT,
+        control_channel=3,
+        v_lower_bound=0.0,
+        v_upper_bound=3.3,
+    )
 
 
 @pytest.fixture(autouse=True)
