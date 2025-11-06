@@ -477,3 +477,94 @@ class TestDataLogger:
             logger.close_all_sessions()
 
             assert len(logger.active_sessions) == 0
+
+    def test_creates_session_with_group_name(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            logger = DataLogger(
+                routine_name="test_routine",
+                base_dir=tmpdir,
+            )
+
+            session = logger.create_session(session_id="my_routine", group_name="control")
+            assert session.session_id == "my_routine_control"
+            assert session.metadata.group_name == "control"
+
+            logger.close_session(session.session_id)
+
+    def test_creates_session_without_group_name(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            logger = DataLogger(
+                routine_name="test_routine",
+                base_dir=tmpdir,
+            )
+
+            session = logger.create_session(session_id="my_routine")
+            assert session.session_id == "my_routine"
+            assert session.metadata.group_name is None
+
+            logger.close_session(session.session_id)
+
+    def test_group_name_included_in_directory_path(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            logger = DataLogger(
+                routine_name="test_routine",
+                base_dir=tmpdir,
+            )
+
+            session = logger.create_session(session_id="my_routine", group_name="sensor")
+
+            # Verify directory exists with group suffix
+            session_dir = logger.base_directory / "my_routine_sensor"
+            assert session_dir.exists()
+
+            # Verify metadata file exists in group-suffixed directory
+            metadata_file = session_dir / "session_metadata.json"
+            assert metadata_file.exists()
+
+            logger.close_session(session.session_id)
+
+    def test_group_name_persisted_in_session_metadata(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            logger = DataLogger(
+                routine_name="test_routine",
+                base_dir=tmpdir,
+            )
+
+            session = logger.create_session(session_id="my_routine", group_name="control")
+            logger.close_session(session.session_id)
+
+            # Read metadata file
+            metadata_file = logger.base_directory / "my_routine_control" / "session_metadata.json"
+            with open(metadata_file, 'r') as f:
+                metadata = json.load(f)
+
+            assert metadata["group_name"] == "control"
+            assert metadata["session_id"] == "my_routine_control"
+
+    def test_multiple_sessions_with_different_groups(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            logger = DataLogger(
+                routine_name="test_routine",
+                base_dir=tmpdir,
+            )
+
+            # Create session for control group
+            session1 = logger.create_session(session_id="routine", group_name="control")
+            session1.log_measurement("test", {"value": 1})
+            logger.close_session(session1.session_id)
+
+            # Create session for sensor group
+            session2 = logger.create_session(session_id="routine", group_name="sensor")
+            session2.log_measurement("test", {"value": 2})
+            logger.close_session(session2.session_id)
+
+            # Verify both directories exist
+            control_dir = logger.base_directory / "routine_control"
+            sensor_dir = logger.base_directory / "routine_sensor"
+
+            assert control_dir.exists()
+            assert sensor_dir.exists()
+
+            # Verify separate data files
+            assert (control_dir / "measurement.jsonl").exists()
+            assert (sensor_dir / "measurement.jsonl").exists()

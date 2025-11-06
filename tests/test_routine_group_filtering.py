@@ -373,3 +373,112 @@ class TestGroupFilteringInstrumentSharing:
         assert received_instruments["control"] is control_inst
         assert received_instruments["measurement"] is measure_inst
         assert received_instruments["control"] is original_device.control_instrument
+
+
+class TestGroupFilteringWithLogger:
+    """Tests for group filtering integration with data logger."""
+
+    def test_group_name_included_in_logger_session_path(
+        self, registry_fixture, routine_runner_with_grouped_device, tmp_path
+    ):
+        """Test that group name is included in logger session directory path."""
+        import tempfile
+        from stanza.logger.data_logger import DataLogger
+
+        runner, _, _, _ = routine_runner_with_grouped_device
+
+        # Create a data logger
+        with tempfile.TemporaryDirectory() as tmpdir:
+            logger = DataLogger(
+                routine_name="test_routine",
+                base_dir=tmpdir,
+            )
+            runner.context.resources.add("logger", logger)
+
+            @routine(name="test_routine")
+            def test_routine(ctx: RoutineContext, session=None) -> dict:
+                # Session should have group in its ID
+                if session:
+                    assert session.session_id == "test_routine_control"
+                    assert session.metadata.group_name == "control"
+                return {}
+
+            runner.run("test_routine", __group__="control")
+
+            # Verify directory with group suffix was created
+            session_dir = logger.base_directory / "test_routine_control"
+            assert session_dir.exists()
+
+    def test_different_groups_create_separate_directories(
+        self, registry_fixture, routine_runner_with_grouped_device
+    ):
+        """Test that different groups create separate output directories."""
+        import tempfile
+        from stanza.logger.data_logger import DataLogger
+
+        runner, _, _, _ = routine_runner_with_grouped_device
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            logger = DataLogger(
+                routine_name="test_routine",
+                base_dir=tmpdir,
+            )
+            runner.context.resources.add("logger", logger)
+
+            @routine(name="test_routine")
+            def test_routine(ctx: RoutineContext, session=None) -> dict:
+                if session:
+                    session.log_measurement("value", {"data": 1})
+                return {}
+
+            # Run for control group
+            runner.run("test_routine", __group__="control")
+
+            # Run for sensor group
+            runner.run("test_routine", __group__="sensor")
+
+            # Verify separate directories exist
+            control_dir = logger.base_directory / "test_routine_control"
+            sensor_dir = logger.base_directory / "test_routine_sensor"
+
+            assert control_dir.exists()
+            assert sensor_dir.exists()
+
+            # Verify both have their own data files
+            assert (control_dir / "measurement.jsonl").exists()
+            assert (sensor_dir / "measurement.jsonl").exists()
+
+    def test_routine_without_group_creates_path_without_suffix(
+        self, registry_fixture, routine_runner_with_grouped_device
+    ):
+        """Test backward compatibility: routines without groups don't get suffix."""
+        import tempfile
+        from stanza.logger.data_logger import DataLogger
+
+        runner, _, _, _ = routine_runner_with_grouped_device
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            logger = DataLogger(
+                routine_name="test_routine",
+                base_dir=tmpdir,
+            )
+            runner.context.resources.add("logger", logger)
+
+            @routine(name="test_routine")
+            def test_routine(ctx: RoutineContext, session=None) -> dict:
+                if session:
+                    # No group specified, so no suffix
+                    assert session.session_id == "test_routine"
+                    assert session.metadata.group_name is None
+                return {}
+
+            # Run without group
+            runner.run("test_routine")
+
+            # Verify directory without group suffix
+            session_dir = logger.base_directory / "test_routine"
+            assert session_dir.exists()
+
+            # Verify no group-suffixed directory was created
+            assert not (logger.base_directory / "test_routine_control").exists()
+            assert not (logger.base_directory / "test_routine_sensor").exists()

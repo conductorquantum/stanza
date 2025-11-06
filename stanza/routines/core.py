@@ -323,7 +323,7 @@ class RoutineRunner:
         session = None
         if data_logger is not None and hasattr(data_logger, "create_session"):
             session_id = self._get_routine_path(routine_name)
-            session = data_logger.create_session(session_id=session_id)
+            session = data_logger.create_session(session_id=session_id, group_name=group_name)
             merged_params["session"] = session
 
         try:
@@ -347,8 +347,7 @@ class RoutineRunner:
 
             # Close logger session if it was created
             if session is not None and data_logger is not None:
-                session_id = self._get_routine_path(routine_name)
-                data_logger.close_session(session_id=session_id)
+                data_logger.close_session(session_id=session.session_id)
 
     def run_all(self, parent_routine: str | None = None) -> dict[str, Any]:
         """Execute all routines from config in order.

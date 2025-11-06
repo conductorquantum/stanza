@@ -85,6 +85,7 @@ class SessionMetadata:
     start_time: float
     user: str
     routine_name: str | None = None
+    group_name: str | None = None
     device_config: dict[str, Any] | None = None
     parameters: dict[str, Any] | None = None
     end_time: float | None = None
@@ -100,6 +101,7 @@ class SessionMetadata:
         return {
             "session_id": self.session_id,
             "routine_name": self.routine_name,
+            "group_name": self.group_name,
             "start_time": self.start_time,
             "user": self.user,
             "device_config": self.device_config,

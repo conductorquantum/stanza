@@ -119,12 +119,16 @@ class DataLogger:
         name = re.sub(r"[^A-Za-z0-9_-]+", "_", name)
         return name
 
-    def create_session(self, session_id: str | None = None) -> LoggerSession:
+    def create_session(self, session_id: str | None = None, group_name: str | None = None) -> LoggerSession:
         """Create a new logger session."""
         if session_id is None:
             timestamp = str(int(time.time()))
             unique_id = str(uuid.uuid4())[:8]
             session_id = f"{self.routine_name}_{timestamp}_{unique_id}"
+
+        # Add group to session_id if provided
+        if group_name is not None:
+            session_id = f"{session_id}_{group_name}"
 
         if self.get_session(session_id) is not None:
             raise LoggingError(f"Session with ID {session_id} already exists")
@@ -138,6 +142,7 @@ class DataLogger:
         metadata = SessionMetadata(
             session_id=session_id,
             routine_name=self.routine_name,
+            group_name=group_name,
             start_time=time.time(),
             user=getpass.getuser(),
             device_config=None,
