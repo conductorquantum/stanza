@@ -5,6 +5,7 @@ import numpy as np
 
 from stanza.logger.session import LoggerSession
 from stanza.routines.builtins.simple_tuner.grid_search import (
+    GRID_SQUARE_MULTIPLIER,
     SearchSquare,
     generate_2d_sweep,
     generate_diagonal_sweep,
@@ -232,6 +233,7 @@ def run_dqd_search_fixed_barriers(
     max_samples: int | None = None,
     num_dqds_for_exit: int = 1,
     include_diagonals: bool = False,
+    charge_carrier_type: str = "electrons",
     seed: int = 42,
     session: LoggerSession | None = None,
 ) -> list[SearchSquare]:
@@ -250,6 +252,7 @@ def run_dqd_search_fixed_barriers(
         max_samples: Maximum grid squares to sample (default: 50% of grid)
         num_dqds_for_exit: Exit after finding this many DQDs
         include_diagonals: Use 8-connected neighborhoods vs 4-connected
+        charge_carrier_type: "electrons" or "holes" - determines sweep direction
         seed: Random seed for reproducibility
         session: Logger session for telemetry
 
@@ -260,17 +263,21 @@ def run_dqd_search_fixed_barriers(
 
     device = ctx.resources.device
     client = ctx.resources.models_client
+    results = ctx.results
 
     saturation_voltages = get_voltages(gates, "saturation_voltage", ctx.results)
     safe_bounds = get_gate_safe_bounds(gates, ctx.results)
     peak_spacing = ctx.results.get("compute_peak_spacing")["peak_spacing"]
     gate_idx = build_gate_indices(gates, device)
+    plunger_gates = [gates[i] for i in gate_idx.plunger]
+    plunger_gate_bounds = get_plunger_gate_bounds(plunger_gates, results)
 
     # Setup grid
-    square_size = peak_spacing * 4.0
-    grid_corners, n_x, n_y = generate_grid_corners(
-        plunger_x_bounds, plunger_y_bounds, square_size
-    )
+    square_size = peak_spacing * GRID_SQUARE_MULTIPLIER
+    x_bounds = plunger_gate_bounds[plunger_gates[0]]
+    y_bounds = plunger_gate_bounds[plunger_gates[1]]
+
+    grid_corners, n_x, n_y = generate_grid_corners(x_bounds, y_bounds, square_size)
     total_squares = n_x * n_y
 
     if max_samples is None:
@@ -303,7 +310,9 @@ def run_dqd_search_fixed_barriers(
         corner = grid_corners[grid_idx]
 
         # Pre-validate: check if square violates bounds
-        test_sweep = generate_diagonal_sweep(corner, square_size, 8)
+        test_sweep = generate_diagonal_sweep(
+            corner, square_size, 8, charge_carrier_type
+        )
         test_voltages = build_full_voltages(
             test_sweep, gates, gate_idx, saturation_voltages
         )
@@ -328,7 +337,9 @@ def run_dqd_search_fixed_barriers(
             continue
 
         # Stage 1: Current trace
-        ct_sweep = generate_diagonal_sweep(corner, square_size, current_trace_points)
+        ct_sweep = generate_diagonal_sweep(
+            corner, square_size, current_trace_points, charge_carrier_type
+        )
         ct_voltages = build_full_voltages(
             ct_sweep, gates, gate_idx, saturation_voltages
         )
@@ -378,7 +389,9 @@ def run_dqd_search_fixed_barriers(
 
         # Stage 2: Low-res CSD
         if ct_classification:
-            lr_sweep = generate_2d_sweep(corner, square_size, low_res_csd_points)
+            lr_sweep = generate_2d_sweep(
+                corner, square_size, low_res_csd_points, charge_carrier_type
+            )
             lr_voltages = build_full_voltages(
                 lr_sweep, gates, gate_idx, saturation_voltages
             )
@@ -427,7 +440,9 @@ def run_dqd_search_fixed_barriers(
 
         # Stage 3: High-res CSD
         if lr_classification:
-            hr_sweep = generate_2d_sweep(corner, square_size, high_res_csd_points)
+            hr_sweep = generate_2d_sweep(
+                corner, square_size, high_res_csd_points, charge_carrier_type
+            )
             hr_voltages = build_full_voltages(
                 hr_sweep, gates, gate_idx, saturation_voltages
             )

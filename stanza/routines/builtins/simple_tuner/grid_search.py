@@ -5,6 +5,11 @@ from dataclasses import dataclass
 import numpy as np
 from numpy.typing import NDArray
 
+# Algorithm constants
+HIGH_SCORE_THRESHOLD: float = 1.5  # Minimum score for priority exploration
+GRID_SQUARE_MULTIPLIER: float = 4.0  # Peak spacing multiplier for grid size
+DISTANCE_DECAY_FACTOR: float = 1.0  # Weight decay with distance in weighted selection
+
 
 @dataclass
 class SearchSquare:
@@ -73,36 +78,58 @@ def generate_grid_corners(
 
 
 def generate_diagonal_sweep(
-    corner: NDArray[np.float64], size: float, num_points: int
+    corner: NDArray[np.float64],
+    size: float,
+    num_points: int,
+    charge_carrier_type: str = "electrons",
 ) -> NDArray[np.float64]:
     """Generate diagonal line through a square.
+
+    Sweeps towards accumulation (electrons) or pinch-off (holes) depending
+    on charge carrier type.
 
     Args:
         corner: (2,) bottom-left corner coordinates
         size: Square side length
         num_points: Number of points along diagonal
+        charge_carrier_type: "electrons" (positive sweep) or "holes" (negative sweep)
 
     Returns:
         (num_points, 2) array of voltage coordinates
     """
-    t = np.linspace(0, size, num_points)
+    if charge_carrier_type == "electrons":
+        t = np.linspace(0, size, num_points)
+    else:  # holes - sweep in negative direction towards pinch-off
+        t = np.linspace(0, -size, num_points)
+
     return corner + np.column_stack([t, t])
 
 
 def generate_2d_sweep(
-    corner: NDArray[np.float64], size: float, num_points: int
+    corner: NDArray[np.float64],
+    size: float,
+    num_points: int,
+    charge_carrier_type: str = "electrons",
 ) -> NDArray[np.float64]:
     """Generate 2D grid sweep over a square.
+
+    Sweeps towards accumulation (electrons) or pinch-off (holes) depending
+    on charge carrier type.
 
     Args:
         corner: (2,) bottom-left corner coordinates
         size: Square side length
         num_points: Number of points per axis
+        charge_carrier_type: "electrons" (positive sweep) or "holes" (negative sweep)
 
     Returns:
         (num_points, num_points, 2) array of voltage coordinates
     """
-    t = np.linspace(0, size, num_points)
+    if charge_carrier_type == "electrons":
+        t = np.linspace(0, size, num_points)
+    else:  # holes - sweep in negative direction towards pinch-off
+        t = np.linspace(0, -size, num_points)
+
     x_mesh, y_mesh = np.meshgrid(t, t)
     return np.stack([x_mesh + corner[0], y_mesh + corner[1]], axis=-1)
 
@@ -138,20 +165,84 @@ def get_neighboring_squares(
     return neighbors
 
 
+def get_grid_distance(idx1: int, idx2: int, n_x: int, n_y: int) -> int:
+    """Calculate Manhattan distance between two grid squares.
+
+    Manhattan distance is the sum of horizontal and vertical distances,
+    appropriate for grid topology where moves are limited to cardinal directions.
+
+    Args:
+        idx1: Linear index of first square
+        idx2: Linear index of second square
+        n_x: Number of squares in X direction
+        n_y: Number of squares in Y direction
+
+    Returns:
+        Manhattan distance (sum of horizontal and vertical distance)
+    """
+    row1, col1 = divmod(idx1, n_x)
+    row2, col2 = divmod(idx2, n_x)
+    return abs(row1 - row2) + abs(col1 - col2)
+
+
+def select_weighted_by_score(
+    candidates: list[int],
+    successful_squares: list[SearchSquare],
+    n_x: int,
+    n_y: int,
+    distance_decay: float = DISTANCE_DECAY_FACTOR,
+) -> int:
+    """Select from candidates weighted by proximity and score of successful squares.
+
+    Exploits spatial correlation in voltage space: DQDs tend to cluster, so squares
+    near high-scoring regions are more likely to contain DQDs. Weight combines:
+    - Score magnitude (higher = more important)
+    - Distance decay (closer = more important)
+
+    Args:
+        candidates: List of candidate square indices
+        successful_squares: List of high-scoring squares
+        n_x: Number of squares in X direction
+        n_y: Number of squares in Y direction
+        distance_decay: Multiplier for weights at unit distance (default: 1.0)
+
+    Returns:
+        Selected square index, chosen probabilistically by weights
+    """
+    weights = []
+    for candidate_idx in candidates:
+        weight = 0.0
+        for success_square in successful_squares:
+            score = success_square.total_score
+            dist = get_grid_distance(candidate_idx, success_square.grid_idx, n_x, n_y)
+            # Weight by score, decayed by distance: closer high-score regions dominate
+            weight += score * distance_decay / (dist + 1.0)
+        weights.append(weight)
+
+    # Normalize and sample
+    weights_array = np.array(weights)
+    weights_normalized = weights_array / weights_array.sum()
+    return int(np.random.choice(candidates, p=weights_normalized))
+
+
 def select_next_square(
     visited: list[SearchSquare],
     dqd_squares: list[SearchSquare],
     n_x: int,
     n_y: int,
     include_diagonals: bool,
-    score_threshold: float = 1.5,
+    score_threshold: float = HIGH_SCORE_THRESHOLD,
 ) -> int | None:
     """Select next grid square using hierarchical priority strategy.
 
-    Priority hierarchy:
-    1. Neighbors of confirmed DQDs
-    2. Neighbors of high-scoring squares (score >= threshold)
+    Priority hierarchy (exploitation → exploration):
+    1. Neighbors of confirmed DQDs (weighted by score and proximity)
+    2. Neighbors of high-scoring squares (weighted by score and proximity)
     3. Random unvisited square
+
+    Uses weighted selection for priorities 1 and 2 to exploit spatial correlation:
+    DQDs cluster in voltage space, so squares near high-scoring regions are
+    preferentially sampled.
 
     Args:
         visited: List of already-visited squares
@@ -171,7 +262,7 @@ def select_next_square(
     if not unvisited:
         return None
 
-    # Priority 1: DQD neighbors
+    # Priority 1: DQD neighbors (weighted by score and distance)
     if dqd_squares:
         candidates: set[int] = set()
         for sq in dqd_squares:
@@ -180,9 +271,11 @@ def select_next_square(
             )
             candidates.update(n for n in neighbors if n not in visited_indices)
         if candidates:
-            return int(np.random.choice(list(candidates)))
+            return select_weighted_by_score(
+                list(candidates), dqd_squares, n_x, n_y, DISTANCE_DECAY_FACTOR
+            )
 
-    # Priority 2: High-score neighbors
+    # Priority 2: High-score neighbors (weighted by score and distance)
     high_score_squares = [sq for sq in visited if sq.total_score >= score_threshold]
     if high_score_squares:
         candidates_2: set[int] = set()
@@ -192,7 +285,9 @@ def select_next_square(
             )
             candidates_2.update(n for n in neighbors if n not in visited_indices)
         if candidates_2:
-            return int(np.random.choice(list(candidates_2)))
+            return select_weighted_by_score(
+                list(candidates_2), high_score_squares, n_x, n_y, DISTANCE_DECAY_FACTOR
+            )
 
     # Priority 3: Random exploration
     return int(np.random.choice(list(unvisited)))
