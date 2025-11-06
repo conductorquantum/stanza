@@ -486,7 +486,9 @@ class TestDataLogger:
                 base_dir=tmpdir,
             )
 
-            session = logger.create_session(session_id="my_routine", group_name="control")
+            session = logger.create_session(
+                session_id="my_routine", group_name="control"
+            )
             assert session.session_id == "my_routine_control"
             assert session.metadata.group_name == "control"
 
@@ -514,7 +516,9 @@ class TestDataLogger:
                 base_dir=tmpdir,
             )
 
-            session = logger.create_session(session_id="my_routine", group_name="sensor")
+            session = logger.create_session(
+                session_id="my_routine", group_name="sensor"
+            )
 
             # Verify directory exists with group suffix
             session_dir = logger.base_directory / "my_routine_sensor"
@@ -534,12 +538,16 @@ class TestDataLogger:
                 base_dir=tmpdir,
             )
 
-            session = logger.create_session(session_id="my_routine", group_name="control")
+            session = logger.create_session(
+                session_id="my_routine", group_name="control"
+            )
             logger.close_session(session.session_id)
 
             # Read metadata file
-            metadata_file = logger.base_directory / "my_routine_control" / "session_metadata.json"
-            with open(metadata_file, 'r') as f:
+            metadata_file = (
+                logger.base_directory / "my_routine_control" / "session_metadata.json"
+            )
+            with open(metadata_file) as f:
                 metadata = json.load(f)
 
             assert metadata["group_name"] == "control"

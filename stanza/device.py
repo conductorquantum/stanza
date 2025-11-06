@@ -608,9 +608,7 @@ class Device:
                 f"{gate_electrode} sweep", "Voltage", "Current", metadata=metadata
             ) as s:
                 for voltage in voltages:
-                    self.jump(
-                        {gate_electrode: voltage}, wait_for_settling=True
-                    )
+                    self.jump({gate_electrode: voltage}, wait_for_settling=True)
                     v_actual = self.check(gate_electrode)
                     i_measured = self.measure(measure_electrode)
                     voltage_measurements.append(v_actual)

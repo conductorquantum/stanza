@@ -119,7 +119,9 @@ class DataLogger:
         name = re.sub(r"[^A-Za-z0-9_-]+", "_", name)
         return name
 
-    def create_session(self, session_id: str | None = None, group_name: str | None = None) -> LoggerSession:
+    def create_session(
+        self, session_id: str | None = None, group_name: str | None = None
+    ) -> LoggerSession:
         """Create a new logger session."""
         if session_id is None:
             timestamp = str(int(time.time()))

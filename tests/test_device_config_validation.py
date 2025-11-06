@@ -2,8 +2,6 @@ import pytest
 
 from stanza.models import (
     GPIO,
-    Contact,
-    ContactType,
     ControlInstrumentConfig,
     DeviceConfig,
     Electrode,
@@ -69,7 +67,9 @@ def test_measurement_instrument_timing_validation():
         )
 
 
-def test_device_config_unique_channels(control_instrument_config, measurement_instrument_config):
+def test_device_config_unique_channels(
+    control_instrument_config, measurement_instrument_config
+):
     gate1 = Gate(
         type=GateType.PLUNGER,
         control_channel=1,
@@ -123,7 +123,11 @@ def test_device_config_unique_channels(control_instrument_config, measurement_in
 
 
 def test_device_config_groups_require_known_pads(
-    sample_gate, sample_contact, sample_gpio, control_instrument_config, measurement_instrument_config
+    sample_gate,
+    sample_contact,
+    sample_gpio,
+    control_instrument_config,
+    measurement_instrument_config,
 ):
     """Test that device config groups must reference existing gates, contacts, and gpios."""
 
@@ -168,7 +172,11 @@ def test_device_config_groups_require_known_pads(
 
 
 def test_device_config_groups_enforce_unique_assignments(
-    sample_gate, sample_contact, sample_gpio, control_instrument_config, measurement_instrument_config
+    sample_gate,
+    sample_contact,
+    sample_gpio,
+    control_instrument_config,
+    measurement_instrument_config,
 ):
     """Test that gates cannot be shared between groups, but contacts and gpios can be shared."""
 

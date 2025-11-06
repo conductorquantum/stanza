@@ -2,7 +2,6 @@
 
 import pytest
 
-from stanza.device import Device
 from stanza.exceptions import DeviceError
 from stanza.models import ContactType, DeviceConfig, DeviceGroup, GateType
 from stanza.routines import (
@@ -11,7 +10,6 @@ from stanza.routines import (
     clear_routine_registry,
     routine,
 )
-from stanza.utils import generate_channel_configs
 from tests.conftest import (
     MockControlInstrument,
     MockMeasurementInstrument,
@@ -30,7 +28,7 @@ def registry_fixture():
 
 
 @pytest.fixture
-def device_with_groups():
+def device_with_groups(create_device):
     """Create a device with multiple groups and shared RESERVOIR gates."""
     device_config = DeviceConfig(
         name="device",
@@ -51,18 +49,10 @@ def device_with_groups():
         instruments=standard_instrument_configs(),
     )
 
-    channel_configs = generate_channel_configs(device_config)
-
     control_inst = MockControlInstrument()
     measure_inst = MockMeasurementInstrument()
 
-    device = Device(
-        name="device",
-        device_config=device_config,
-        channel_configs=channel_configs,
-        control_instrument=control_inst,
-        measurement_instrument=measure_inst,
-    )
+    device = create_device(device_config, control_inst, measure_inst)
 
     return device, control_inst, measure_inst
 
@@ -80,8 +70,19 @@ def routine_runner_with_grouped_device(device_with_groups):
 class TestRoutineDeviceFiltering:
     """Test that RoutineRunner correctly filters device by group."""
 
+    @pytest.mark.parametrize(
+        "group,expected_gates",
+        [
+            ("control", {"G1", "G2", "RES1", "RES2"}),
+            ("sensor", {"G3", "G4", "RES1", "RES2"}),
+        ],
+    )
     def test_routine_receives_filtered_device_with_only_group_gates(
-        self, registry_fixture, routine_runner_with_grouped_device
+        self,
+        registry_fixture,
+        routine_runner_with_grouped_device,
+        group,
+        expected_gates,
     ):
         """Test that routine receives a filtered device with only the group's gates."""
         runner, original_device, control_inst, measure_inst = (
@@ -97,23 +98,20 @@ class TestRoutineDeviceFiltering:
             received_device = ctx.resources.device
             return {"gates": list(ctx.resources.device.gates)}
 
-        # Run with control group
-        runner.run("test_routine", __group__="control")
+        # Run with specified group
+        runner.run("test_routine", __group__=group)
 
         # Verify routine received filtered device
         assert received_device is not None
-        assert set(received_device.gates) == {"G1", "G2", "RES1", "RES2"}
+        assert set(received_device.gates) == expected_gates
         assert set(received_device.gates) != set(original_device.gates)
 
-        # Run with sensor group
-        received_device = None
-        runner.run("test_routine", __group__="sensor")
-
-        assert received_device is not None
-        assert set(received_device.gates) == {"G3", "G4", "RES1", "RES2"}
-
+    @pytest.mark.parametrize(
+        "group,expected_name",
+        [("control", "device_control"), ("sensor", "device_sensor")],
+    )
     def test_filtered_device_has_correct_name(
-        self, registry_fixture, routine_runner_with_grouped_device
+        self, registry_fixture, routine_runner_with_grouped_device, group, expected_name
     ):
         """Test that filtered device name includes group name."""
         runner, original_device, _, _ = routine_runner_with_grouped_device
@@ -126,9 +124,9 @@ class TestRoutineDeviceFiltering:
             received_device_name = ctx.resources.device.name
             return {}
 
-        runner.run("test_routine", __group__="control")
+        runner.run("test_routine", __group__=group)
 
-        assert received_device_name == "device_control"
+        assert received_device_name == expected_name
 
     def test_filter_unknown_group_raises_error(
         self, registry_fixture, routine_runner_with_grouped_device
@@ -142,6 +140,50 @@ class TestRoutineDeviceFiltering:
 
         with pytest.raises(DeviceError, match="Group 'unknown' not found"):
             runner.run("test_routine", __group__="unknown")
+
+    def test_group_parameter_alias_works(
+        self, registry_fixture, routine_runner_with_grouped_device
+    ):
+        """Test that 'group' parameter works as an alias for '__group__'."""
+        runner, original_device, _, _ = routine_runner_with_grouped_device
+
+        received_device = None
+
+        @routine(name="test_routine")
+        def capture_device_routine(ctx: RoutineContext) -> dict:
+            nonlocal received_device
+            received_device = ctx.resources.device
+            return {"gates": list(ctx.resources.device.gates)}
+
+        # Run with 'group' parameter (alias for '__group__')
+        runner.run("test_routine", group="control")
+
+        # Verify routine received filtered device
+        assert received_device is not None
+        assert set(received_device.gates) == {"G1", "G2", "RES1", "RES2"}
+        assert received_device.name == "device_control"
+
+    def test_group_parameter_precedence(
+        self, registry_fixture, routine_runner_with_grouped_device
+    ):
+        """Test that '__group__' takes precedence over 'group' if both are provided."""
+        runner, original_device, _, _ = routine_runner_with_grouped_device
+
+        received_device = None
+
+        @routine(name="test_routine")
+        def capture_device_routine(ctx: RoutineContext) -> dict:
+            nonlocal received_device
+            received_device = ctx.resources.device
+            return {"gates": list(ctx.resources.device.gates)}
+
+        # Run with both parameters - '__group__' should take precedence
+        runner.run("test_routine", group="control", __group__="sensor")
+
+        # Verify routine received sensor group device (__group__ takes precedence)
+        assert received_device is not None
+        assert set(received_device.gates) == {"G3", "G4", "RES1", "RES2"}
+        assert received_device.name == "device_sensor"
 
 
 class TestZeroOtherGroupsParameter:
@@ -263,7 +305,7 @@ class TestZeroOtherGroupsParameter:
         )
 
     def test_zero_other_groups_respects_conditional_filtering(
-        self, registry_fixture
+        self, registry_fixture, create_device
     ):
         """Test that zero_other_groups respects conditional filtering logic.
 
@@ -311,18 +353,10 @@ class TestZeroOtherGroupsParameter:
             instruments=standard_instrument_configs(),
         )
 
-        channel_configs = generate_channel_configs(device_config)
         control_inst = MockControlInstrument()
         measure_inst = MockMeasurementInstrument()
 
-        device = Device(
-            name="device",
-            device_config=device_config,
-            channel_configs=channel_configs,
-            control_instrument=control_inst,
-            measurement_instrument=measure_inst,
-        )
-
+        device = create_device(device_config, control_inst, measure_inst)
         runner = RoutineRunner(resources=[device])
 
         # Set initial voltages on all pads
@@ -480,6 +514,7 @@ class TestGroupFilteringWithLogger:
     ):
         """Test that group name is included in logger session directory path."""
         import tempfile
+
         from stanza.logger.data_logger import DataLogger
 
         runner, _, _, _ = routine_runner_with_grouped_device
@@ -511,6 +546,7 @@ class TestGroupFilteringWithLogger:
     ):
         """Test that different groups create separate output directories."""
         import tempfile
+
         from stanza.logger.data_logger import DataLogger
 
         runner, _, _, _ = routine_runner_with_grouped_device
@@ -548,8 +584,9 @@ class TestGroupFilteringWithLogger:
     def test_routine_without_group_creates_path_without_suffix(
         self, registry_fixture, routine_runner_with_grouped_device
     ):
-        """Test backward compatibility: routines without groups don't get suffix."""
+        """Test routines without groups don't get suffix."""
         import tempfile
+
         from stanza.logger.data_logger import DataLogger
 
         runner, _, _, _ = routine_runner_with_grouped_device

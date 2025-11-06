@@ -3,12 +3,12 @@ import pytest
 from stanza.device import Device
 from stanza.exceptions import DeviceError
 from stanza.models import (
+    GPIO,
     ContactType,
     DeviceConfig,
     DeviceGroup,
-    GPIO,
-    GPIOType,
     GateType,
+    GPIOType,
 )
 from stanza.utils import generate_channel_configs
 from tests.conftest import (
@@ -23,6 +23,7 @@ from tests.conftest import (
 @pytest.fixture
 def create_device():
     """Fixture that returns a function to create a Device from a DeviceConfig."""
+
     def _create_device(
         device_config: DeviceConfig,
         control_instrument: MockControlInstrument | None = None,
@@ -35,8 +36,10 @@ def create_device():
             device_config=device_config,
             channel_configs=channel_configs,
             control_instrument=control_instrument or MockControlInstrument(),
-            measurement_instrument=measurement_instrument or MockMeasurementInstrument(),
+            measurement_instrument=measurement_instrument
+            or MockMeasurementInstrument(),
         )
+
     return _create_device
 
 
@@ -243,7 +246,9 @@ class TestConditionalFiltering:
         # Should include ALL device GPIOs (not specified, so all included)
         assert set(filtered_device.gpios) == {"A0", "A1", "A2", "VDD"}
 
-    def test_group_with_omitted_contacts_includes_all_device_contacts(self, create_device):
+    def test_group_with_omitted_contacts_includes_all_device_contacts(
+        self, create_device
+    ):
         """Test that when contacts are omitted from group, ALL device contacts are included."""
         device_config = DeviceConfig(
             name="test_device",
@@ -298,7 +303,9 @@ class TestConditionalFiltering:
             },
             groups={
                 # Group explicitly specifies only A0 and VDD
-                "control": DeviceGroup(gates=["G1"], contacts=["IN"], gpios=["A0", "VDD"]),
+                "control": DeviceGroup(
+                    gates=["G1"], contacts=["IN"], gpios=["A0", "VDD"]
+                ),
             },
             routines=[],
             instruments=standard_instrument_configs(),
@@ -535,7 +542,9 @@ class TestConditionalFiltering:
                 contacts={},
                 groups={
                     "control": DeviceGroup(gates=["G1"]),
-                    "sensor": DeviceGroup(gates=["G1", "G2"]),  # G1 is shared - not allowed
+                    "sensor": DeviceGroup(
+                        gates=["G1", "G2"]
+                    ),  # G1 is shared - not allowed
                 },
                 routines=[],
                 instruments=standard_instrument_configs(),

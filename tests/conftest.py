@@ -4,13 +4,13 @@ import pytest
 
 from stanza.device import Device
 from stanza.models import (
+    GPIO,
     Contact,
     ContactType,
     ControlInstrumentConfig,
     DeviceConfig,
     Gate,
     GateType,
-    GPIO,
     GPIOType,
     InstrumentType,
     MeasurementInstrumentConfig,
@@ -233,6 +233,29 @@ def sample_gpio():
         v_lower_bound=0.0,
         v_upper_bound=3.3,
     )
+
+
+@pytest.fixture
+def create_device():
+    """Fixture that returns a function to create a Device from a DeviceConfig."""
+
+    def _create_device(
+        device_config: DeviceConfig,
+        control_instrument: MockControlInstrument | None = None,
+        measurement_instrument: MockMeasurementInstrument | None = None,
+    ) -> Device:
+        """Create a Device instance from a DeviceConfig."""
+        channel_configs = generate_channel_configs(device_config)
+        return Device(
+            name=device_config.name,
+            device_config=device_config,
+            channel_configs=channel_configs,
+            control_instrument=control_instrument or MockControlInstrument(),
+            measurement_instrument=measurement_instrument
+            or MockMeasurementInstrument(),
+        )
+
+    return _create_device
 
 
 @pytest.fixture(autouse=True)

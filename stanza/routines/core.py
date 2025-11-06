@@ -281,7 +281,14 @@ class RoutineRunner:
         merged_params = {**parent_params, **config, **params}
 
         # Extract group information if present (not passed to routine as parameter)
-        group_name = merged_params.pop("__group__", None)
+        # Support both 'group' and '__group__' for convenience
+        # '__group__' takes precedence if both are provided
+        if "__group__" in merged_params:
+            group_name = merged_params.pop("__group__", None)
+            # Remove 'group' if it was also provided to avoid passing it to routine
+            merged_params.pop("group", None)
+        else:
+            group_name = merged_params.pop("group", None)
 
         # Get the routine function from global registry
         routine_func = _routine_registry[routine_name]
@@ -323,7 +330,9 @@ class RoutineRunner:
         session = None
         if data_logger is not None and hasattr(data_logger, "create_session"):
             session_id = self._get_routine_path(routine_name)
-            session = data_logger.create_session(session_id=session_id, group_name=group_name)
+            session = data_logger.create_session(
+                session_id=session_id, group_name=group_name
+            )
             merged_params["session"] = session
 
         try:
@@ -392,7 +401,11 @@ class RoutineRunner:
                 group_override["__group__"] = routine_config.group
 
             if parent_params:
-                merged = {**parent_params, **(routine_config.parameters or {}), **group_override}
+                merged = {
+                    **parent_params,
+                    **(routine_config.parameters or {}),
+                    **group_override,
+                }
                 result = self.run(routine_config.name, **merged)
             else:
                 # Merge config parameters with group override
@@ -403,7 +416,11 @@ class RoutineRunner:
                     result = self.run(routine_config.name)
 
             # Store result with unique key if there's a group
-            result_key = f"{routine_config.name}_{routine_config.group}" if hasattr(routine_config, "group") and routine_config.group else routine_config.name
+            result_key = (
+                f"{routine_config.name}_{routine_config.group}"
+                if hasattr(routine_config, "group") and routine_config.group
+                else routine_config.name
+            )
             results[result_key] = result
 
         if routine_config.routines:
