@@ -9,6 +9,7 @@ from stanza.models import (
     DeviceGroup,
     GateType,
     GPIOType,
+    PadType,
 )
 from stanza.utils import generate_channel_configs
 from tests.conftest import (
@@ -18,6 +19,23 @@ from tests.conftest import (
     make_gate,
     standard_instrument_configs,
 )
+
+
+def get_gates(configs):
+    """Extract gate names from channel configs."""
+    return [name for name, config in configs.items() if config.pad_type == PadType.GATE]
+
+
+def get_contacts(configs):
+    """Extract contact names from channel configs."""
+    return [
+        name for name, config in configs.items() if config.pad_type == PadType.CONTACT
+    ]
+
+
+def get_gpios(configs):
+    """Extract GPIO names from channel configs."""
+    return [name for name, config in configs.items() if config.pad_type == PadType.GPIO]
 
 
 @pytest.fixture
@@ -84,16 +102,14 @@ def test_device_filter_by_group_basic(create_device):
     device = create_device(device_config)
 
     # Filter by control group
-    control_device = device.filter_by_group("control")
-    assert set(control_device.gates) == {"G1", "G2"}
-    assert set(control_device.contacts) == {"IN"}
-    assert control_device.name == "test_device_control"
+    control_configs = device.filter_by_group("control")
+    assert set(get_gates(control_configs)) == {"G1", "G2"}
+    assert set(get_contacts(control_configs)) == {"IN"}
 
     # Filter by sensor group
-    sensor_device = device.filter_by_group("sensor")
-    assert set(sensor_device.gates) == {"G3"}
-    assert set(sensor_device.contacts) == {"OUT"}
-    assert sensor_device.name == "test_device_sensor"
+    sensor_configs = device.filter_by_group("sensor")
+    assert set(get_gates(sensor_configs)) == {"G3"}
+    assert set(get_contacts(sensor_configs)) == {"OUT"}
 
 
 def test_device_filter_by_group_unknown_group(create_device):
@@ -112,39 +128,6 @@ def test_device_filter_by_group_unknown_group(create_device):
     # Try to filter by unknown group
     with pytest.raises(DeviceError, match="Group 'unknown' not found"):
         device.filter_by_group("unknown")
-
-
-def test_device_filter_by_group_shares_instruments(create_device):
-    """Test that filtered devices share the same instrument instances."""
-    device_config = DeviceConfig(
-        name="test_device",
-        gates={
-            "G1": make_gate(GateType.PLUNGER, control_channel=1),
-            "G2": make_gate(GateType.BARRIER, control_channel=2),
-        },
-        contacts={},
-        groups={
-            "control": DeviceGroup(gates=["G1"]),
-            "sensor": DeviceGroup(gates=["G2"]),
-        },
-        routines=[],
-        instruments=standard_instrument_configs(),
-    )
-
-    control_inst = MockControlInstrument()
-    measure_inst = MockMeasurementInstrument()
-
-    device = create_device(device_config, control_inst, measure_inst)
-
-    # Filter by groups
-    control_device = device.filter_by_group("control")
-    sensor_device = device.filter_by_group("sensor")
-
-    # Check that instruments are shared (same instance)
-    assert control_device.control_instrument is control_inst
-    assert control_device.measurement_instrument is measure_inst
-    assert sensor_device.control_instrument is control_inst
-    assert sensor_device.measurement_instrument is measure_inst
 
 
 def test_device_get_shared_gates(create_device):
@@ -237,14 +220,14 @@ class TestConditionalFiltering:
         device = create_device(device_config)
 
         # Filter by control group
-        filtered_device = device.filter_by_group("control")
+        filtered_configs = device.filter_by_group("control")
 
         # Should include only specified gates and contacts
-        assert set(filtered_device.gates) == {"G1"}
-        assert set(filtered_device.contacts) == {"IN"}
+        assert set(get_gates(filtered_configs)) == {"G1"}
+        assert set(get_contacts(filtered_configs)) == {"IN"}
 
         # Should include ALL device GPIOs (not specified, so all included)
-        assert set(filtered_device.gpios) == {"A0", "A1", "A2", "VDD"}
+        assert set(get_gpios(filtered_configs)) == {"A0", "A1", "A2", "VDD"}
 
     def test_group_with_omitted_contacts_includes_all_device_contacts(
         self, create_device
@@ -275,14 +258,14 @@ class TestConditionalFiltering:
         device = create_device(device_config)
 
         # Filter by control group
-        filtered_device = device.filter_by_group("control")
+        filtered_configs = device.filter_by_group("control")
 
         # Should include only specified gates and gpios
-        assert set(filtered_device.gates) == {"G1"}
-        assert set(filtered_device.gpios) == {"VDD"}
+        assert set(get_gates(filtered_configs)) == {"G1"}
+        assert set(get_gpios(filtered_configs)) == {"VDD"}
 
         # Should include ALL device contacts (not specified, so all included)
-        assert set(filtered_device.contacts) == {"IN_A", "OUT_A", "OUT_B"}
+        assert set(get_contacts(filtered_configs)) == {"IN_A", "OUT_A", "OUT_B"}
 
     def test_group_with_explicit_gpios_includes_only_specified(self, create_device):
         """Test that when gpios are explicitly specified, ONLY those are included."""
@@ -314,17 +297,18 @@ class TestConditionalFiltering:
         device = create_device(device_config)
 
         # Filter by control group
-        filtered_device = device.filter_by_group("control")
+        filtered_configs = device.filter_by_group("control")
 
         # Should include only specified elements
-        assert set(filtered_device.gates) == {"G1"}
-        assert set(filtered_device.contacts) == {"IN"}
-        assert set(filtered_device.gpios) == {"A0", "VDD"}  # Only specified ones
+        assert set(get_gates(filtered_configs)) == {"G1"}
+        assert set(get_contacts(filtered_configs)) == {"IN"}
+        assert set(get_gpios(filtered_configs)) == {"A0", "VDD"}  # Only specified ones
 
         # Should NOT include A1, A2, VSS
-        assert "A1" not in filtered_device.gpios
-        assert "A2" not in filtered_device.gpios
-        assert "VSS" not in filtered_device.gpios
+        gpios = get_gpios(filtered_configs)
+        assert "A1" not in gpios
+        assert "A2" not in gpios
+        assert "VSS" not in gpios
 
     def test_group_with_explicit_contacts_includes_only_specified(self, create_device):
         """Test that when contacts are explicitly specified, ONLY those are included."""
@@ -354,15 +338,19 @@ class TestConditionalFiltering:
         device = create_device(device_config)
 
         # Filter by control group
-        filtered_device = device.filter_by_group("control")
+        filtered_configs = device.filter_by_group("control")
 
         # Should include only specified elements
-        assert set(filtered_device.gates) == {"G1"}
-        assert set(filtered_device.contacts) == {"IN_A", "OUT_A"}  # Only specified ones
-        assert set(filtered_device.gpios) == {"VDD"}
+        assert set(get_gates(filtered_configs)) == {"G1"}
+        assert set(get_contacts(filtered_configs)) == {
+            "IN_A",
+            "OUT_A",
+        }  # Only specified ones
+        assert set(get_gpios(filtered_configs)) == {"VDD"}
 
         # Should NOT include OUT_B
-        assert "OUT_B" not in filtered_device.contacts
+        contacts = get_contacts(filtered_configs)
+        assert "OUT_B" not in contacts
 
     def test_group_with_empty_contacts_and_gpios_includes_none(self, create_device):
         """Test that when contacts and gpios are explicitly empty lists, NONE are included."""
@@ -393,22 +381,24 @@ class TestConditionalFiltering:
         device = create_device(device_config)
 
         # Filter by control group
-        filtered_device = device.filter_by_group("control")
+        filtered_configs = device.filter_by_group("control")
 
         # Should include specified gates
-        assert set(filtered_device.gates) == {"G1", "G2"}
+        assert set(get_gates(filtered_configs)) == {"G1", "G2"}
 
         # Should NOT include any contacts (empty list specified)
-        assert len(filtered_device.contacts) == 0
-        assert "IN" not in filtered_device.contacts
-        assert "OUT_A" not in filtered_device.contacts
-        assert "OUT_B" not in filtered_device.contacts
+        contacts = get_contacts(filtered_configs)
+        assert len(contacts) == 0
+        assert "IN" not in contacts
+        assert "OUT_A" not in contacts
+        assert "OUT_B" not in contacts
 
         # Should NOT include any gpios (empty list specified)
-        assert len(filtered_device.gpios) == 0
-        assert "VDD" not in filtered_device.gpios
-        assert "VSS" not in filtered_device.gpios
-        assert "A0" not in filtered_device.gpios
+        gpios = get_gpios(filtered_configs)
+        assert len(gpios) == 0
+        assert "VDD" not in gpios
+        assert "VSS" not in gpios
+        assert "A0" not in gpios
 
     def test_mixed_groups_different_filtering_behavior(self, create_device):
         """Test mixed scenario: one group with explicit gpios, one without."""
@@ -442,16 +432,25 @@ class TestConditionalFiltering:
         device = create_device(device_config)
 
         # Filter by control group
-        control_device = device.filter_by_group("control")
-        assert set(control_device.gates) == {"G1"}
-        assert set(control_device.gpios) == {"VDD"}  # Only specified
-        assert set(control_device.contacts) == {"IN", "OUT_A", "OUT_B"}  # All (omitted)
+        control_configs = device.filter_by_group("control")
+        assert set(get_gates(control_configs)) == {"G1"}
+        assert set(get_gpios(control_configs)) == {"VDD"}  # Only specified
+        assert set(get_contacts(control_configs)) == {
+            "IN",
+            "OUT_A",
+            "OUT_B",
+        }  # All (omitted)
 
         # Filter by sensor group
-        sensor_device = device.filter_by_group("sensor")
-        assert set(sensor_device.gates) == {"G2"}
-        assert set(sensor_device.gpios) == {"A0", "A1", "VDD", "VSS"}  # All (omitted)
-        assert set(sensor_device.contacts) == {"OUT_B"}  # Only specified
+        sensor_configs = device.filter_by_group("sensor")
+        assert set(get_gates(sensor_configs)) == {"G2"}
+        assert set(get_gpios(sensor_configs)) == {
+            "A0",
+            "A1",
+            "VDD",
+            "VSS",
+        }  # All (omitted)
+        assert set(get_contacts(sensor_configs)) == {"OUT_B"}  # Only specified
 
     def test_gates_always_filter_explicitly(self, create_device):
         """Test that gates ALWAYS filter explicitly regardless of omission."""
@@ -479,15 +478,16 @@ class TestConditionalFiltering:
         device = create_device(device_config)
 
         # Filter by control group
-        filtered_device = device.filter_by_group("control")
+        filtered_configs = device.filter_by_group("control")
 
         # Should include ONLY specified gates
-        assert set(filtered_device.gates) == {"G1", "G2"}
-        assert "G3" not in filtered_device.gates
+        gates = get_gates(filtered_configs)
+        assert set(gates) == {"G1", "G2"}
+        assert "G3" not in gates
 
         # Contacts and GPIOs should include all (omitted from group)
-        assert set(filtered_device.contacts) == {"IN"}
-        assert set(filtered_device.gpios) == {"VDD"}
+        assert set(get_contacts(filtered_configs)) == {"IN"}
+        assert set(get_gpios(filtered_configs)) == {"VDD"}
 
     def test_gpios_can_be_explicitly_shared_between_groups(self, create_device):
         """Test that GPIOs can be explicitly listed in multiple groups (like contacts)."""
@@ -517,15 +517,16 @@ class TestConditionalFiltering:
         device = create_device(device_config)
 
         # Filter by control group
-        control_device = device.filter_by_group("control")
-        assert set(control_device.gates) == {"G1"}
-        assert set(control_device.gpios) == {"VDD", "VSS"}  # Shared GPIOs
-        assert "A0" not in control_device.gpios
+        control_configs = device.filter_by_group("control")
+        assert set(get_gates(control_configs)) == {"G1"}
+        control_gpios = get_gpios(control_configs)
+        assert set(control_gpios) == {"VDD", "VSS"}  # Shared GPIOs
+        assert "A0" not in control_gpios
 
         # Filter by sensor group
-        sensor_device = device.filter_by_group("sensor")
-        assert set(sensor_device.gates) == {"G2"}
-        assert set(sensor_device.gpios) == {"VDD", "VSS", "A0"}
+        sensor_configs = device.filter_by_group("sensor")
+        assert set(get_gates(sensor_configs)) == {"G2"}
+        assert set(get_gpios(sensor_configs)) == {"VDD", "VSS", "A0"}
 
     def test_non_reservoir_gates_cannot_be_shared(self):
         """Test that non-RESERVOIR gates cannot be explicitly shared between groups."""
@@ -571,12 +572,12 @@ class TestConditionalFiltering:
         device = create_device(device_config)
 
         # Filter by control group
-        control_device = device.filter_by_group("control")
-        assert set(control_device.gates) == {"G1", "RES1"}
+        control_configs = device.filter_by_group("control")
+        assert set(get_gates(control_configs)) == {"G1", "RES1"}
 
         # Filter by sensor group
-        sensor_device = device.filter_by_group("sensor")
-        assert set(sensor_device.gates) == {"G2", "RES1"}
+        sensor_configs = device.filter_by_group("sensor")
+        assert set(get_gates(sensor_configs)) == {"G2", "RES1"}
 
     def test_contacts_can_be_explicitly_shared_between_groups(self, create_device):
         """Test that contacts can be explicitly listed in multiple groups."""
@@ -604,11 +605,11 @@ class TestConditionalFiltering:
         device = create_device(device_config)
 
         # Filter by control group
-        control_device = device.filter_by_group("control")
-        assert set(control_device.gates) == {"G1"}
-        assert set(control_device.contacts) == {"IN", "OUT_A"}
+        control_configs = device.filter_by_group("control")
+        assert set(get_gates(control_configs)) == {"G1"}
+        assert set(get_contacts(control_configs)) == {"IN", "OUT_A"}
 
         # Filter by sensor group
-        sensor_device = device.filter_by_group("sensor")
-        assert set(sensor_device.gates) == {"G2"}
-        assert set(sensor_device.contacts) == {"IN", "OUT_B"}
+        sensor_configs = device.filter_by_group("sensor")
+        assert set(get_gates(sensor_configs)) == {"G2"}
+        assert set(get_contacts(sensor_configs)) == {"IN", "OUT_B"}

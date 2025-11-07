@@ -294,31 +294,25 @@ class RoutineRunner:
         routine_func = _routine_registry[routine_name]
 
         # Filter device by group if specified
-        original_device = None
         if group_name is not None:
             device = getattr(self.resources, "device", None)
             if device is not None and hasattr(device, "filter_by_group"):
-                original_device = device
-                filtered_device = device.filter_by_group(group_name)
-                # Temporarily replace device in resources
-                self.resources.add("device", filtered_device)
+                group_configs = device.filter_by_group(group_name)
+                # Add group configs to resources for routine access
+                self.resources.add("group_configs", group_configs)
                 logger.info("Filtering device to group: %s", group_name)
 
                 # Handle zero_other_groups parameter
                 zero_other_groups = merged_params.get("zero_other_groups", False)
-                if zero_other_groups and hasattr(
-                    original_device, "get_other_group_gates"
-                ):
+                if zero_other_groups and hasattr(device, "get_other_group_gates"):
                     try:
-                        gates_to_zero = original_device.get_other_group_gates(
-                            group_name
-                        )
+                        gates_to_zero = device.get_other_group_gates(group_name)
                         if gates_to_zero:
                             logger.info(
                                 "Zeroing gates from other groups: %s",
                                 gates_to_zero,
                             )
-                            original_device.zero_gates(gates_to_zero)
+                            device.zero_gates(gates_to_zero)
                     except (DeviceError, InstrumentError) as e:
                         logger.warning(
                             "Failed to zero other group gates: %s",
@@ -350,10 +344,6 @@ class RoutineRunner:
             raise RuntimeError(f"Routine '{routine_name}' failed: {e}") from e
 
         finally:
-            # Restore original device if it was filtered
-            if original_device is not None:
-                self.resources.add("device", original_device)
-
             # Close logger session if it was created
             if session is not None and data_logger is not None:
                 data_logger.close_session(session_id=session.session_id)

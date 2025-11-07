@@ -3,7 +3,7 @@
 import pytest
 
 from stanza.exceptions import DeviceError
-from stanza.models import ContactType, DeviceConfig, DeviceGroup, GateType
+from stanza.models import ContactType, DeviceConfig, DeviceGroup, GateType, PadType
 from stanza.routines import (
     RoutineContext,
     RoutineRunner,
@@ -17,6 +17,11 @@ from tests.conftest import (
     make_gate,
     standard_instrument_configs,
 )
+
+
+def get_gates_from_configs(configs):
+    """Extract gate names from channel configs."""
+    return [name for name, config in configs.items() if config.pad_type == PadType.GATE]
 
 
 @pytest.fixture
@@ -84,36 +89,38 @@ class TestRoutineDeviceFiltering:
         group,
         expected_gates,
     ):
-        """Test that routine receives a filtered device with only the group's gates."""
+        """Test that routine receives full device plus group_configs with only the group's gates."""
         runner, original_device, control_inst, measure_inst = (
             routine_runner_with_grouped_device
         )
 
-        # Track what device the routine receives
+        # Track what device and group_configs the routine receives
         received_device = None
+        received_group_configs = None
 
         @routine(name="test_routine")
         def capture_device_routine(ctx: RoutineContext) -> dict:
-            nonlocal received_device
+            nonlocal received_device, received_group_configs
             received_device = ctx.resources.device
+            received_group_configs = getattr(ctx.resources, "group_configs", None)
             return {"gates": list(ctx.resources.device.gates)}
 
         # Run with specified group
         runner.run("test_routine", __group__=group)
 
-        # Verify routine received filtered device
+        # Verify routine received the original device (not filtered)
         assert received_device is not None
-        assert set(received_device.gates) == expected_gates
-        assert set(received_device.gates) != set(original_device.gates)
+        assert received_device is original_device
+        assert set(received_device.gates) == set(original_device.gates)
 
-    @pytest.mark.parametrize(
-        "group,expected_name",
-        [("control", "device_control"), ("sensor", "device_sensor")],
-    )
-    def test_filtered_device_has_correct_name(
-        self, registry_fixture, routine_runner_with_grouped_device, group, expected_name
+        # Verify group_configs were added and contain only group gates
+        assert received_group_configs is not None
+        assert set(get_gates_from_configs(received_group_configs)) == expected_gates
+
+    def test_device_name_unchanged_with_group(
+        self, registry_fixture, routine_runner_with_grouped_device
     ):
-        """Test that filtered device name includes group name."""
+        """Test that device name remains unchanged when group is specified."""
         runner, original_device, _, _ = routine_runner_with_grouped_device
 
         received_device_name = None
@@ -124,9 +131,11 @@ class TestRoutineDeviceFiltering:
             received_device_name = ctx.resources.device.name
             return {}
 
-        runner.run("test_routine", __group__=group)
+        runner.run("test_routine", __group__="control")
 
-        assert received_device_name == expected_name
+        # Device name should still be "device" (not "device_control")
+        assert received_device_name == "device"
+        assert received_device_name == original_device.name
 
     def test_filter_unknown_group_raises_error(
         self, registry_fixture, routine_runner_with_grouped_device
@@ -148,20 +157,28 @@ class TestRoutineDeviceFiltering:
         runner, original_device, _, _ = routine_runner_with_grouped_device
 
         received_device = None
+        received_group_configs = None
 
         @routine(name="test_routine")
         def capture_device_routine(ctx: RoutineContext) -> dict:
-            nonlocal received_device
+            nonlocal received_device, received_group_configs
             received_device = ctx.resources.device
+            received_group_configs = getattr(ctx.resources, "group_configs", None)
             return {"gates": list(ctx.resources.device.gates)}
 
         # Run with 'group' parameter (alias for '__group__')
         runner.run("test_routine", group="control")
 
-        # Verify routine received filtered device
+        # Verify routine received original device and group_configs
         assert received_device is not None
-        assert set(received_device.gates) == {"G1", "G2", "RES1", "RES2"}
-        assert received_device.name == "device_control"
+        assert received_device is original_device
+        assert received_group_configs is not None
+        assert set(get_gates_from_configs(received_group_configs)) == {
+            "G1",
+            "G2",
+            "RES1",
+            "RES2",
+        }
 
     def test_group_parameter_precedence(
         self, registry_fixture, routine_runner_with_grouped_device
@@ -170,20 +187,28 @@ class TestRoutineDeviceFiltering:
         runner, original_device, _, _ = routine_runner_with_grouped_device
 
         received_device = None
+        received_group_configs = None
 
         @routine(name="test_routine")
         def capture_device_routine(ctx: RoutineContext) -> dict:
-            nonlocal received_device
+            nonlocal received_device, received_group_configs
             received_device = ctx.resources.device
+            received_group_configs = getattr(ctx.resources, "group_configs", None)
             return {"gates": list(ctx.resources.device.gates)}
 
         # Run with both parameters - '__group__' should take precedence
         runner.run("test_routine", group="control", __group__="sensor")
 
-        # Verify routine received sensor group device (__group__ takes precedence)
+        # Verify routine received original device with sensor group configs (__group__ takes precedence)
         assert received_device is not None
-        assert set(received_device.gates) == {"G3", "G4", "RES1", "RES2"}
-        assert received_device.name == "device_sensor"
+        assert received_device is original_device
+        assert received_group_configs is not None
+        assert set(get_gates_from_configs(received_group_configs)) == {
+            "G3",
+            "G4",
+            "RES1",
+            "RES2",
+        }
 
 
 class TestZeroOtherGroupsParameter:
@@ -463,17 +488,16 @@ class TestDeviceRestoration:
         # Verify each routine got the correct device
         assert len(devices_received) == 3
 
-        # First routine: control group
-        assert devices_received[0]["name"] == "device_control"
-        assert devices_received[0]["gates"] == {"G1", "G2", "RES1", "RES2"}
-
-        # Second routine: sensor group
-        assert devices_received[1]["name"] == "device_sensor"
-        assert devices_received[1]["gates"] == {"G3", "G4", "RES1", "RES2"}
-
-        # Third routine: original device (no group)
+        # All routines should receive the original device (name stays "device")
+        assert devices_received[0]["name"] == "device"
+        assert devices_received[1]["name"] == "device"
         assert devices_received[2]["name"] == "device"
-        assert devices_received[2]["gates"] == {"G1", "G2", "G3", "G4", "RES1", "RES2"}
+
+        # All routines see the same gates (full device gates)
+        all_gates = {"G1", "G2", "G3", "G4", "RES1", "RES2"}
+        assert devices_received[0]["gates"] == all_gates
+        assert devices_received[1]["gates"] == all_gates
+        assert devices_received[2]["gates"] == all_gates
 
 
 class TestGroupFilteringInstrumentSharing:
