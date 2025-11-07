@@ -54,33 +54,11 @@ from stanza.exceptions import RoutineError
 from stanza.logger.session import LoggerSession
 from stanza.models import GateType
 from stanza.routines import RoutineContext, routine
+from stanza.routines.builtins.utils import filter_gates_by_group
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_SETTLING_TIME_S = 10
-
-
-def filter_gates_by_group(
-    ctx: RoutineContext, gate_list: list[str]
-) -> list[str]:
-    """Filter a list of gates to only include those in the current group.
-
-    If group_configs is available in ctx.resources, filters gates to only
-    include those present in the group. Otherwise, returns the original list.
-
-    Args:
-        ctx: Routine context containing device resources and optional group_configs.
-        gate_list: List of gate names to filter.
-
-    Returns:
-        Filtered list of gates that are in the current group, or original list
-        if no group filtering is active.
-    """
-    group_configs = getattr(ctx.resources, "group_configs", None)
-    if group_configs is not None:
-        group_gates = set(group_configs.keys())
-        return [gate for gate in gate_list if gate in group_gates]
-    return gate_list
 
 
 @routine
@@ -342,7 +320,7 @@ def global_accumulation(
     control_gates = filter_gates_by_group(ctx, ctx.resources.device.control_gates)
     num_points = max(2, int(abs(voltage_bound) / step_size))
     sweep_voltages = np.linspace(0, voltage_bound, num_points)
-    
+
     # Use sweep_nd to sweep all filtered gates together
     voltages_list = [[voltage] * len(control_gates) for voltage in sweep_voltages]
     _, currents = ctx.resources.device.sweep_nd(
@@ -359,9 +337,7 @@ def global_accumulation(
         raise RoutineError(f"Error in global_accumulation: {str(e)}") from e
 
     ctx.resources.device.jump(
-        dict.fromkeys(
-            control_gates, turn_on_analysis["saturation_voltage"]
-        ),
+        dict.fromkeys(control_gates, turn_on_analysis["saturation_voltage"]),
         wait_for_settling=True,
     )
 
@@ -458,12 +434,12 @@ def reservoir_characterization(
     plunger_gates = ctx.resources.device.get_gates_by_type(GateType.PLUNGER)
     barrier_gates = ctx.resources.device.get_gates_by_type(GateType.BARRIER)
     reservoirs = ctx.resources.device.get_gates_by_type(GateType.RESERVOIR)
-    
+
     # Filter gates by group if group_configs is available
     plunger_gates = filter_gates_by_group(ctx, plunger_gates)
     barrier_gates = filter_gates_by_group(ctx, barrier_gates)
     reservoirs = filter_gates_by_group(ctx, reservoirs)
-    
+
     finger_gates = plunger_gates + barrier_gates
     gates_to_accumulate = finger_gates + reservoirs
     for reservoir in reservoirs:
@@ -569,9 +545,11 @@ def finger_gate_characterization(
 
     max_safe_voltage_bound = leakage_test_results["max_safe_voltage_bound"]
     min_safe_voltage_bound = leakage_test_results["min_safe_voltage_bound"]
-    print(f"max_safe_voltage_bound: {max_safe_voltage_bound}, min_safe_voltage_bound: {min_safe_voltage_bound}")
+    print(
+        f"max_safe_voltage_bound: {max_safe_voltage_bound}, min_safe_voltage_bound: {min_safe_voltage_bound}"
+    )
     print(f"charge_carrier_type: {charge_carrier_type}")
-    
+
     voltage_left_bound = (
         min_safe_voltage_bound
         if charge_carrier_type == "electron"
@@ -591,12 +569,12 @@ def finger_gate_characterization(
     plunger_gates = ctx.resources.device.get_gates_by_type(GateType.PLUNGER)
     barrier_gates = ctx.resources.device.get_gates_by_type(GateType.BARRIER)
     reservoirs = ctx.resources.device.get_gates_by_type(GateType.RESERVOIR)
-    
+
     # Filter gates by group if group_configs is available
     plunger_gates = filter_gates_by_group(ctx, plunger_gates)
     barrier_gates = filter_gates_by_group(ctx, barrier_gates)
     reservoirs = filter_gates_by_group(ctx, reservoirs)
-    
+
     finger_gates = plunger_gates + barrier_gates
     gates_to_accumulate = finger_gates + reservoirs
 
