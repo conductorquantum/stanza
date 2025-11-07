@@ -5,17 +5,16 @@ import pytest
 
 from stanza.base.channels import ChannelConfig
 from stanza.drivers.qswitch import QSwitch, QSwitchChannel
-from stanza.models import ControlInstrumentConfig, GateType, InstrumentType, PadType
+from stanza.models import BreakoutBoxInstrumentConfig, GateType, InstrumentType, PadType
 
 
 @pytest.fixture
 def qswitch_sim():
-    instrument_config = ControlInstrumentConfig(
+    instrument_config = BreakoutBoxInstrumentConfig(
         name="qswitch_sim",
         type=InstrumentType.BREAKOUT_BOX,
         serial_addr="192.168.1.100",
         port=5025,
-        slew_rate=1.0,
     )
 
     channel_configs = {
