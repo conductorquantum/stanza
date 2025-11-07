@@ -41,6 +41,13 @@ from typing import Any
 
 import numpy as np
 
+try:
+    from scipy.ndimage import gaussian_filter
+
+    HAS_SCIPY = True
+except ImportError:
+    HAS_SCIPY = False
+
 from stanza.analysis.criterion import fit_quality_criterion
 from stanza.analysis.fitting import fit_pinchoff_parameters
 from stanza.exceptions import RoutineError
@@ -332,7 +339,7 @@ def global_accumulation(
 
     ctx.resources.device.jump(
         dict.fromkeys(
-            ctx.resources.device.control_gates, turn_on_analysis["cutoff_voltage"]
+            ctx.resources.device.control_gates, turn_on_analysis["saturation_voltage"]
         ),
         wait_for_settling=True,
     )
@@ -344,7 +351,7 @@ def global_accumulation(
         )
 
     return {
-        "global_turn_on_voltage": turn_on_analysis["cutoff_voltage"],
+        "global_turn_on_voltage": turn_on_analysis["saturation_voltage"],
     }
 
 
@@ -426,21 +433,19 @@ def reservoir_characterization(
         if charge_carrier_type == "electron"
         else min_safe_voltage_bound
     )
-    voltage_cut_off = 1.2 * global_accumulation_results["global_turn_on_voltage"]
 
-    global_turn_on_voltage = (
-        min(voltage_cut_off, max_safe_voltage_bound)
-        if charge_carrier_type == "electron"
-        else max(voltage_cut_off, min_safe_voltage_bound)
-    )
+    global_turn_on_voltage = global_accumulation_results["global_turn_on_voltage"]
 
     reservoir_characterization_results = {}
-
+    plunger_gates = ctx.resources.device.get_gates_by_type(GateType.PLUNGER)
+    barrier_gates = ctx.resources.device.get_gates_by_type(GateType.BARRIER)
     reservoirs = ctx.resources.device.get_gates_by_type(GateType.RESERVOIR)
+    finger_gates = plunger_gates + barrier_gates
+    gates_to_accumulate = finger_gates + reservoirs
     for reservoir in reservoirs:
-        other_reservoirs = [r for r in reservoirs if r != reservoir]
+        other_gates = [g for g in gates_to_accumulate if g != reservoir]
         ctx.resources.device.jump(
-            dict.fromkeys(other_reservoirs, global_turn_on_voltage),
+            dict.fromkeys(other_gates, global_turn_on_voltage),
             wait_for_settling=True,
         )
         time.sleep(DEFAULT_SETTLING_TIME_S)
@@ -782,7 +787,13 @@ def analyze_single_gate_heuristic(
 
     pinchoff_fit = fit_pinchoff_parameters(voltages, currents, percent_threshold=0.05)
     y_pred = pinchoff_fit.fit_curve(voltages)
-    is_good_fit = fit_quality_criterion(voltages, currents, y_pred)
+
+    if not HAS_SCIPY:
+        raise ImportError(
+            "scipy is not installed. Install with: pip install cq-stanza[routines]"
+        )
+    filtered_currents = gaussian_filter(currents, sigma=2.0)
+    is_good_fit = fit_quality_criterion(voltages, filtered_currents, y_pred)
 
     if not is_good_fit:
         raise ValueError("Curve fit quality is poor (low R² or high NRMSE)")
