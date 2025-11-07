@@ -60,6 +60,29 @@ logger = logging.getLogger(__name__)
 DEFAULT_SETTLING_TIME_S = 10
 
 
+def filter_gates_by_group(
+    ctx: RoutineContext, gate_list: list[str]
+) -> list[str]:
+    """Filter a list of gates to only include those in the current group.
+
+    If group_configs is available in ctx.resources, filters gates to only
+    include those present in the group. Otherwise, returns the original list.
+
+    Args:
+        ctx: Routine context containing device resources and optional group_configs.
+        gate_list: List of gate names to filter.
+
+    Returns:
+        Filtered list of gates that are in the current group, or original list
+        if no group filtering is active.
+    """
+    group_configs = getattr(ctx.resources, "group_configs", None)
+    if group_configs is not None:
+        group_gates = set(group_configs.keys())
+        return [gate for gate in gate_list if gate in group_gates]
+    return gate_list
+
+
 @routine
 def noise_floor_measurement(
     ctx: RoutineContext,
@@ -92,9 +115,11 @@ def noise_floor_measurement(
         - The current_std value is commonly used in leakage_test as min_current_threshold
     """
     currents = []
+    control_gates = filter_gates_by_group(ctx, ctx.resources.device.control_gates)
+    control_contacts = filter_gates_by_group(ctx, ctx.resources.device.control_contacts)
     ctx.resources.device.jump(
         dict.fromkeys(
-            ctx.resources.device.control_gates + ctx.resources.device.control_contacts,
+            control_gates + control_contacts,
             0.0,
         )
     )
@@ -175,7 +200,7 @@ def leakage_test(
     leakage_threshold_count = int(leakage_threshold_count)
     num_points = int(num_points)
 
-    control_gates = ctx.resources.device.control_gates
+    control_gates = filter_gates_by_group(ctx, ctx.resources.device.control_gates)
     control_gate_configs = {
         gate: ctx.resources.device.channel_configs[gate] for gate in control_gates
     }
@@ -314,10 +339,15 @@ def global_accumulation(
 
     ctx.resources.device.jump({bias_gate: bias_voltage}, wait_for_settling=True)
 
+    control_gates = filter_gates_by_group(ctx, ctx.resources.device.control_gates)
     num_points = max(2, int(abs(voltage_bound) / step_size))
     sweep_voltages = np.linspace(0, voltage_bound, num_points)
-    _, currents = ctx.resources.device.sweep_all(
-        voltages=sweep_voltages,
+    
+    # Use sweep_nd to sweep all filtered gates together
+    voltages_list = [[voltage] * len(control_gates) for voltage in sweep_voltages]
+    _, currents = ctx.resources.device.sweep_nd(
+        gate_electrodes=control_gates,
+        voltages=voltages_list,
         measure_electrode=measure_electrode,
         session=session,
     )
@@ -330,7 +360,7 @@ def global_accumulation(
 
     ctx.resources.device.jump(
         dict.fromkeys(
-            ctx.resources.device.control_gates, turn_on_analysis["saturation_voltage"]
+            control_gates, turn_on_analysis["saturation_voltage"]
         ),
         wait_for_settling=True,
     )
@@ -421,13 +451,19 @@ def reservoir_characterization(
         if charge_carrier_type == "electron"
         else min_safe_voltage_bound
     )
-
+    voltage_bounds_range = abs(voltage_right_bound - voltage_left_bound)
     global_turn_on_voltage = global_accumulation_results["global_turn_on_voltage"]
 
     reservoir_characterization_results = {}
     plunger_gates = ctx.resources.device.get_gates_by_type(GateType.PLUNGER)
     barrier_gates = ctx.resources.device.get_gates_by_type(GateType.BARRIER)
     reservoirs = ctx.resources.device.get_gates_by_type(GateType.RESERVOIR)
+    
+    # Filter gates by group if group_configs is available
+    plunger_gates = filter_gates_by_group(ctx, plunger_gates)
+    barrier_gates = filter_gates_by_group(ctx, barrier_gates)
+    reservoirs = filter_gates_by_group(ctx, reservoirs)
+    
     finger_gates = plunger_gates + barrier_gates
     gates_to_accumulate = finger_gates + reservoirs
     for reservoir in reservoirs:
@@ -442,7 +478,7 @@ def reservoir_characterization(
         )
         time.sleep(DEFAULT_SETTLING_TIME_S)
 
-        num_points = max(2, int(abs(voltage_right_bound / step_size)))
+        num_points = max(2, int(voltage_bounds_range / step_size))
         voltages, currents = ctx.resources.device.sweep_1d(
             reservoir,
             np.linspace(voltage_left_bound, voltage_right_bound, num_points),
@@ -533,7 +569,9 @@ def finger_gate_characterization(
 
     max_safe_voltage_bound = leakage_test_results["max_safe_voltage_bound"]
     min_safe_voltage_bound = leakage_test_results["min_safe_voltage_bound"]
-
+    print(f"max_safe_voltage_bound: {max_safe_voltage_bound}, min_safe_voltage_bound: {min_safe_voltage_bound}")
+    print(f"charge_carrier_type: {charge_carrier_type}")
+    
     voltage_left_bound = (
         min_safe_voltage_bound
         if charge_carrier_type == "electron"
@@ -544,24 +582,34 @@ def finger_gate_characterization(
         if charge_carrier_type == "electron"
         else min_safe_voltage_bound
     )
+    voltage_bounds_range = abs(voltage_right_bound - voltage_left_bound)
     global_turn_on_voltage = global_accumulation_results["global_turn_on_voltage"]
+    print(f"global_turn_on_voltage: {global_turn_on_voltage}")
 
     finger_gate_characterization_results = {}
 
     plunger_gates = ctx.resources.device.get_gates_by_type(GateType.PLUNGER)
     barrier_gates = ctx.resources.device.get_gates_by_type(GateType.BARRIER)
     reservoirs = ctx.resources.device.get_gates_by_type(GateType.RESERVOIR)
+    
+    # Filter gates by group if group_configs is available
+    plunger_gates = filter_gates_by_group(ctx, plunger_gates)
+    barrier_gates = filter_gates_by_group(ctx, barrier_gates)
+    reservoirs = filter_gates_by_group(ctx, reservoirs)
+    
     finger_gates = plunger_gates + barrier_gates
     gates_to_accumulate = finger_gates + reservoirs
 
     for gate in finger_gates:
         other_gates = [g for g in gates_to_accumulate if g != gate]
+        print(f"Jumping to global turn-on voltage for other gates: {other_gates}")
         ctx.resources.device.jump(
             dict.fromkeys(other_gates, global_turn_on_voltage), wait_for_settling=True
         )  # Make sure the other gates are accumulated before sweeping the finger gate
         ctx.resources.device.jump({gate: voltage_left_bound}, wait_for_settling=True)
+        print(f"Jumped to voltage left bound for gate: {gate}")
         time.sleep(DEFAULT_SETTLING_TIME_S)
-        num_points = max(2, int(abs(voltage_right_bound / step_size)))
+        num_points = max(2, int(voltage_bounds_range / step_size))
         voltages, currents = ctx.resources.device.sweep_1d(
             gate,
             np.linspace(voltage_left_bound, voltage_right_bound, num_points),
@@ -774,7 +822,6 @@ def analyze_single_gate_heuristic(
     y_pred = pinchoff_fit.fit_curve(voltages)
     filtered_currents = gaussian_filter(currents, sigma=2.0)
     is_good_fit = fit_quality_criterion(voltages, filtered_currents, y_pred)
-
     if not is_good_fit:
         raise ValueError("Curve fit quality is poor (low R² or high NRMSE)")
 
