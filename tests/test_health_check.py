@@ -449,10 +449,14 @@ class TestAnalyzeSingleGateHeuristic:
         np.random.seed(42)
         noise = np.random.normal(0, 0.01 * np.ptp(currents), size=currents.shape)
         result = analyze_single_gate_heuristic(voltages, currents + noise)
+        # Saturation should always be at higher voltage (higher index) than cutoff
+        # This ensures saturation_voltage >= cutoff_voltage regardless of curve type
+        assert result["saturation_voltage"] >= result["cutoff_voltage"]
+        # Transition voltage should be between cutoff and saturation
         assert (
-            result["saturation_voltage"]
+            result["cutoff_voltage"]
             < result["transition_voltage"]
-            < result["cutoff_voltage"]
+            < result["saturation_voltage"]
         )
 
 
