@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import sys
 import threading
 import time
 from typing import Any
@@ -33,9 +34,15 @@ class ServerBackend:
     Runs embedded server in background thread. Server dies when parent process exits.
     """
 
-    def __init__(self, port: int = 5006, daemon: bool = True) -> None:
+    def __init__(
+        self,
+        port: int = 5006,
+        daemon: bool = True,
+        session_token_expiration: int = sys.maxsize,
+    ) -> None:
         self.port = port
         self.daemon = daemon
+        self.session_token_expiration = session_token_expiration
         self._server: Server | None = None
         self._doc: Any = None
         self._running = False
@@ -76,6 +83,7 @@ class ServerBackend:
                 {"/": app},
                 port=self.port,
                 allow_websocket_origin=[f"localhost:{self.port}"],
+                session_token_expiration=self.session_token_expiration,
             )
 
             self._server.start()
