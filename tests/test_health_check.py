@@ -53,9 +53,6 @@ class MockDevice:
     def jump(self, voltage_dict, wait_for_settling=False):
         self.voltages.update(voltage_dict)
 
-    def sweep_all(self, voltages, measure_electrode, session=None):
-        return voltages, pinchoff_curve(voltages, 1.0, 1.0, 1.0)
-
     def sweep_1d(self, gate, voltages, measure_electrode, session=None):
         return voltages, pinchoff_curve(voltages, 1.0, 1.0, 1.0)
 
@@ -87,10 +84,6 @@ class MockLoggerSession:
 
 class HighQualityMockDevice(MockDevice):
     """Mock device that returns high-quality pinchoff curves."""
-
-    def sweep_all(self, voltages, measure_electrode, session=None):
-        voltages_array = np.array(voltages)
-        return voltages_array, pinchoff_curve(voltages_array, 1.5, 3.0, -1.5)
 
     def sweep_1d(self, gate, voltages, measure_electrode, session=None):
         voltages_array = np.array(voltages)
@@ -276,7 +269,9 @@ class TestGlobalAccumulation:
                 self.sweep_nd_called = False
                 self.sweep_params = {}
 
-            def sweep_nd(self, gate_electrodes, voltages, measure_electrode, session=None):
+            def sweep_nd(
+                self, gate_electrodes, voltages, measure_electrode, session=None
+            ):
                 self.sweep_nd_called = True
                 self.sweep_params = {
                     "gate_electrodes": gate_electrodes,
