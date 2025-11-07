@@ -1,9 +1,9 @@
-"""Tests for RoutineRunner group filtering and zero_other_groups functionality."""
+"""Tests for RoutineRunner group filtering functionality."""
 
 import pytest
 
 from stanza.exceptions import DeviceError
-from stanza.models import ContactType, DeviceConfig, DeviceGroup, GateType
+from stanza.models import DeviceConfig, DeviceGroup, GateType
 from stanza.routines import (
     RoutineContext,
     RoutineRunner,
@@ -13,7 +13,6 @@ from stanza.routines import (
 from tests.conftest import (
     MockControlInstrument,
     MockMeasurementInstrument,
-    make_contact,
     make_gate,
     standard_instrument_configs,
 )
@@ -184,213 +183,6 @@ class TestRoutineDeviceFiltering:
         assert received_device is not None
         assert set(received_device.gates) == {"G3", "G4", "RES1", "RES2"}
         assert received_device.name == "device_sensor"
-
-
-class TestZeroOtherGroupsParameter:
-    """Test zero_other_groups parameter functionality."""
-
-    def test_zero_other_groups_zeros_non_group_gates(
-        self, registry_fixture, routine_runner_with_grouped_device
-    ):
-        """Test that zero_other_groups=True zeros gates from other groups."""
-        runner, original_device, control_inst, _ = routine_runner_with_grouped_device
-
-        # Set initial voltages on all gates
-        original_device.jump(
-            {
-                "G1": 0.5,
-                "G2": 0.5,
-                "G3": 0.5,
-                "G4": 0.5,
-                "RES1": 0.5,
-                "RES2": 0.5,
-            }
-        )
-
-        @routine(name="test_routine")
-        def check_voltages_routine(ctx: RoutineContext, **kwargs) -> dict:
-            # Check voltages during routine execution
-            return {
-                "G1": control_inst.voltages.get("G1"),
-                "G3": control_inst.voltages.get("G3"),
-            }
-
-        # Run with control group and zero_other_groups=True
-        runner.run("test_routine", __group__="control", zero_other_groups=True)
-
-        # G3 and G4 (sensor group gates) should be zeroed
-        assert control_inst.voltages["G3"] == 0.0
-        assert control_inst.voltages["G4"] == 0.0
-
-        # G1 and G2 (control group gates) should still have their values
-        assert control_inst.voltages["G1"] == 0.5
-        assert control_inst.voltages["G2"] == 0.5
-
-    def test_zero_other_groups_does_not_zero_shared_gates(
-        self, registry_fixture, routine_runner_with_grouped_device
-    ):
-        """Test that zero_other_groups=True does NOT zero shared RESERVOIR gates."""
-        runner, original_device, control_inst, _ = routine_runner_with_grouped_device
-
-        # Set initial voltages including shared reservoirs
-        original_device.jump(
-            {
-                "G1": 0.5,
-                "G3": 0.5,
-                "RES1": 0.7,
-                "RES2": 0.8,
-            }
-        )
-
-        @routine(name="test_routine")
-        def simple_routine(ctx: RoutineContext, **kwargs) -> dict:
-            return {}
-
-        # Run with control group and zero_other_groups=True
-        runner.run("test_routine", __group__="control", zero_other_groups=True)
-
-        # Shared RESERVOIR gates should NOT be zeroed
-        assert control_inst.voltages["RES1"] == 0.7
-        assert control_inst.voltages["RES2"] == 0.8
-
-        # Non-shared gate from other group should be zeroed
-        assert control_inst.voltages["G3"] == 0.0
-
-    def test_zero_other_groups_false_skips_zeroing(
-        self, registry_fixture, routine_runner_with_grouped_device
-    ):
-        """Test that zero_other_groups=False (default) skips zeroing."""
-        runner, original_device, control_inst, _ = routine_runner_with_grouped_device
-
-        # Set initial voltages
-        original_device.jump({"G1": 0.5, "G3": 0.5})
-
-        @routine(name="test_routine")
-        def simple_routine(ctx: RoutineContext, **kwargs) -> dict:
-            return {}
-
-        # Run with control group but zero_other_groups=False (default)
-        runner.run("test_routine", __group__="control", zero_other_groups=False)
-
-        # G3 should NOT be zeroed
-        assert control_inst.voltages["G3"] == 0.5
-
-    def test_zero_other_groups_error_logged_but_routine_continues(
-        self, registry_fixture, routine_runner_with_grouped_device, caplog
-    ):
-        """Test that zeroing errors are logged as warnings but routine continues."""
-        runner, original_device, control_inst, _ = routine_runner_with_grouped_device
-
-        # Make control instrument fail on set_voltage
-        control_inst.should_fail = True
-
-        routine_executed = False
-
-        @routine(name="test_routine")
-        def track_execution_routine(ctx: RoutineContext, **kwargs) -> dict:
-            nonlocal routine_executed
-            routine_executed = True
-            return {}
-
-        # This should log a warning but continue
-        runner.run("test_routine", __group__="control", zero_other_groups=True)
-
-        # Routine should still execute despite zeroing failure
-        assert routine_executed
-
-        # Check that warning was logged
-        assert any(
-            "Failed to zero other group gates" in record.message
-            for record in caplog.records
-        )
-
-    def test_zero_other_groups_respects_conditional_filtering(
-        self, registry_fixture, create_device
-    ):
-        """Test that zero_other_groups respects conditional filtering logic.
-
-        When GPIOs/contacts are omitted from group definition, they are accessible
-        to all groups (conditional filtering). Therefore, they should NOT be zeroed
-        by zero_other_groups.
-        """
-        from stanza.models import GPIO, GPIOType
-
-        # Create device with gates, contacts, and GPIOs
-        device_config = DeviceConfig(
-            name="device",
-            gates={
-                "G1": make_gate(GateType.PLUNGER, control_channel=1),
-                "G2": make_gate(GateType.BARRIER, control_channel=2),
-                "G3": make_gate(GateType.PLUNGER, control_channel=3),
-                "G4": make_gate(GateType.BARRIER, control_channel=4),
-            },
-            contacts={
-                "IN": make_contact(ContactType.SOURCE, measure_channel=1),
-                "OUT_A": make_contact(ContactType.DRAIN, measure_channel=2),
-                "OUT_B": make_contact(ContactType.DRAIN, measure_channel=3),
-            },
-            gpios={
-                "VDD": GPIO(
-                    type=GPIOType.INPUT,
-                    control_channel=10,
-                    v_lower_bound=-3.0,
-                    v_upper_bound=3.0,
-                ),
-                "VSS": GPIO(
-                    type=GPIOType.INPUT,
-                    control_channel=11,
-                    v_lower_bound=-3.0,
-                    v_upper_bound=3.0,
-                ),
-            },
-            groups={
-                # control group: omits gpios and contacts (conditional filtering)
-                "control": DeviceGroup(gates=["G1", "G2"]),
-                # sensor group: omits gpios and contacts (conditional filtering)
-                "sensor": DeviceGroup(gates=["G3", "G4"]),
-            },
-            routines=[],
-            instruments=standard_instrument_configs(),
-        )
-
-        control_inst = MockControlInstrument()
-        measure_inst = MockMeasurementInstrument()
-
-        device = create_device(device_config, control_inst, measure_inst)
-        runner = RoutineRunner(resources=[device])
-
-        # Set initial voltages on all pads
-        device.jump(
-            {
-                "G1": 0.5,
-                "G2": 0.5,
-                "G3": 0.5,
-                "G4": 0.5,
-                "VDD": 1.5,
-                "VSS": -1.5,
-            }
-        )
-
-        @routine(name="test_routine")
-        def simple_routine(ctx: RoutineContext, **kwargs) -> dict:
-            return {}
-
-        # Run with control group and zero_other_groups=True
-        runner.run("test_routine", __group__="control", zero_other_groups=True)
-
-        # Gates from sensor group should be zeroed
-        assert control_inst.voltages["G3"] == 0.0
-        assert control_inst.voltages["G4"] == 0.0
-
-        # Gates from control group should NOT be zeroed
-        assert control_inst.voltages["G1"] == 0.5
-        assert control_inst.voltages["G2"] == 0.5
-
-        # GPIOs should NOT be zeroed (accessible to control group via conditional filtering)
-        assert control_inst.voltages["VDD"] == 1.5
-        assert control_inst.voltages["VSS"] == -1.5
-
-        # Note: Contacts don't have control channels in this test, so they can't be zeroed
 
 
 class TestDeviceRestoration:

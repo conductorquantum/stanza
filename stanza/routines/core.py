@@ -3,7 +3,6 @@ from collections.abc import Callable
 from typing import Any
 
 from stanza.context import StanzaSession
-from stanza.exceptions import DeviceError, InstrumentError
 from stanza.logger.data_logger import DataLogger
 from stanza.models import DeviceConfig
 from stanza.registry import ResourceRegistry, ResultsRegistry
@@ -303,27 +302,6 @@ class RoutineRunner:
                 # Temporarily replace device in resources
                 self.resources.add("device", filtered_device)
                 logger.info("Filtering device to group: %s", group_name)
-
-                # Handle zero_other_groups parameter
-                zero_other_groups = merged_params.get("zero_other_groups", False)
-                if zero_other_groups and hasattr(
-                    original_device, "get_other_group_gates"
-                ):
-                    try:
-                        gates_to_zero = original_device.get_other_group_gates(
-                            group_name
-                        )
-                        if gates_to_zero:
-                            logger.info(
-                                "Zeroing gates from other groups: %s",
-                                gates_to_zero,
-                            )
-                            original_device.zero_gates(gates_to_zero)
-                    except (DeviceError, InstrumentError) as e:
-                        logger.warning(
-                            "Failed to zero other group gates: %s",
-                            e,
-                        )
 
         # Create logger session if logger exists and has create_session method
         data_logger = getattr(self.resources, "logger", None)

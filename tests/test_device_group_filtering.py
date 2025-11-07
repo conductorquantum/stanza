@@ -147,64 +147,6 @@ def test_device_filter_by_group_shares_instruments(create_device):
     assert sensor_device.measurement_instrument is measure_inst
 
 
-def test_device_get_shared_gates(create_device):
-    """Test getting list of shared gates."""
-    device_config = DeviceConfig(
-        name="test_device",
-        gates={
-            "G1": make_gate(GateType.PLUNGER, control_channel=1),
-            "G2": make_gate(GateType.BARRIER, control_channel=2),
-            "RES1": make_gate(GateType.RESERVOIR, control_channel=3),
-            "RES2": make_gate(GateType.RESERVOIR, control_channel=4),
-        },
-        contacts={},
-        groups={
-            "control": DeviceGroup(gates=["G1", "RES1", "RES2"]),
-            "sensor": DeviceGroup(gates=["G2", "RES1", "RES2"]),
-        },
-        routines=[],
-        instruments=standard_instrument_configs(),
-    )
-
-    device = create_device(device_config)
-
-    # Check shared gates
-    shared_gates = device.get_shared_gates()
-    assert set(shared_gates) == {"RES1", "RES2"}
-
-
-def test_device_get_other_group_gates(create_device):
-    """Test getting gates from other groups (excluding shared)."""
-    device_config = DeviceConfig(
-        name="test_device",
-        gates={
-            "G1": make_gate(GateType.PLUNGER, control_channel=1),
-            "G2": make_gate(GateType.BARRIER, control_channel=2),
-            "G3": make_gate(GateType.PLUNGER, control_channel=3),
-            "RES1": make_gate(GateType.RESERVOIR, control_channel=4),
-        },
-        contacts={},
-        groups={
-            "control": DeviceGroup(gates=["G1", "G2", "RES1"]),
-            "sensor": DeviceGroup(gates=["G3", "RES1"]),
-        },
-        routines=[],
-        instruments=standard_instrument_configs(),
-    )
-
-    device = create_device(device_config)
-
-    # Get gates from other groups (not in control, not shared)
-    other_gates = device.get_other_group_gates("control")
-    # Should get G3 (from sensor group), but NOT RES1 (shared)
-    assert set(other_gates) == {"G3"}
-
-    # Get gates from other groups (not in sensor, not shared)
-    other_gates = device.get_other_group_gates("sensor")
-    # Should get G1, G2 (from control group), but NOT RES1 (shared)
-    assert set(other_gates) == {"G1", "G2"}
-
-
 class TestConditionalFiltering:
     """Tests for conditional filtering of GPIOs and contacts."""
 
