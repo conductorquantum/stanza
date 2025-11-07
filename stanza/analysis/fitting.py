@@ -110,12 +110,12 @@ def derivative_extrema_indices(x: np.ndarray, y: np.ndarray) -> tuple[int, int, 
 
     if y[imin_second] < y[imax_second]:
         cut_off_v_ind = imin_second
-        conducting_v_ind = imax_second
+        saturation_v_ind = imax_second
     else:
         cut_off_v_ind = imax_second
-        conducting_v_ind = imin_second
+        saturation_v_ind = imin_second
 
-    return transition_v_ind, conducting_v_ind, cut_off_v_ind
+    return transition_v_ind, saturation_v_ind, cut_off_v_ind
 
 
 def _compute_initial_params(v_norm: np.ndarray, i_norm: np.ndarray) -> np.ndarray:
@@ -205,7 +205,9 @@ def _map_index_to_voltage(index: int, voltages: np.ndarray) -> float | None:
 
 
 def compute_indices_from_threshold(
-    fitted_current: np.ndarray, percent_threshold: float
+    fitted_current: np.ndarray,
+    percent_threshold: float,
+    original_current: np.ndarray | None = None,
 ) -> tuple[int, int]:
     """Find cutoff and saturation indices based on threshold percentages.
 
@@ -220,11 +222,14 @@ def compute_indices_from_threshold(
         fitted_current: Fitted current values (normalized or unnormalized)
         percent_threshold: Percentage (0 to 1) defining distance from min/max.
             For example, 0.1 means thresholds at 10% and 90% of the range.
+        original_current: Optional original current values before normalization.
+            If provided and all values are negative, uses magnitude to determine inversion.
 
     Returns:
         Tuple of (cutoff_index, saturation_index) where:
             - cutoff_index: Index where current enters the transition region from cutoff
             - saturation_index: Index where current enters the saturation region
+            Note: saturation_index is always >= cutoff_index (saturation occurs later in the voltage sweep)
     """
     min_threshold = fitted_current.min() + percent_threshold * (
         fitted_current.max() - fitted_current.min()
@@ -233,23 +238,35 @@ def compute_indices_from_threshold(
         fitted_current.max() - fitted_current.min()
     )
 
-    is_inverted = fitted_current[-1] < fitted_current[0]
-    return (
-        int(
-            np.argmax(
-                fitted_current <= min_threshold
-                if is_inverted
-                else fitted_current >= min_threshold
-            )
-        ),
-        int(
-            np.argmax(
-                fitted_current <= max_threshold
-                if is_inverted
-                else fitted_current >= max_threshold
-            )
-        ),
+    # Use magnitude to determine inversion when original current is negative
+    if original_current is not None and np.all(original_current < 0):
+        # All negative: check if magnitude is increasing (current becoming more negative)
+        # If magnitude increases, current is decreasing (more negative), so it's inverted
+        is_inverted = np.abs(original_current[-1]) > np.abs(original_current[0])
+    else:
+        # Use standard comparison for mixed or positive currents
+        is_inverted = fitted_current[-1] < fitted_current[0]
+
+    cutoff_idx = int(
+        np.argmax(
+            fitted_current <= min_threshold
+            if is_inverted
+            else fitted_current >= min_threshold
+        )
     )
+    saturation_idx = int(
+        np.argmax(
+            fitted_current <= max_threshold
+            if is_inverted
+            else fitted_current >= max_threshold
+        )
+    )
+
+    # Ensure saturation_index is always the higher index (later in voltage sweep)
+    if saturation_idx < cutoff_idx:
+        cutoff_idx, saturation_idx = saturation_idx, cutoff_idx
+
+    return cutoff_idx, saturation_idx
 
 
 def fit_pinchoff_parameters(
@@ -295,7 +312,7 @@ def fit_pinchoff_parameters(
 
     if percent_threshold is not None:
         cut_off_v_ind, saturation_v_ind = compute_indices_from_threshold(
-            i_fit, percent_threshold
+            i_fit, percent_threshold, original_current=filtered_current
         )
 
     return PinchoffFitResult(

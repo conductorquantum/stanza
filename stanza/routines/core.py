@@ -3,7 +3,6 @@ from collections.abc import Callable
 from typing import Any
 
 from stanza.context import StanzaSession
-from stanza.exceptions import DeviceError, InstrumentError
 from stanza.logger.data_logger import DataLogger
 from stanza.models import DeviceConfig
 from stanza.registry import ResourceRegistry, ResultsRegistry
@@ -205,7 +204,7 @@ class RoutineRunner:
         if routine_config.parameters:
             config_data.update(routine_config.parameters)
         if hasattr(routine_config, "group") and routine_config.group is not None:
-            config_data["__group__"] = routine_config.group
+            config_data["group"] = routine_config.group
 
         if config_data:
             routine_configs[routine_config.name] = config_data
@@ -281,14 +280,7 @@ class RoutineRunner:
         merged_params = {**parent_params, **config, **params}
 
         # Extract group information if present (not passed to routine as parameter)
-        # Support both 'group' and '__group__' for convenience
-        # '__group__' takes precedence if both are provided
-        if "__group__" in merged_params:
-            group_name = merged_params.pop("__group__", None)
-            # Remove 'group' if it was also provided to avoid passing it to routine
-            merged_params.pop("group", None)
-        else:
-            group_name = merged_params.pop("group", None)
+        group_name = merged_params.pop("group", None)
 
         # Get the routine function from global registry
         routine_func = _routine_registry[routine_name]
@@ -301,23 +293,6 @@ class RoutineRunner:
                 # Add group configs to resources for routine access
                 self.resources.add("group_configs", group_configs)
                 logger.info("Filtering device to group: %s", group_name)
-
-                # Handle zero_other_groups parameter
-                zero_other_groups = merged_params.get("zero_other_groups", False)
-                if zero_other_groups and hasattr(device, "get_other_group_gates"):
-                    try:
-                        gates_to_zero = device.get_other_group_gates(group_name)
-                        if gates_to_zero:
-                            logger.info(
-                                "Zeroing gates from other groups: %s",
-                                gates_to_zero,
-                            )
-                            device.zero_gates(gates_to_zero)
-                    except (DeviceError, InstrumentError) as e:
-                        logger.warning(
-                            "Failed to zero other group gates: %s",
-                            e,
-                        )
 
         # Create logger session if logger exists and has create_session method
         data_logger = getattr(self.resources, "logger", None)
@@ -388,7 +363,7 @@ class RoutineRunner:
             # Extract group from routine_config if present
             group_override = {}
             if hasattr(routine_config, "group") and routine_config.group is not None:
-                group_override["__group__"] = routine_config.group
+                group_override["group"] = routine_config.group
 
             if parent_params:
                 merged = {

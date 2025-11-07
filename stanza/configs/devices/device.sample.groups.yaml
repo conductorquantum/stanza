@@ -50,13 +50,11 @@ routines:
         parameters:
           leakage_threshold_resistance: 50e6
           leakage_threshold_count: 0
-          zero_other_groups: true
 
       - name: global_accumulation
         group: control
         parameters:
           step_size: 1e-2
-          zero_other_groups: true
 
       - name: reservoir_characterization
         group: control

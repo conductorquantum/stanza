@@ -637,20 +637,6 @@ print(dot2_device.contacts)  # ['IN', 'OUT_B']
 print(dot2_device.gpios)     # ['VDD'] - inherited
 ```
 
-### Shared Gates Helper Methods
-
-The Device class provides methods to identify shared gates:
-
-```python
-# Get all shared gates (appear in multiple groups)
-shared = device.get_shared_gates()
-# Returns: ['RES1']
-
-# Get gates from other groups (for zeroing)
-other_gates = device.get_other_group_gates("dot1")
-# Returns: ['G3'] (in dot2, not in dot1, not shared)
-```
-
 ---
 
 ## Routine Configuration
@@ -767,26 +753,6 @@ parameters:
 3. Otherwise keep as float
 4. If parsing fails, keep as string
 
-### Special Parameter: zero_other_groups
-
-When a routine has a group assigned, you can zero gates from other groups:
-
-```yaml
-- name: reservoir_characterization
-  group: control
-  parameters:
-    zero_other_groups: true    # Zero sensor group gates before running
-```
-
-**Behavior**:
-1. Device filtered to `control` group
-2. Identifies gates from other groups NOT accessible to `control`
-3. Sets those gates to 0V
-4. Runs the routine
-5. Restores original device
-
-**Respects conditional filtering**: Only zeros gates that are truly inaccessible. GPIOs/contacts that are inherited (omitted from group) are NOT zeroed.
-
 ### Running Routines
 
 **From Python**:
@@ -801,7 +767,7 @@ runner = RoutineRunner(configs=[config])
 result = runner.run("leakage_test")
 
 # Run specific routine on group
-result = runner.run("leakage_test", __group__="control")
+result = runner.run("leakage_test", group="control")
 
 # Run all routines in config
 results = runner.run_all()
@@ -1124,7 +1090,6 @@ routines:
         parameters:
           leakage_threshold_resistance: 50e6
           measure_electrode: OUT_1
-          zero_other_groups: true
 
       - name: reservoir_characterization
         group: dot1
@@ -1132,7 +1097,6 @@ routines:
           bias_gate: IN
           step_size: 1e-2
           measure_electrode: OUT_1
-          zero_other_groups: true
 
       # Dot 2 characterization
       - name: noise_floor_measurement
@@ -1146,7 +1110,6 @@ routines:
         parameters:
           leakage_threshold_resistance: 50e6
           measure_electrode: OUT_2
-          zero_other_groups: true
 
       - name: reservoir_characterization
         group: dot2
@@ -1154,7 +1117,6 @@ routines:
           bias_gate: IN
           step_size: 1e-2
           measure_electrode: OUT_2
-          zero_other_groups: true
 
 instruments:
   - name: qdac2
@@ -1171,7 +1133,6 @@ instruments:
 - Shared RESERVOIR gates (RES_LEFT, RES_RIGHT) between groups
 - Shared source contact (IN) between groups
 - GPIOs omitted from groups → ALL inherited
-- `zero_other_groups: true` for isolated characterization
 
 ### Example 3: Multiplexed Multi-Device System
 
@@ -1264,7 +1225,6 @@ routines:
           bias_voltage: 5e-4
           step_size: 1e-2
           measure_electrode: OUT_A
-          zero_other_groups: true
 
       - name: finger_gate_characterization
         group: side_A
@@ -1273,7 +1233,6 @@ routines:
           bias_voltage: 5e-4
           step_size: 1e-2
           measure_electrode: OUT_A
-          zero_other_groups: true
 
       # Side B routines (mirror of side A)
       - name: noise_floor_measurement
@@ -1305,7 +1264,6 @@ routines:
           bias_voltage: 5e-4
           step_size: 1e-2
           measure_electrode: OUT_B
-          zero_other_groups: true
 
       - name: finger_gate_characterization
         group: side_B
@@ -1314,7 +1272,6 @@ routines:
           bias_voltage: 5e-4
           step_size: 1e-2
           measure_electrode: OUT_B
-          zero_other_groups: true
 
 instruments:
   - name: qdac2
@@ -1667,18 +1624,7 @@ routines:
           step_size: 5e-3  # Override specific parameter
 ```
 
-### 6. Safety with zero_other_groups
-
-Use `zero_other_groups: true` for isolated characterization:
-
-```yaml
-- name: reservoir_characterization
-  group: control
-  parameters:
-    zero_other_groups: true  # Prevents crosstalk
-```
-
-### 7. Documentation
+### 6. Documentation
 
 Add comments for clarity:
 

@@ -130,62 +130,37 @@ def test_device_filter_by_group_unknown_group(create_device):
         device.filter_by_group("unknown")
 
 
-def test_device_get_shared_gates(create_device):
-    """Test getting list of shared gates."""
+def test_device_filter_by_group_shares_instruments(create_device):
+    """Test that filtered devices share the same instrument instances."""
     device_config = DeviceConfig(
         name="test_device",
         gates={
             "G1": make_gate(GateType.PLUNGER, control_channel=1),
             "G2": make_gate(GateType.BARRIER, control_channel=2),
-            "RES1": make_gate(GateType.RESERVOIR, control_channel=3),
-            "RES2": make_gate(GateType.RESERVOIR, control_channel=4),
         },
         contacts={},
         groups={
-            "control": DeviceGroup(gates=["G1", "RES1", "RES2"]),
-            "sensor": DeviceGroup(gates=["G2", "RES1", "RES2"]),
+            "control": DeviceGroup(gates=["G1"]),
+            "sensor": DeviceGroup(gates=["G2"]),
         },
         routines=[],
         instruments=standard_instrument_configs(),
     )
 
-    device = create_device(device_config)
+    control_inst = MockControlInstrument()
+    measure_inst = MockMeasurementInstrument()
 
-    # Check shared gates
-    shared_gates = device.get_shared_gates()
-    assert set(shared_gates) == {"RES1", "RES2"}
+    device = create_device(device_config, control_inst, measure_inst)
 
+    # Filter by groups
+    control_device = device.filter_by_group("control")
+    sensor_device = device.filter_by_group("sensor")
 
-def test_device_get_other_group_gates(create_device):
-    """Test getting gates from other groups (excluding shared)."""
-    device_config = DeviceConfig(
-        name="test_device",
-        gates={
-            "G1": make_gate(GateType.PLUNGER, control_channel=1),
-            "G2": make_gate(GateType.BARRIER, control_channel=2),
-            "G3": make_gate(GateType.PLUNGER, control_channel=3),
-            "RES1": make_gate(GateType.RESERVOIR, control_channel=4),
-        },
-        contacts={},
-        groups={
-            "control": DeviceGroup(gates=["G1", "G2", "RES1"]),
-            "sensor": DeviceGroup(gates=["G3", "RES1"]),
-        },
-        routines=[],
-        instruments=standard_instrument_configs(),
-    )
-
-    device = create_device(device_config)
-
-    # Get gates from other groups (not in control, not shared)
-    other_gates = device.get_other_group_gates("control")
-    # Should get G3 (from sensor group), but NOT RES1 (shared)
-    assert set(other_gates) == {"G3"}
-
-    # Get gates from other groups (not in sensor, not shared)
-    other_gates = device.get_other_group_gates("sensor")
-    # Should get G1, G2 (from control group), but NOT RES1 (shared)
-    assert set(other_gates) == {"G1", "G2"}
+    # Check that instruments are shared (same instance)
+    assert control_device.control_instrument is control_inst
+    assert control_device.measurement_instrument is measure_inst
+    assert sensor_device.control_instrument is control_inst
+    assert sensor_device.measurement_instrument is measure_inst
 
 
 class TestConditionalFiltering:
@@ -532,7 +507,7 @@ class TestConditionalFiltering:
         """Test that non-RESERVOIR gates cannot be explicitly shared between groups."""
         with pytest.raises(
             ValueError,
-            match="Gate 'G1' referenced by group 'sensor' already assigned to group 'control'",
+            match="Gate 'G1' is assigned to multiple groups: control, sensor",
         ):
             DeviceConfig(
                 name="test_device",
