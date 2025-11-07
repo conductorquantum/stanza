@@ -364,38 +364,31 @@ class DeviceConfig(BaseModel):
 
         return self
 
+    def _validate_routine_group(
+        self, routine: RoutineConfig, available_groups: set[str], path: str = ""
+    ) -> None:
+        current_path = f"{path}/{routine.name}" if path else routine.name
+
+        if routine.group and routine.group not in available_groups:
+            raise ValueError(
+                f"Routine '{current_path}' references unknown group '{routine.group}'. "
+                f"Available groups: {', '.join(sorted(available_groups))}"
+            )
+
+        for nested in routine.routines or []:
+            self._validate_routine_group(nested, available_groups, current_path)
+
+        return self
+
     @model_validator(mode="after")
     def validate_routine_groups(self) -> "DeviceConfig":
-        """Validate that routine groups exist if specified.
-
-        Routines can optionally specify a group field. If specified, the group
-        must exist in the device's groups. If omitted, the routine receives the
-        full unfiltered device.
-        """
+        """Validate that routine groups exist if specified."""
         if not self.groups:
             return self
 
         available_groups = set(self.groups.keys())
-
-        def check_routine(routine: RoutineConfig, parent_path: str = "") -> None:
-            routine_path = (
-                f"{parent_path}/{routine.name}" if parent_path else routine.name
-            )
-
-            # Only validate that specified group exists (if provided)
-            if routine.group is not None and routine.group not in available_groups:
-                raise ValueError(
-                    f"Routine '{routine_path}' references unknown group '{routine.group}'. "
-                    f"Available groups: {', '.join(sorted(available_groups))}"
-                )
-
-            # Recursively check nested routines
-            if routine.routines:
-                for nested_routine in routine.routines:
-                    check_routine(nested_routine, routine_path)
-
         for routine in self.routines:
-            check_routine(routine)
+            self._validate_routine_group(routine, available_groups)
 
         return self
 
