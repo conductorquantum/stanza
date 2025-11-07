@@ -767,7 +767,7 @@ runner = RoutineRunner(configs=[config])
 result = runner.run("leakage_test")
 
 # Run specific routine on group
-result = runner.run("leakage_test", __group__="control")
+result = runner.run("leakage_test", group="control")
 
 # Run all routines in config
 results = runner.run_all()

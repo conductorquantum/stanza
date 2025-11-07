@@ -98,7 +98,7 @@ class TestRoutineDeviceFiltering:
             return {"gates": list(ctx.resources.device.gates)}
 
         # Run with specified group
-        runner.run("test_routine", __group__=group)
+        runner.run("test_routine", group=group)
 
         # Verify routine received filtered device
         assert received_device is not None
@@ -123,7 +123,7 @@ class TestRoutineDeviceFiltering:
             received_device_name = ctx.resources.device.name
             return {}
 
-        runner.run("test_routine", __group__=group)
+        runner.run("test_routine", group=group)
 
         assert received_device_name == expected_name
 
@@ -138,12 +138,12 @@ class TestRoutineDeviceFiltering:
             return {}
 
         with pytest.raises(DeviceError, match="Group 'unknown' not found"):
-            runner.run("test_routine", __group__="unknown")
+            runner.run("test_routine", group="unknown")
 
-    def test_group_parameter_alias_works(
+    def test_group_parameter_works(
         self, registry_fixture, routine_runner_with_grouped_device
     ):
-        """Test that 'group' parameter works as an alias for '__group__'."""
+        """Test that 'group' parameter filters the device correctly."""
         runner, original_device, _, _ = routine_runner_with_grouped_device
 
         received_device = None
@@ -154,35 +154,13 @@ class TestRoutineDeviceFiltering:
             received_device = ctx.resources.device
             return {"gates": list(ctx.resources.device.gates)}
 
-        # Run with 'group' parameter (alias for '__group__')
+        # Run with 'group' parameter
         runner.run("test_routine", group="control")
 
         # Verify routine received filtered device
         assert received_device is not None
         assert set(received_device.gates) == {"G1", "G2", "RES1", "RES2"}
         assert received_device.name == "device_control"
-
-    def test_group_parameter_precedence(
-        self, registry_fixture, routine_runner_with_grouped_device
-    ):
-        """Test that '__group__' takes precedence over 'group' if both are provided."""
-        runner, original_device, _, _ = routine_runner_with_grouped_device
-
-        received_device = None
-
-        @routine(name="test_routine")
-        def capture_device_routine(ctx: RoutineContext) -> dict:
-            nonlocal received_device
-            received_device = ctx.resources.device
-            return {"gates": list(ctx.resources.device.gates)}
-
-        # Run with both parameters - '__group__' should take precedence
-        runner.run("test_routine", group="control", __group__="sensor")
-
-        # Verify routine received sensor group device (__group__ takes precedence)
-        assert received_device is not None
-        assert set(received_device.gates) == {"G3", "G4", "RES1", "RES2"}
-        assert received_device.name == "device_sensor"
 
 
 class TestDeviceRestoration:
@@ -199,7 +177,7 @@ class TestDeviceRestoration:
             return {}
 
         # Run routine with group filtering
-        runner.run("test_routine", __group__="control")
+        runner.run("test_routine", group="control")
 
         # Original device should be restored in resources
         restored_device = runner.resources.device
@@ -218,7 +196,7 @@ class TestDeviceRestoration:
 
         # Run routine with group filtering - should raise error
         with pytest.raises(RuntimeError, match="Routine failed"):
-            runner.run("failing_routine", __group__="control")
+            runner.run("failing_routine", group="control")
 
         # Original device should STILL be restored despite exception
         restored_device = runner.resources.device
@@ -244,10 +222,10 @@ class TestDeviceRestoration:
             return {}
 
         # Run with control group
-        runner.run("test_routine", __group__="control")
+        runner.run("test_routine", group="control")
 
         # Run with sensor group
-        runner.run("test_routine", __group__="sensor")
+        runner.run("test_routine", group="sensor")
 
         # Run without group (should get original device)
         runner.run("test_routine")
@@ -290,7 +268,7 @@ class TestGroupFilteringInstrumentSharing:
             }
             return {}
 
-        runner.run("test_routine", __group__="control")
+        runner.run("test_routine", group="control")
 
         # Filtered device should share the same instrument instances
         assert received_instruments["control"] is control_inst
@@ -327,7 +305,7 @@ class TestGroupFilteringWithLogger:
                     assert session.metadata.group_name == "control"
                 return {}
 
-            runner.run("test_routine", __group__="control")
+            runner.run("test_routine", group="control")
 
             # Verify directory with group suffix was created
             session_dir = logger.base_directory / "test_routine_control"
@@ -357,10 +335,10 @@ class TestGroupFilteringWithLogger:
                 return {}
 
             # Run for control group
-            runner.run("test_routine", __group__="control")
+            runner.run("test_routine", group="control")
 
             # Run for sensor group
-            runner.run("test_routine", __group__="sensor")
+            runner.run("test_routine", group="sensor")
 
             # Verify separate directories exist
             control_dir = logger.base_directory / "test_routine_control"

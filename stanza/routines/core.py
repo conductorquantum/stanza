@@ -204,7 +204,7 @@ class RoutineRunner:
         if routine_config.parameters:
             config_data.update(routine_config.parameters)
         if hasattr(routine_config, "group") and routine_config.group is not None:
-            config_data["__group__"] = routine_config.group
+            config_data["group"] = routine_config.group
 
         if config_data:
             routine_configs[routine_config.name] = config_data
@@ -280,14 +280,7 @@ class RoutineRunner:
         merged_params = {**parent_params, **config, **params}
 
         # Extract group information if present (not passed to routine as parameter)
-        # Support both 'group' and '__group__' for convenience
-        # '__group__' takes precedence if both are provided
-        if "__group__" in merged_params:
-            group_name = merged_params.pop("__group__", None)
-            # Remove 'group' if it was also provided to avoid passing it to routine
-            merged_params.pop("group", None)
-        else:
-            group_name = merged_params.pop("group", None)
+        group_name = merged_params.pop("group", None)
 
         # Get the routine function from global registry
         routine_func = _routine_registry[routine_name]
@@ -376,7 +369,7 @@ class RoutineRunner:
             # Extract group from routine_config if present
             group_override = {}
             if hasattr(routine_config, "group") and routine_config.group is not None:
-                group_override["__group__"] = routine_config.group
+                group_override["group"] = routine_config.group
 
             if parent_params:
                 merged = {
