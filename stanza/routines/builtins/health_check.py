@@ -772,11 +772,6 @@ def analyze_single_gate_heuristic(
 
     pinchoff_fit = fit_pinchoff_parameters(voltages, currents, percent_threshold=0.05)
     y_pred = pinchoff_fit.fit_curve(voltages)
-
-    if not HAS_SCIPY:
-        raise ImportError(
-            "scipy is not installed. Install with: pip install cq-stanza[routines]"
-        )
     filtered_currents = gaussian_filter(currents, sigma=2.0)
     is_good_fit = fit_quality_criterion(voltages, filtered_currents, y_pred)
 

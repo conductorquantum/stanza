@@ -289,10 +289,7 @@ def fit_pinchoff_parameters(
     Returns:
         PinchoffFitResult containing fitted voltages and parameters
     """
-    if not HAS_SCIPY:
-        raise ImportError(
-            "scipy is not installed. Install with: pip install cq-stanza[routines]"
-        )
+
     filtered_current = gaussian_filter(currents, sigma=sigma)
     v_norm = normalize(voltages)
     i_norm = normalize(filtered_current)
