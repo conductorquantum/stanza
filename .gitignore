@@ -33,3 +33,6 @@ archive.zip
 
 # uv
 uv.lock
+
+# conductor_dev
+conductor_dev*
