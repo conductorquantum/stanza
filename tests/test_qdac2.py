@@ -10,9 +10,9 @@ from stanza.drivers.qdac2 import (
     QDAC2MeasurementChannel,
 )
 from stanza.models import (
-    BaseInstrumentConfig,
     ContactType,
     GateType,
+    GeneralInstrumentConfig,
     InstrumentType,
     PadType,
 )
@@ -20,11 +20,14 @@ from stanza.models import (
 
 @pytest.fixture
 def instrument_config():
-    return BaseInstrumentConfig(
+    return GeneralInstrumentConfig(
         name="qdac2",
         type=InstrumentType.GENERAL,
         serial_addr="192.168.1.1",
         port=5025,
+        measurement_duration=1.0,
+        sample_time=0.1,
+        slew_rate=1.0,
     )
 
 
@@ -552,11 +555,14 @@ class TestQDAC2:
         mock_driver = Mock()
         mock_driver_class.return_value = mock_driver
 
-        instrument_config = BaseInstrumentConfig(
+        instrument_config = GeneralInstrumentConfig(
             name="qdac2",
             type=InstrumentType.GENERAL,
             serial_addr="192.168.1.1",
             port=5025,
+            measurement_duration=1.0,
+            sample_time=0.1,
+            slew_rate=1.0,
         )
         instrument_config.aperature_s = 0.002
 
@@ -589,11 +595,14 @@ class TestQDAC2:
         mock_driver = Mock()
         mock_driver_class.return_value = mock_driver
 
-        instrument_config = BaseInstrumentConfig(
+        instrument_config = GeneralInstrumentConfig(
             name="qdac2",
             type=InstrumentType.GENERAL,
             serial_addr="192.168.1.1",
             port=5025,
+            measurement_duration=1.0,
+            sample_time=0.1,
+            slew_rate=1.0,
         )
         instrument_config.nplc = 10
 
@@ -705,3 +714,54 @@ class TestQDAC2MeasurementChannel:
         mock_driver.query.assert_called_with("read? (@2)")
 
         assert current_param.setter is None
+
+    @patch("stanza.drivers.qdac2.PyVisaDriver")
+    def test_conversion_factor_applied(
+        self, mock_driver_class, measurement_channel_config
+    ):
+        """Test that conversion factor is applied to current measurements."""
+        mock_driver = Mock()
+        mock_driver.query.return_value = "1000"
+        mock_driver_class.return_value = mock_driver
+
+        channel = QDAC2MeasurementChannel(
+            "sense1", 2, measurement_channel_config, mock_driver
+        )
+        channel.set_parameter("conversion_factor", 1e-6)
+
+        current_param = channel.get_parameter("current")
+        current = current_param.getter()
+        assert current == 0.001
+
+    @patch("stanza.drivers.qdac2.PyVisaDriver")
+    def test_conversion_factor_from_instrument_config(self, mock_driver_class):
+        """Test that conversion factor is set from instrument config on initialization."""
+        mock_driver = Mock()
+        mock_driver_class.return_value = mock_driver
+
+        instrument_config = GeneralInstrumentConfig(
+            name="qdac2",
+            type=InstrumentType.GENERAL,
+            serial_addr="192.168.1.1",
+            port=5025,
+            measurement_duration=1.0,
+            sample_time=0.1,
+            slew_rate=1.0,
+            conversion_factor=1e-6,
+        )
+        measurement_config = ChannelConfig(
+            name="sense1",
+            voltage_range=(-1.0, 1.0),
+            pad_type=PadType.CONTACT,
+            electrode_type=ContactType.SOURCE,
+            measure_channel=2,
+        )
+
+        qdac = QDAC2(
+            instrument_config=instrument_config,
+            current_range=QDAC2CurrentRange.LOW,
+            channel_configs={"sense1": measurement_config},
+        )
+
+        measure_channel = qdac.channels["measure_sense1"]
+        assert measure_channel.get_parameter_value("conversion_factor") == 1e-6

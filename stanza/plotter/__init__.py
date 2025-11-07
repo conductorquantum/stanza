@@ -8,6 +8,7 @@ Two backends available:
 from __future__ import annotations
 
 import logging
+import sys
 from typing import TYPE_CHECKING, Literal
 
 from stanza.plotter.backends.inline import InlineBackend
@@ -25,6 +26,7 @@ def enable_live_plotting(
     data_logger: DataLogger,
     backend: Literal["server", "inline"] = "server",
     port: int = 5006,
+    session_token_expiration: int = sys.maxsize,
 ) -> ServerBackend | InlineBackend:
     """Enable live plotting for a data logger.
 
@@ -32,6 +34,8 @@ def enable_live_plotting(
         data_logger: DataLogger instance
         backend: "server" (browser) or "inline" (notebook)
         port: Server port (server backend only)
+        session_token_expiration: Duration in seconds that a session token is valid
+            (server backend only). Defaults to sys.maxsize (effectively infinite).
 
     Returns:
         Backend instance
@@ -55,7 +59,9 @@ def enable_live_plotting(
             if port in _active_servers:
                 del _active_servers[port]
 
-            bokeh_backend = ServerBackend(port=port)
+            bokeh_backend = ServerBackend(
+                port=port, session_token_expiration=session_token_expiration
+            )
             bokeh_backend.start()
             _active_servers[port] = bokeh_backend
             logger.info(f"Bokeh Server started: http://localhost:{port}")

@@ -1,6 +1,6 @@
 import pytest
 
-from stanza.base.instruments import BaseControlInstrument, BaseInstrument
+from stanza.base.instruments import BaseControlInstrument, GeneralInstrument
 from stanza.base.mixins import InstrumentChannelMixin
 from stanza.base.registry import load_driver_class, validate_driver_protocols
 from stanza.models import InstrumentType
@@ -9,7 +9,7 @@ from stanza.models import InstrumentType
 def test_load_driver_class_qdac2():
     driver = load_driver_class("qdac2")
     assert driver.__name__ == "QDAC2"
-    assert issubclass(driver, BaseInstrument)
+    assert issubclass(driver, GeneralInstrument)
 
 
 def test_load_driver_class_opx():

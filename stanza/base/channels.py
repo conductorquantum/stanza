@@ -248,7 +248,7 @@ class MeasurementChannel(InstrumentChannel):
 
         conversion_factor_param = Parameter(
             name="conversion_factor",
-            value=1e-6,
+            value=1,
             unit="A/count",
             validator=Validators.non_zero_validator,
             metadata={"description": "Conversion factor from ADC counts to amperes"},
