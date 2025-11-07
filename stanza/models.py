@@ -346,7 +346,7 @@ class DeviceConfig(BaseModel):
 
     def _validate_routine_group(
         self, routine: RoutineConfig, available_groups: set[str], path: str = ""
-    ) -> None:
+    ) -> "DeviceConfig":
         current_path = f"{path}/{routine.name}" if path else routine.name
 
         if routine.group and routine.group not in available_groups:
