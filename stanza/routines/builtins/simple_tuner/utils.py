@@ -236,8 +236,12 @@ def get_voltages(
     Returns:
         Dict mapping gate names to voltages
     """
-    if not (res := results.get("reservoir_characterization")) or not (
-        fg := results.get("finger_gate_characterization")
+    if not (
+        res := results.get("reservoir_characterization")["reservoir_characterization"]
+    ) or not (
+        fg := results.get("finger_gate_characterization")[
+            "finger_gate_characterization"
+        ]
     ):
         raise ValueError("Reservoir and finger gate characterization results not found")
     return {g: {**res, **fg}[g][key] for g in gates}
@@ -255,8 +259,12 @@ def get_plunger_gate_bounds(
     Returns:
         Dict mapping plunger gate names to bounds
     """
-    if not (res := results.get("reservoir_characterization")) or not (
-        fg := results.get("finger_gate_characterization")
+    if not (
+        res := results.get("reservoir_characterization")["reservoir_characterization"]
+    ) or not (
+        fg := results.get("finger_gate_characterization")[
+            "finger_gate_characterization"
+        ]
     ):
         raise ValueError("Reservoir and finger gate characterization results not found")
     v = {**res, **fg}

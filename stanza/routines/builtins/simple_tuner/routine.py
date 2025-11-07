@@ -1,5 +1,6 @@
 import logging
 import uuid
+from typing import Any
 
 import numpy as np
 
@@ -40,6 +41,7 @@ def compute_peak_spacing(
     number_of_samples_for_scale_computation: int = 10,
     seed: int = 42,
     session: LoggerSession | None = None,
+    **kwargs: Any,
 ) -> dict[str, float]:
     """Compute peak spacing by analyzing Coulomb blockade patterns in random sweeps.
 
@@ -67,6 +69,8 @@ def compute_peak_spacing(
     client = ctx.resources.models_client
     results = ctx.results
 
+    device.jump({"IN_A_B": 0.0005}, wait_for_settling=True)
+
     saturation_voltages = get_voltages(gates, "saturation_voltage", results)
     gate_idx = build_gate_indices(gates, device)
     plunger_gates = [gates[i] for i in gate_idx.plunger]
@@ -80,7 +84,15 @@ def compute_peak_spacing(
     for scale in scales:
         logger.info(f"Testing scale {scale:.4f} V")
 
-        for attempt in range(max_number_of_samples):
+        successful_measurements = 0
+        total_attempts = 0
+
+        while successful_measurements < max_number_of_samples:
+            total_attempts += 1
+            if total_attempts > max_number_of_samples * 10:  # Safety limit
+                logger.warning(f"Exceeded max attempts for scale {scale:.4f} V")
+                break
+
             x_bounds = plunger_gate_bounds[plunger_gates[0]]
             y_bounds = plunger_gate_bounds[plunger_gates[1]]
             sweep = generate_random_sweep(
@@ -103,9 +115,8 @@ def compute_peak_spacing(
             )
 
             # Measure
-            currents = np.array(
-                device.sweep_nd(gates, voltages.tolist(), measure_electrode)
-            )
+            _, currents = device.sweep_nd(gates, voltages.tolist(), measure_electrode)
+            currents = np.array(currents)
 
             measurement_id = str(uuid.uuid4())
             if session:
@@ -114,7 +125,7 @@ def compute_peak_spacing(
                     {
                         "id": measurement_id,
                         "scale": float(scale),
-                        "sample_index": attempt,
+                        "sample_index": successful_measurements,
                         "start_point": sweep.start.tolist(),
                         "end_point": sweep.end.tolist(),
                         "currents": currents.tolist(),
@@ -122,6 +133,8 @@ def compute_peak_spacing(
                     metadata=metadata,
                     routine_name="compute_peak_spacing",
                 )
+
+            successful_measurements += 1
 
             # Classify
             if not client.models.execute(
@@ -133,7 +146,7 @@ def compute_peak_spacing(
                         data={
                             "measurement_id": measurement_id,
                             "scale": float(scale),
-                            "sample_number": attempt,
+                            "sample_number": successful_measurements - 1,
                             "success": False,
                             "reason": "no_coulomb_blockade_detected",
                         },
@@ -145,7 +158,7 @@ def compute_peak_spacing(
             # Extract peaks
             peak_indices = np.array(
                 client.models.execute(
-                    model="coulomb-blockade-peak-detector-v1", data=currents
+                    model="coulomb-blockade-peak-detector-v2", data=currents
                 ).output["peak_indices"]
             )
 
@@ -158,7 +171,7 @@ def compute_peak_spacing(
                         data={
                             "measurement_id": measurement_id,
                             "scale": float(scale),
-                            "sample_number": attempt,
+                            "sample_number": successful_measurements - 1,
                             "num_peaks_detected": len(peak_indices),
                             "success": False,
                             "reason": "insufficient_peaks_for_spacing_calculation",
@@ -179,7 +192,7 @@ def compute_peak_spacing(
                     data={
                         "measurement_id": measurement_id,
                         "scale": float(scale),
-                        "sample_number": attempt,
+                        "sample_number": successful_measurements - 1,
                         "num_peaks_detected": len(peak_indices),
                         "peak_indices": peak_indices.tolist(),
                         "peak_voltages_x": peak_positions[:, 0].tolist(),
@@ -224,9 +237,6 @@ def run_dqd_search_fixed_barriers(
     ctx: RoutineContext,
     gates: list[str],
     measure_electrode: str,
-    plunger_x_bounds: tuple[float, float],
-    plunger_y_bounds: tuple[float, float],
-    peak_spacing: float,
     current_trace_points: int = 128,
     low_res_csd_points: int = 25,
     high_res_csd_points: int = 50,
@@ -236,6 +246,7 @@ def run_dqd_search_fixed_barriers(
     charge_carrier_type: str = "electrons",
     seed: int = 42,
     session: LoggerSession | None = None,
+    **kwargs: Any,
 ) -> list[SearchSquare]:
     """Run DQD search with fixed barrier voltages using adaptive grid sampling.
 
@@ -243,9 +254,6 @@ def run_dqd_search_fixed_barriers(
         ctx: Routine context with device and models client
         gates: Gate electrode names
         measure_electrode: Current measurement electrode
-        plunger_x_bounds: (min, max) voltage bounds for X plunger
-        plunger_y_bounds: (min, max) voltage bounds for Y plunger
-        peak_spacing: Coulomb peak spacing in volts
         current_trace_points: Points in diagonal current trace
         low_res_csd_points: Points per axis in low-res charge stability diagram
         high_res_csd_points: Points per axis in high-res CSD
@@ -343,9 +351,8 @@ def run_dqd_search_fixed_barriers(
         ct_voltages = build_full_voltages(
             ct_sweep, gates, gate_idx, saturation_voltages
         )
-        ct_currents = np.array(
-            device.sweep_nd(gates, ct_voltages.tolist(), measure_electrode)
-        )
+        _, ct_currents = device.sweep_nd(gates, ct_voltages.tolist(), measure_electrode)
+        ct_currents = np.array(ct_currents)
 
         ct_id = str(uuid.uuid4())
         if session:
@@ -395,13 +402,14 @@ def run_dqd_search_fixed_barriers(
             lr_voltages = build_full_voltages(
                 lr_sweep, gates, gate_idx, saturation_voltages
             )
-            lr_currents = np.array(
-                device.sweep_nd(
-                    gates,
-                    lr_voltages.reshape(-1, len(gates)).tolist(),
-                    measure_electrode,
-                )
-            ).reshape(low_res_csd_points, low_res_csd_points)
+            _, lr_currents = device.sweep_nd(
+                gates,
+                lr_voltages.reshape(-1, len(gates)).tolist(),
+                measure_electrode,
+            )
+            lr_currents = np.array(lr_currents).reshape(
+                low_res_csd_points, low_res_csd_points
+            )
 
             lr_id = str(uuid.uuid4())
             if session:
@@ -446,13 +454,14 @@ def run_dqd_search_fixed_barriers(
             hr_voltages = build_full_voltages(
                 hr_sweep, gates, gate_idx, saturation_voltages
             )
-            hr_currents = np.array(
-                device.sweep_nd(
-                    gates,
-                    hr_voltages.reshape(-1, len(gates)).tolist(),
-                    measure_electrode,
-                )
-            ).reshape(high_res_csd_points, high_res_csd_points)
+            _, hr_currents = device.sweep_nd(
+                gates,
+                hr_voltages.reshape(-1, len(gates)).tolist(),
+                measure_electrode,
+            )
+            hr_currents = np.array(hr_currents).reshape(
+                high_res_csd_points, high_res_csd_points
+            )
 
             hr_id = str(uuid.uuid4())
             if session:
