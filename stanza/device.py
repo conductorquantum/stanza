@@ -183,13 +183,13 @@ class Device:
         """List of GPIO pad names associated with a specific group."""
         return list(self._get_group(group_name).gpios)
 
-    def filter_by_group(self, group_name: str) -> "Device":
-        """Create a new Device instance containing only electrodes from the specified group.
+    def filter_by_group(self, group_name: str) -> dict[str, ChannelConfig]:
+        """Get filtered channel configurations for electrodes in the specified group.
 
-        This method returns a new Device object that shares the same instrument instances
-        but has filtered channel_configs to include only the pads (gates, contacts, gpios)
-        that belong to the specified group. All Device properties (e.g., .gates, .contacts,
-        .control_gates) will automatically respect this filtering.
+        This method returns a dictionary of channel configurations containing only the pads
+        (gates, contacts, gpios) that belong to the specified group. This is useful for
+        getting configuration information about a subset of device pads without creating
+        a separate device instance.
 
         Filtering behavior:
         - Gates: Always explicitly filtered (only listed gates included)
@@ -200,19 +200,21 @@ class Device:
             group_name: Name of the group to filter by. Must exist in device_config.groups.
 
         Returns:
-            A new Device instance with filtered channel configurations.
+            Dictionary mapping pad names to their channel configurations, filtered to
+            include only pads in the specified group.
 
         Raises:
             DeviceError: If the specified group does not exist.
 
         Example:
             >>> # Group with explicit GPIO list
-            >>> control_device = device.filter_by_group("control")
-            >>> control_device.gpios  # Returns only ["MUX1"] if specified in group
+            >>> control_configs = device.filter_by_group("control")
+            >>> control_pads = list(control_configs.keys())
+            >>> device.jump({pad: 0.5 for pad in control_pads})
 
-            >>> # Group without GPIO field
-            >>> sensor_device = device.filter_by_group("sensor")
-            >>> sensor_device.gpios  # Returns ALL device GPIOs
+            >>> # Check what pads are in a group
+            >>> sensor_configs = device.filter_by_group("sensor")
+            >>> print(f"Sensor pads: {list(sensor_configs.keys())}")
         """
         group = self._get_group(group_name)
 
@@ -252,15 +254,7 @@ class Device:
             if pad_name in group_pad_names
         }
 
-        # Create new Device with same instruments but filtered channels
-        return Device(
-            name=f"{self.name}_{group_name}",
-            device_config=self.device_config,  # Keep full config for reference
-            channel_configs=filtered_channel_configs,
-            control_instrument=self.control_instrument,
-            measurement_instrument=self.measurement_instrument,
-            breakout_box_instrument=self.breakout_box_instrument,
-        )
+        return filtered_channel_configs
 
     def get_gates_by_type(self, gate_type: str | GateType) -> list[str]:
         """Get the gate electrodes of a given type.

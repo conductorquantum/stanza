@@ -286,14 +286,12 @@ class RoutineRunner:
         routine_func = _routine_registry[routine_name]
 
         # Filter device by group if specified
-        original_device = None
         if group_name is not None:
             device = getattr(self.resources, "device", None)
             if device is not None and hasattr(device, "filter_by_group"):
-                original_device = device
-                filtered_device = device.filter_by_group(group_name)
-                # Temporarily replace device in resources
-                self.resources.add("device", filtered_device)
+                group_configs = device.filter_by_group(group_name)
+                # Add group configs to resources for routine access
+                self.resources.add("group_configs", group_configs)
                 logger.info("Filtering device to group: %s", group_name)
 
         # Create logger session if logger exists and has create_session method
@@ -321,10 +319,6 @@ class RoutineRunner:
             raise RuntimeError(f"Routine '{routine_name}' failed: {e}") from e
 
         finally:
-            # Restore original device if it was filtered
-            if original_device is not None:
-                self.resources.add("device", original_device)
-
             # Close logger session if it was created
             if session is not None and data_logger is not None:
                 data_logger.close_session(session_id=session.session_id)

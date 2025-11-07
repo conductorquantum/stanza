@@ -99,14 +99,24 @@ routines:
 @routine
 def cross_group_calibration(ctx, bias_voltage, control_group, sensor_group, measure_contact):
     device = ctx.resources.device
-    control_device = device.filter_by_group(control_group)
-    sensor_device = device.filter_by_group(sensor_group)
+    control_configs = device.filter_by_group(control_group)
+    sensor_configs = device.filter_by_group(sensor_group)
 
-    # Bias each group independently
-    control_device.jump({gate: bias_voltage for gate in control_device.control_gates})
-    sensor_device.jump({gate: bias_voltage / 2 for gate in sensor_device.control_gates})
+    # Get control gates from each group
+    control_gates = [
+        name for name, config in control_configs.items()
+        if config.control_channel is not None
+    ]
+    sensor_gates = [
+        name for name, config in sensor_configs.items()
+        if config.control_channel is not None
+    ]
 
-    # Measure through the shared contact on the original device
+    # Bias each group independently using the main device
+    device.jump({gate: bias_voltage for gate in control_gates})
+    device.jump({gate: bias_voltage / 2 for gate in sensor_gates})
+
+    # Measure through the shared contact
     reading = device.measure(measure_contact)
     return {"current": reading}
 ```
