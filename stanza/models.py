@@ -159,7 +159,7 @@ class MeasurementInstrumentConfigMixin(BaseModel):
     )
     sample_time: float = Field(gt=0, description="Individual sample time in seconds")
     conversion_factor: float = Field(
-        gt=0, default=1, description="The conversion factor from ADC counts to amperes"
+        default=1, description="The conversion factor from ADC counts to amperes"
     )
 
     # OPX-specific fields

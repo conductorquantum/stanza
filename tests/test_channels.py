@@ -187,6 +187,9 @@ class TestMeasurementChannel:
         assert "current" in measurement_channel.parameters
         assert "conversion_factor" in measurement_channel.parameters
 
+    def test_conversion_factor_default(self, measurement_channel):
+        assert measurement_channel.get_parameter_value("conversion_factor") == 1
+
     def test_conversion_factor_validation(self, measurement_channel):
         measurement_channel.set_parameter("conversion_factor", 1e-6)
         assert measurement_channel.get_parameter_value("conversion_factor") == 1e-6
