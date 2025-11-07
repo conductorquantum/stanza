@@ -7,9 +7,9 @@ import pyvisa
 from stanza.base.channels import ChannelConfig
 from stanza.drivers.qdac2 import QDAC2, QDAC2CurrentRange
 from stanza.models import (
-    BaseInstrumentConfig,
     ContactType,
     GateType,
+    GeneralInstrumentConfig,
     InstrumentType,
     PadType,
 )
@@ -29,11 +29,14 @@ def sim_resource_manager():
 @pytest.fixture
 def qdac2_sim():
     """Create a QDAC2 instance using simulation."""
-    instrument_config = BaseInstrumentConfig(
+    instrument_config = GeneralInstrumentConfig(
         name="qdac2_sim",
         type=InstrumentType.GENERAL,
         serial_addr="192.168.1.1",
         port=5025,
+        measurement_duration=1.0,
+        sample_time=0.1,
+        slew_rate=1.0,
     )
 
     channel_configs = {

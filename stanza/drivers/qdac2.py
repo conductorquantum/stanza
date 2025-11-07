@@ -11,8 +11,8 @@ from stanza.base.channels import (
     MeasurementChannel,
     Parameter,
 )
-from stanza.base.instruments import BaseInstrument
-from stanza.models import BaseInstrumentConfig
+from stanza.base.instruments import GeneralInstrument
+from stanza.models import GeneralInstrumentConfig
 from stanza.pyvisa import PyVisaDriver
 
 logger = logging.getLogger(__name__)
@@ -80,9 +80,9 @@ class QDAC2MeasurementChannel(MeasurementChannel):
         super()._setup_parameters()
 
         current_param = self.get_parameter("current")
-        current_param.getter = lambda: float(
-            self.driver.query(f"read? (@{self.channel_id})")
-        )
+        current_param.getter = lambda: self.get_parameter_value(
+            "conversion_factor"
+        ) * float(self.driver.query(f"read? (@{self.channel_id})"))
         current_param.setter = None
 
         current_range_param = Parameter(
@@ -113,10 +113,10 @@ class QDAC2MeasurementChannel(MeasurementChannel):
         self.add_parameter(measurement_nplc)
 
 
-class QDAC2(BaseInstrument):
+class QDAC2(GeneralInstrument):
     def __init__(
         self,
-        instrument_config: BaseInstrumentConfig,
+        instrument_config: GeneralInstrumentConfig,
         channel_configs: dict[str, ChannelConfig],
         current_range: QDAC2CurrentRange = QDAC2CurrentRange.LOW,
         is_simulation: bool = False,
@@ -183,19 +183,22 @@ class QDAC2(BaseInstrument):
                 and (channel_config.name, channel_config.measure_channel)
                 in self.measurement_channels
             ):
+                qdac2_measurement_channel = QDAC2MeasurementChannel(
+                    channel_config.name,
+                    channel_config.measure_channel,
+                    channel_config,
+                    self.driver,
+                )
                 self.add_channel(
-                    f"measure_{channel_config.name}",
-                    QDAC2MeasurementChannel(
-                        channel_config.name,
-                        channel_config.measure_channel,
-                        channel_config,
-                        self.driver,
-                    ),
+                    f"measure_{channel_config.name}", qdac2_measurement_channel
+                )
+                qdac2_measurement_channel.get_parameter("conversion_factor").set(
+                    self.instrument_config.conversion_factor
                 )
 
     def set_voltage(self, channel_name: str, voltage: float) -> None:
         """Set the voltage on a specific channel."""
-        return super().set_voltage(f"control_{channel_name}", voltage)
+        super().set_voltage(f"control_{channel_name}", voltage)
 
     def get_voltage(self, channel_name: str) -> float:
         """Get the voltage on a specific channel."""
@@ -203,7 +206,7 @@ class QDAC2(BaseInstrument):
 
     def set_slew_rate(self, channel_name: str, slew_rate: float) -> None:
         """Set the slew rate on a specific channel."""
-        return super().set_slew_rate(f"control_{channel_name}", slew_rate)
+        super().set_slew_rate(f"control_{channel_name}", slew_rate)
 
     def get_slew_rate(self, channel_name: str) -> float:
         """Get the slew rate on a specific channel."""
@@ -283,7 +286,7 @@ class QDAC2(BaseInstrument):
     def measure(self, channel_name: str | list[str]) -> float | list[float]:
         """Measure the current on a specific channel."""
         if isinstance(channel_name, str):
-            return super().measure(f"measure_{channel_name}")
+            return float(super().measure(f"measure_{channel_name}"))
         else:
             channel_numbers = [
                 self.channel_configs[ch].measure_channel for ch in channel_name

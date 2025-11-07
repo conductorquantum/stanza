@@ -3,8 +3,8 @@ from typing import Any
 
 from stanza.base.mixins import ControlInstrumentMixin, MeasurementInstrumentMixin
 from stanza.models import (
-    BaseInstrumentConfig,
     ControlInstrumentConfig,
+    GeneralInstrumentConfig,
     MeasurementInstrumentConfig,
 )
 
@@ -59,10 +59,10 @@ class BaseControlInstrument(ControlInstrumentMixin):
         }
 
 
-class BaseInstrument(MeasurementInstrumentMixin, ControlInstrumentMixin):
-    """Base class for instruments."""
+class GeneralInstrument(MeasurementInstrumentMixin, ControlInstrumentMixin):
+    """General instrument class for instruments with both control and measurement capabilities."""
 
-    def __init__(self, instrument_config: BaseInstrumentConfig) -> None:
+    def __init__(self, instrument_config: GeneralInstrumentConfig) -> None:
         super().__init__()
         self.instrument_config = instrument_config
         self.name = instrument_config.name

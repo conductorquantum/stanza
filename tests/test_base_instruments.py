@@ -7,14 +7,14 @@ from stanza.base.channels import (
 )
 from stanza.base.instruments import (
     BaseControlInstrument,
-    BaseInstrument,
     BaseMeasurementInstrument,
+    GeneralInstrument,
 )
 from stanza.models import (
-    BaseInstrumentConfig,
     ContactType,
     ControlInstrumentConfig,
     GateType,
+    GeneralInstrumentConfig,
     InstrumentType,
     MeasurementInstrumentConfig,
     PadType,
@@ -44,10 +44,13 @@ def control_config():
 
 @pytest.fixture
 def base_config():
-    return BaseInstrumentConfig(
+    return GeneralInstrumentConfig(
         name="test_base",
         type=InstrumentType.GENERAL,
         ip_addr="192.168.1.3",
+        measurement_duration=1.0,
+        sample_time=0.1,
+        slew_rate=1.0,
     )
 
 
@@ -134,9 +137,9 @@ class TestBaseControlInstrument:
         assert info1 is info2
 
 
-class TestBaseInstrument:
+class TestGeneralInstrument:
     def test_initialization(self, base_config):
-        instrument = BaseInstrument(base_config)
+        instrument = GeneralInstrument(base_config)
 
         assert instrument.name == "test_base"
         assert instrument.instrument_config == base_config
@@ -144,7 +147,7 @@ class TestBaseInstrument:
     def test_instrument_info_with_channels(
         self, base_config, measurement_channel, control_channel
     ):
-        instrument = BaseInstrument(base_config)
+        instrument = GeneralInstrument(base_config)
         instrument.add_channel(measurement_channel)
         instrument.add_channel(control_channel)
         info = instrument.instrument_info
@@ -155,7 +158,7 @@ class TestBaseInstrument:
         assert "instrument_config" in info
 
     def test_instrument_info_cached_property(self, base_config):
-        instrument = BaseInstrument(base_config)
+        instrument = GeneralInstrument(base_config)
         info1 = instrument.instrument_info
         info2 = instrument.instrument_info
 
