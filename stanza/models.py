@@ -110,6 +110,7 @@ class GPIO(Electrode):
 
 class RoutineConfig(BaseModelWithConfig):
     name: str
+    group: str | None = None
     parameters: dict[str, Any] | None = None
     routines: list["RoutineConfig"] | None = None
 
@@ -232,6 +233,15 @@ InstrumentConfig = Annotated[
 ]
 
 
+class DeviceGroup(BaseModel):
+    """Logical grouping of pads within a device."""
+
+    name: str | None = None
+    gates: list[str] = Field(default_factory=list)
+    contacts: list[str] | None = None
+    gpios: list[str] | None = None
+
+
 class DeviceConfig(BaseModel):
     """Configuration for a quantum device (Device Under Test)."""
 
@@ -241,6 +251,7 @@ class DeviceConfig(BaseModel):
     gates: dict[str, Gate] = {}
     contacts: dict[str, Contact] = {}
     gpios: dict[str, GPIO] = {}
+    groups: dict[str, DeviceGroup] = {}
     routines: list[RoutineConfig] = []
     instruments: list[InstrumentConfig]
 
@@ -289,6 +300,80 @@ class DeviceConfig(BaseModel):
 
         if duplicates:
             raise ValueError(f"Duplicate channels found: {', '.join(duplicates)}")
+
+        return self
+
+    @model_validator(mode="after")
+    def validate_groups(self) -> "DeviceConfig":
+        if not self.groups:
+            return self
+
+        gate_names = set(self.gates.keys())
+        contact_names = set(self.contacts.keys())
+        gpio_names = set(self.gpios.keys())
+
+        gate_assignments: dict[str, list[str]] = {}
+
+        for group_name, group in self.groups.items():
+            # Validate and track gates
+            for gate in group.gates:
+                if gate not in gate_names:
+                    raise ValueError(
+                        f"Group '{group_name}' references unknown gate '{gate}'"
+                    )
+                gate_assignments.setdefault(gate, []).append(group_name)
+
+            # Validate contacts (can be shared, no tracking needed)
+            if group.contacts is not None:
+                for contact in group.contacts:
+                    if contact not in contact_names:
+                        raise ValueError(
+                            f"Group '{group_name}' references unknown contact '{contact}'"
+                        )
+
+            # Validate gpios (can be shared, no tracking needed)
+            if group.gpios is not None:
+                for gpio in group.gpios:
+                    if gpio not in gpio_names:
+                        raise ValueError(
+                            f"Group '{group_name}' references unknown gpio '{gpio}'"
+                        )
+
+        # Check gate uniqueness (except RESERVOIR gates)
+        for gate, groups in gate_assignments.items():
+            if len(groups) > 1 and self.gates[gate].type != GateType.RESERVOIR:
+                raise ValueError(
+                    f"Gate '{gate}' is assigned to multiple groups: {', '.join(groups)}. "
+                    f"Only RESERVOIR gates can be shared between groups."
+                )
+
+        return self
+
+    def _validate_routine_group(
+        self, routine: RoutineConfig, available_groups: set[str], path: str = ""
+    ) -> "DeviceConfig":
+        current_path = f"{path}/{routine.name}" if path else routine.name
+
+        if routine.group and routine.group not in available_groups:
+            raise ValueError(
+                f"Routine '{current_path}' references unknown group '{routine.group}'. "
+                f"Available groups: {', '.join(sorted(available_groups))}"
+            )
+
+        for nested in routine.routines or []:
+            self._validate_routine_group(nested, available_groups, current_path)
+
+        return self
+
+    @model_validator(mode="after")
+    def validate_routine_groups(self) -> "DeviceConfig":
+        """Validate that routine groups exist if specified."""
+        if not self.groups:
+            return self
+
+        available_groups = set(self.groups.keys())
+        for routine in self.routines:
+            self._validate_routine_group(routine, available_groups)
 
         return self
 

@@ -2,8 +2,6 @@ import pytest
 
 from stanza.models import (
     GPIO,
-    Contact,
-    ContactType,
     ControlInstrumentConfig,
     DeviceConfig,
     Electrode,
@@ -69,7 +67,9 @@ def test_measurement_instrument_timing_validation():
         )
 
 
-def test_device_config_unique_channels():
+def test_device_config_unique_channels(
+    control_instrument_config, measurement_instrument_config
+):
     gate1 = Gate(
         type=GateType.PLUNGER,
         control_channel=1,
@@ -83,20 +83,6 @@ def test_device_config_unique_channels():
         v_upper_bound=1.0,
     )
 
-    control_instrument = ControlInstrumentConfig(
-        name="control",
-        type=InstrumentType.CONTROL,
-        ip_addr="192.168.1.1",
-        slew_rate=1.0,
-    )
-    measurement_instrument = MeasurementInstrumentConfig(
-        name="measurement",
-        type=InstrumentType.MEASUREMENT,
-        ip_addr="192.168.1.2",
-        measurement_duration=1.0,
-        sample_time=0.5,
-    )
-
     with pytest.raises(
         ValueError,
         match="Duplicate channels found: gate 'gate1' control_channel 1, gate 'gate2' control_channel 1",
@@ -106,7 +92,7 @@ def test_device_config_unique_channels():
             gates={"gate1": gate1, "gate2": gate2},
             contacts={},
             routines=[RoutineConfig(name="test_exp")],
-            instruments=[control_instrument, measurement_instrument],
+            instruments=[control_instrument_config, measurement_instrument_config],
         )
 
     gpio1 = GPIO(
@@ -132,8 +118,119 @@ def test_device_config_unique_channels():
             contacts={},
             gpios={"gpio1": gpio1, "gpio2": gpio2},
             routines=[RoutineConfig(name="test_exp")],
-            instruments=[control_instrument, measurement_instrument],
+            instruments=[control_instrument_config, measurement_instrument_config],
         )
+
+
+def test_device_config_groups_require_known_pads(
+    sample_gate,
+    sample_contact,
+    sample_gpio,
+    control_instrument_config,
+    measurement_instrument_config,
+):
+    """Test that device config groups must reference existing gates, contacts, and gpios."""
+
+    with pytest.raises(
+        ValueError, match="Group 'control' references unknown gate 'missing'"
+    ):
+        DeviceConfig(
+            name="test_device",
+            gates={"g1": sample_gate},
+            contacts={"c1": sample_contact},
+            gpios={"gpio1": sample_gpio},
+            groups={"control": {"gates": ["missing"]}},
+            routines=[RoutineConfig(name="test_exp")],
+            instruments=[control_instrument_config, measurement_instrument_config],
+        )
+
+    with pytest.raises(
+        ValueError, match="Group 'control' references unknown contact 'missing'"
+    ):
+        DeviceConfig(
+            name="test_device",
+            gates={"g1": sample_gate},
+            contacts={"c1": sample_contact},
+            gpios={"gpio1": sample_gpio},
+            groups={"control": {"contacts": ["missing"]}},
+            routines=[RoutineConfig(name="test_exp")],
+            instruments=[control_instrument_config, measurement_instrument_config],
+        )
+
+    with pytest.raises(
+        ValueError, match="Group 'control' references unknown gpio 'missing'"
+    ):
+        DeviceConfig(
+            name="test_device",
+            gates={"g1": sample_gate},
+            contacts={"c1": sample_contact},
+            gpios={"gpio1": sample_gpio},
+            groups={"control": {"gpios": ["missing"]}},
+            routines=[RoutineConfig(name="test_exp")],
+            instruments=[control_instrument_config, measurement_instrument_config],
+        )
+
+
+def test_device_config_groups_enforce_unique_assignments(
+    sample_gate,
+    sample_contact,
+    sample_gpio,
+    control_instrument_config,
+    measurement_instrument_config,
+):
+    """Test that gates cannot be shared between groups, but contacts and gpios can be shared."""
+
+    routine = RoutineConfig(name="test_exp", group="control")
+
+    with pytest.raises(
+        ValueError,
+        match="Gate 'g1' is assigned to multiple groups: control, sensor",
+    ):
+        DeviceConfig(
+            name="test_device",
+            gates={"g1": sample_gate},
+            contacts={"c1": sample_contact},
+            gpios={"gpio1": sample_gpio},
+            groups={
+                "control": {"gates": ["g1"], "contacts": ["c1"], "gpios": ["gpio1"]},
+                "sensor": {"gates": ["g1"]},
+            },
+            routines=[routine],
+            instruments=[control_instrument_config, measurement_instrument_config],
+        )
+
+    shared_contact_device = DeviceConfig(
+        name="test_device",
+        gates={"g1": sample_gate},
+        contacts={"c1": sample_contact},
+        gpios={"gpio1": sample_gpio},
+        groups={
+            "control": {"contacts": ["c1"]},
+            "sensor": {"contacts": ["c1"]},
+        },
+        routines=[routine],
+        instruments=[control_instrument_config, measurement_instrument_config],
+    )
+
+    assert shared_contact_device.groups["control"].contacts == ["c1"]
+    assert shared_contact_device.groups["sensor"].contacts == ["c1"]
+
+    # GPIOs can also be shared between groups (like contacts)
+    shared_gpio_device = DeviceConfig(
+        name="test_device",
+        gates={"g1": sample_gate},
+        contacts={"c1": sample_contact},
+        gpios={"gpio1": sample_gpio},
+        groups={
+            "control": {"gpios": ["gpio1"]},
+            "sensor": {"gpios": ["gpio1"]},
+        },
+        routines=[routine],
+        instruments=[control_instrument_config, measurement_instrument_config],
+    )
+
+    assert shared_gpio_device.groups["control"].gpios == ["gpio1"]
+    assert shared_gpio_device.groups["sensor"].gpios == ["gpio1"]
 
 
 def test_device_config_required_instruments():
@@ -182,31 +279,13 @@ def test_device_config_required_instruments():
         )
 
 
-def test_valid_device_config():
+def test_valid_device_config(sample_contact, sample_gpio, control_instrument_config):
+    """Test that a valid device config is created."""
     gate = Gate(
         type=GateType.PLUNGER,
         measure_channel=1,
         v_lower_bound=0.0,
         v_upper_bound=1.0,
-    )
-    contact = Contact(
-        type=ContactType.SOURCE,
-        measure_channel=2,
-        v_lower_bound=0.0,
-        v_upper_bound=1.0,
-    )
-    gpio = GPIO(
-        type=GPIOType.OUTPUT,
-        control_channel=3,
-        v_lower_bound=0.0,
-        v_upper_bound=3.3,
-    )
-
-    control_instrument = ControlInstrumentConfig(
-        name="control",
-        type=InstrumentType.CONTROL,
-        ip_addr="192.168.1.1",
-        slew_rate=1.0,
     )
     measurement_instrument = MeasurementInstrumentConfig(
         name="measurement",
@@ -219,10 +298,10 @@ def test_valid_device_config():
     device = DeviceConfig(
         name="test_device",
         gates={"gate1": gate},
-        contacts={"contact1": contact},
-        gpios={"gpio1": gpio},
+        contacts={"contact1": sample_contact},
+        gpios={"gpio1": sample_gpio},
         routines=[RoutineConfig(name="test_exp")],
-        instruments=[control_instrument, measurement_instrument],
+        instruments=[control_instrument_config, measurement_instrument],
     )
 
     assert device.name == "test_device"
@@ -398,3 +477,122 @@ def test_routine_config_handles_scientific_notation_strings():
     # "1e3" becomes 1000.0, which has no fractional part, so it's converted to int
     assert routine.parameters["integer_scientific"] == 1000
     assert isinstance(routine.parameters["integer_scientific"], int)
+
+
+def test_device_config_validates_routine_group_exists(
+    sample_gate, control_instrument_config, measurement_instrument_config
+):
+    """Test that routine group must exist in device groups."""
+    # Test that unknown group raises error
+    with pytest.raises(
+        ValueError,
+        match="Routine 'test_routine' references unknown group 'sensor'",
+    ):
+        DeviceConfig(
+            name="test_device",
+            gates={"g1": sample_gate},
+            contacts={},
+            groups={"control": {"gates": ["g1"]}},
+            routines=[RoutineConfig(name="test_routine", group="sensor")],
+            instruments=[control_instrument_config, measurement_instrument_config],
+        )
+
+
+def test_device_config_allows_routines_without_groups_when_no_groups_defined(
+    sample_gate, control_instrument_config, measurement_instrument_config
+):
+    """Test that routines can omit group when device has no groups."""
+    # Should not raise error - no groups defined
+    device = DeviceConfig(
+        name="test_device",
+        gates={"g1": sample_gate},
+        contacts={},
+        groups={},
+        routines=[RoutineConfig(name="test_routine")],
+        instruments=[control_instrument_config, measurement_instrument_config],
+    )
+
+    assert device.name == "test_device"
+    assert len(device.routines) == 1
+
+
+def test_device_config_allows_shared_reservoir_gates(
+    control_instrument_config, measurement_instrument_config
+):
+    """Test that RESERVOIR type gates can be shared between groups."""
+    reservoir_gate = Gate(
+        type=GateType.RESERVOIR,
+        control_channel=1,
+        v_lower_bound=0.0,
+        v_upper_bound=1.0,
+    )
+    plunger_gate = Gate(
+        type=GateType.PLUNGER,
+        control_channel=2,
+        v_lower_bound=0.0,
+        v_upper_bound=1.0,
+    )
+    barrier_gate = Gate(
+        type=GateType.BARRIER,
+        control_channel=3,
+        v_lower_bound=0.0,
+        v_upper_bound=1.0,
+    )
+
+    # Should NOT raise error - RESERVOIR gates can be shared
+    device = DeviceConfig(
+        name="test_device",
+        gates={"res1": reservoir_gate, "p1": plunger_gate, "b1": barrier_gate},
+        contacts={},
+        groups={
+            "control": {"gates": ["res1", "p1"]},
+            "sensor": {"gates": ["res1", "b1"]},
+        },
+        routines=[
+            RoutineConfig(name="test_routine1", group="control"),
+            RoutineConfig(name="test_routine2", group="sensor"),
+        ],
+        instruments=[control_instrument_config, measurement_instrument_config],
+    )
+
+    assert device.name == "test_device"
+    assert "res1" in device.groups["control"].gates
+    assert "res1" in device.groups["sensor"].gates
+
+
+def test_device_config_rejects_shared_non_reservoir_gates(
+    control_instrument_config, measurement_instrument_config
+):
+    """Test that non-RESERVOIR gates cannot be shared between groups."""
+    plunger_gate = Gate(
+        type=GateType.PLUNGER,
+        control_channel=1,
+        v_lower_bound=0.0,
+        v_upper_bound=1.0,
+    )
+    barrier_gate = Gate(
+        type=GateType.BARRIER,
+        control_channel=2,
+        v_lower_bound=0.0,
+        v_upper_bound=1.0,
+    )
+
+    # Should raise error - PLUNGER gates cannot be shared
+    with pytest.raises(
+        ValueError,
+        match="Gate 'p1' is assigned to multiple groups: control, sensor",
+    ):
+        DeviceConfig(
+            name="test_device",
+            gates={"p1": plunger_gate, "b1": barrier_gate},
+            contacts={},
+            groups={
+                "control": {"gates": ["p1"]},
+                "sensor": {"gates": ["p1", "b1"]},
+            },
+            routines=[
+                RoutineConfig(name="test_routine1", group="control"),
+                RoutineConfig(name="test_routine2", group="sensor"),
+            ],
+            instruments=[control_instrument_config, measurement_instrument_config],
+        )

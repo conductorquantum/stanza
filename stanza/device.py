@@ -13,7 +13,7 @@ from stanza.base.protocols import (
 )
 from stanza.exceptions import DeviceError
 from stanza.logger.session import LoggerSession
-from stanza.models import ContactType, DeviceConfig, GateType, PadType
+from stanza.models import ContactType, DeviceConfig, DeviceGroup, GateType, PadType
 
 
 class Device:
@@ -160,6 +160,103 @@ class Device:
             if channel.pad_type == PadType.CONTACT
             and channel.measure_channel is not None
         ]
+
+    def group_names(self) -> list[str]:
+        """List of configured device group names."""
+        return list(self.device_config.groups.keys())
+
+    def _get_group(self, group_name: str) -> DeviceGroup:
+        try:
+            return self.device_config.groups[group_name]
+        except KeyError as exc:
+            raise DeviceError(f"Group '{group_name}' not found") from exc
+
+    def group_gates(self, group_name: str) -> list[str]:
+        """List of gate pad names associated with a specific group."""
+        return list(self._get_group(group_name).gates)
+
+    def group_contacts(self, group_name: str) -> list[str]:
+        """List of contact pad names associated with a specific group."""
+        contacts = self._get_group(group_name).contacts
+        return list(contacts) if contacts is not None else []
+
+    def group_gpios(self, group_name: str) -> list[str]:
+        """List of GPIO pad names associated with a specific group."""
+        gpios = self._get_group(group_name).gpios
+        return list(gpios) if gpios is not None else []
+
+    def filter_by_group(self, group_name: str) -> dict[str, ChannelConfig]:
+        """Get filtered channel configurations for electrodes in the specified group.
+
+        This method returns a dictionary of channel configurations containing only the pads
+        (gates, contacts, gpios) that belong to the specified group. This is useful for
+        getting configuration information about a subset of device pads without creating
+        a separate device instance.
+
+        Filtering behavior:
+        - Gates: Always explicitly filtered (only listed gates included)
+        - Contacts: If specified in group, only those contacts. If omitted, ALL device contacts.
+        - GPIOs: If specified in group, only those GPIOs. If omitted, ALL device GPIOs.
+
+        Args:
+            group_name: Name of the group to filter by. Must exist in device_config.groups.
+
+        Returns:
+            Dictionary mapping pad names to their channel configurations, filtered to
+            include only pads in the specified group.
+
+        Raises:
+            DeviceError: If the specified group does not exist.
+
+        Example:
+            >>> # Group with explicit GPIO list
+            >>> control_configs = device.filter_by_group("control")
+            >>> control_pads = list(control_configs.keys())
+            >>> device.jump({pad: 0.5 for pad in control_pads})
+
+            >>> # Check what pads are in a group
+            >>> sensor_configs = device.filter_by_group("sensor")
+            >>> print(f"Sensor pads: {list(sensor_configs.keys())}")
+        """
+        group = self._get_group(group_name)
+
+        # Gates: always explicitly filter
+        group_pad_names = set(group.gates)
+
+        # Contacts: conditional filtering
+        if group.contacts is not None:
+            # User explicitly specified contacts - include ONLY these
+            group_pad_names.update(group.contacts)
+        else:
+            # User didn't specify contacts - include ALL device contacts
+            all_contacts = [
+                name
+                for name, config in self.channel_configs.items()
+                if config.pad_type == PadType.CONTACT
+            ]
+            group_pad_names.update(all_contacts)
+
+        # GPIOs: conditional filtering
+        if group.gpios is not None:
+            # User explicitly specified gpios - include ONLY these
+            group_pad_names.update(group.gpios)
+        else:
+            # User didn't specify gpios - include ALL device GPIOs
+            all_gpios = [
+                name
+                for name, config in self.channel_configs.items()
+                if config.pad_type == PadType.GPIO
+            ]
+            group_pad_names.update(all_gpios)
+
+        # Filter channel_configs to only include group members
+        filtered_channel_configs = {
+            pad_name: config
+            for pad_name, config in self.channel_configs.items()
+            if pad_name in group_pad_names
+        }
+
+        return filtered_channel_configs
 
     def get_gates_by_type(self, gate_type: str | GateType) -> list[str]:
         """Get the gate electrodes of a given type.
@@ -388,9 +485,8 @@ class Device:
 
         if session is None:
             # No logging - just collect data
-            for i, voltage in enumerate(voltages):
-                should_settle = i == 0
-                self.jump({gate_electrode: voltage}, wait_for_settling=should_settle)
+            for voltage in voltages:
+                self.jump({gate_electrode: voltage}, wait_for_settling=True)
                 v_actual = self.check(gate_electrode)
                 i_measured = self.measure(measure_electrode)
                 voltage_measurements.append(v_actual)
@@ -404,11 +500,8 @@ class Device:
             with session.sweep(
                 f"{gate_electrode} sweep", "Voltage", "Current", metadata=metadata
             ) as s:
-                for i, voltage in enumerate(voltages):
-                    should_settle = i == 0
-                    self.jump(
-                        {gate_electrode: voltage}, wait_for_settling=should_settle
-                    )
+                for voltage in voltages:
+                    self.jump({gate_electrode: voltage}, wait_for_settling=True)
                     v_actual = self.check(gate_electrode)
                     i_measured = self.measure(measure_electrode)
                     voltage_measurements.append(v_actual)
@@ -452,12 +545,11 @@ class Device:
 
         if session is None:
             # No logging - just collect data
-            for i, voltage_1 in enumerate(voltages_1):
-                for j, voltage_2 in enumerate(voltages_2):
-                    should_settle = i == 0 and j == 0
+            for voltage_1 in voltages_1:
+                for voltage_2 in voltages_2:
                     self.jump(
                         {gate_1: voltage_1, gate_2: voltage_2},
-                        wait_for_settling=should_settle,
+                        wait_for_settling=True,
                     )
                     v1_actual = self.check(gate_1)
                     v2_actual = self.check(gate_2)
@@ -476,12 +568,11 @@ class Device:
                 "Current",
                 metadata=metadata,
             ) as s:
-                for i, voltage_1 in enumerate(voltages_1):
-                    for j, voltage_2 in enumerate(voltages_2):
-                        should_settle = i == 0 and j == 0
+                for voltage_1 in voltages_1:
+                    for voltage_2 in voltages_2:
                         self.jump(
                             {gate_1: voltage_1, gate_2: voltage_2},
-                            wait_for_settling=should_settle,
+                            wait_for_settling=True,
                         )
                         v1_actual = self.check(gate_1)
                         v2_actual = self.check(gate_2)
@@ -521,12 +612,12 @@ class Device:
 
         if session is None:
             # No logging - just collect data
-            for i, voltage in enumerate(voltages):
-                should_settle = i == 0
+            for voltage in voltages:
                 self.jump(
                     dict.fromkeys(self.control_gates, voltage),
-                    wait_for_settling=should_settle,
+                    wait_for_settling=True,
                 )
+
                 i_measured = self.measure(measure_electrode)
                 voltage_measurements.append([voltage])
                 current_measurements.append(i_measured)
@@ -539,12 +630,12 @@ class Device:
             with session.sweep(
                 "all gates sweep", "Voltage", "Current", metadata=metadata
             ) as s:
-                for i, voltage in enumerate(voltages):
-                    should_settle = i == 0
+                for voltage in voltages:
                     self.jump(
                         dict.fromkeys(self.control_gates, voltage),
-                        wait_for_settling=should_settle,
+                        wait_for_settling=True,
                     )
+
                     i_measured = self.measure(measure_electrode)
                     voltage_measurements.append([voltage])
                     current_measurements.append(i_measured)
@@ -583,11 +674,10 @@ class Device:
         voltage_measurements = []
         current_measurements = []
 
-        for i, voltage in enumerate(voltages):
-            should_settle = i == 0
+        for voltage in voltages:
             self.jump(
                 dict(zip(gate_electrodes, voltage, strict=True)),
-                wait_for_settling=should_settle,
+                wait_for_settling=True,
             )
 
             voltage_measurements.append(

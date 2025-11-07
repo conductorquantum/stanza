@@ -169,6 +169,7 @@ class TestGetConfigResource:
 
 class TestLoadDeviceConfig:
     def test_loads_sample_device_config(self):
+        """Test that sample device config is loaded correctly."""
         result = load_device_config("devices/device.sample.yaml", is_stanza_config=True)
 
         assert result.name == "Sample Device"
@@ -183,6 +184,39 @@ class TestLoadDeviceConfig:
         assert result.contacts["IN"].control_channel == 1
         assert result.contacts["IN"].measure_channel == 1
         assert result.contacts["IN"].breakout_channel == 1
+
+    def test_loads_sample_device__with_groups_config(self):
+        result = load_device_config(
+            "devices/device.sample.groups.yaml", is_stanza_config=True
+        )
+
+        assert result.name == "Sample Device"
+        assert len(result.gates) == 10
+        assert len(result.contacts) == 2
+        assert len(result.gpios) == 3
+        assert len(result.instruments) == 2
+        assert "G1" in result.gates
+        assert "IN" in result.contacts
+        assert result.gates["G1"].control_channel == 3
+        assert result.gates["G1"].measure_channel == 3
+        assert result.gates["G1"].breakout_channel == 3
+        assert result.contacts["IN"].control_channel == 1
+        assert result.contacts["IN"].measure_channel == 1
+        assert result.contacts["IN"].breakout_channel == 1
+        assert set(result.groups.keys()) == {"control", "sensor"}
+        assert result.groups["control"].gates == [
+            "G1",
+            "G2",
+            "G3",
+            "G4",
+            "G5",
+            "G9",
+            "G10",
+        ]
+        assert result.groups["control"].contacts == ["IN", "OUT"]
+        assert result.groups["sensor"].contacts == ["IN", "OUT"]
+        assert result.groups["control"].gpios == ["MUX1"]
+        assert result.groups["sensor"].gpios == ["MUX2", "SENSOR_ENABLE"]
 
     def test_loads_external_yaml_config(self, valid_device_yaml, tmp_path):
         config_file = tmp_path / "device.yaml"

@@ -53,11 +53,15 @@ class MockDevice:
     def jump(self, voltage_dict, wait_for_settling=False):
         self.voltages.update(voltage_dict)
 
-    def sweep_all(self, voltages, measure_electrode, session=None):
-        return voltages, pinchoff_curve(voltages, 1.0, 1.0, 1.0)
-
     def sweep_1d(self, gate, voltages, measure_electrode, session=None):
         return voltages, pinchoff_curve(voltages, 1.0, 1.0, 1.0)
+
+    def sweep_nd(self, gate_electrodes, voltages, measure_electrode, session=None):
+        # Extract first voltage from each step for the pinchoff curve
+        # (in global_accumulation, all gates get the same voltage at each step)
+        sweep_voltages = np.array([v[0] for v in voltages])
+        currents = pinchoff_curve(sweep_voltages, 1.0, 1.0, 1.0)
+        return voltages, currents
 
     def get_gates_by_type(self, gate_type):
         return [name for name, gtype in self.gate_types.items() if gtype == gate_type]
@@ -81,13 +85,16 @@ class MockLoggerSession:
 class HighQualityMockDevice(MockDevice):
     """Mock device that returns high-quality pinchoff curves."""
 
-    def sweep_all(self, voltages, measure_electrode, session=None):
-        voltages_array = np.array(voltages)
-        return voltages_array, pinchoff_curve(voltages_array, 1.5, 3.0, -1.5)
-
     def sweep_1d(self, gate, voltages, measure_electrode, session=None):
         voltages_array = np.array(voltages)
         return voltages_array, pinchoff_curve(voltages_array, 1.5, 3.0, -1.5)
+
+    def sweep_nd(self, gate_electrodes, voltages, measure_electrode, session=None):
+        # Extract first voltage from each step for the pinchoff curve
+        # (in global_accumulation, all gates get the same voltage at each step)
+        sweep_voltages = np.array([v[0] for v in voltages])
+        currents = pinchoff_curve(sweep_voltages, 1.5, 3.0, -1.5)
+        return voltages, currents
 
 
 @pytest.fixture
@@ -255,20 +262,24 @@ class TestGlobalAccumulation:
                 charge_carrier_type="electron",
             )
 
-    def test_calls_sweep_all(self, routine_context):
+    def test_calls_sweep_nd(self, routine_context):
         class TrackedDevice(MockDevice):
             def __init__(self):
                 super().__init__()
-                self.sweep_all_called = False
+                self.sweep_nd_called = False
                 self.sweep_params = {}
 
-            def sweep_all(self, voltages, measure_electrode, session=None):
-                self.sweep_all_called = True
+            def sweep_nd(
+                self, gate_electrodes, voltages, measure_electrode, session=None
+            ):
+                self.sweep_nd_called = True
                 self.sweep_params = {
+                    "gate_electrodes": gate_electrodes,
                     "voltages": voltages,
                     "measure_electrode": measure_electrode,
                 }
-                return voltages, np.ones_like(voltages) * 1e-10
+                # Return flat currents that will fail analysis
+                return voltages, np.ones(len(voltages)) * 1e-10
 
         routine_context.resources._resources["device"] = TrackedDevice()
         routine_context.results.store(
@@ -284,7 +295,7 @@ class TestGlobalAccumulation:
                 bias_voltage=0.0,
                 charge_carrier_type="electron",
             )
-        assert routine_context.resources.device.sweep_all_called
+        assert routine_context.resources.device.sweep_nd_called
 
     def test_with_session_logging(self, routine_context):
         session = MockLoggerSession()
@@ -444,6 +455,7 @@ class TestAnalyzeSingleGateHeuristic:
                 assert isinstance(result[key], float)
 
     def test_negative_amplitude_curve(self):
+        """Test that the saturation voltage is less than the transition voltage, which is less than the cutoff voltage for a negative amplitude curve."""
         voltages = np.linspace(-2, 2, 200)
         currents = pinchoff_curve(voltages, -0.5, 2.0, -1.0)
         np.random.seed(42)

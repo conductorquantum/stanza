@@ -4,12 +4,14 @@ import pytest
 
 from stanza.device import Device
 from stanza.models import (
+    GPIO,
     Contact,
     ContactType,
     ControlInstrumentConfig,
     DeviceConfig,
     Gate,
     GateType,
+    GPIOType,
     InstrumentType,
     MeasurementInstrumentConfig,
     RoutineConfig,
@@ -119,6 +121,141 @@ class MockBreakoutBoxInstrument:
         else:
             for name in channel_name:
                 self.disconnected_calls.append((name, line_number))
+
+
+# Helper functions for test setup
+def make_gate(
+    gate_type: GateType = GateType.PLUNGER,
+    control_channel: int | None = None,
+    measure_channel: int | None = None,
+    v_lower_bound: float = 0.0,
+    v_upper_bound: float = 1.0,
+) -> Gate:
+    """Helper function to create Gate instances with common defaults."""
+    return Gate(
+        type=gate_type,
+        control_channel=control_channel,
+        measure_channel=measure_channel,
+        v_lower_bound=v_lower_bound,
+        v_upper_bound=v_upper_bound,
+    )
+
+
+def make_contact(
+    contact_type: ContactType = ContactType.SOURCE,
+    control_channel: int | None = None,
+    measure_channel: int | None = None,
+    v_lower_bound: float = 0.0,
+    v_upper_bound: float = 1.0,
+) -> Contact:
+    """Helper function to create Contact instances with common defaults."""
+    return Contact(
+        type=contact_type,
+        control_channel=control_channel,
+        measure_channel=measure_channel,
+        v_lower_bound=v_lower_bound,
+        v_upper_bound=v_upper_bound,
+    )
+
+
+def standard_instrument_configs() -> list[
+    ControlInstrumentConfig | MeasurementInstrumentConfig
+]:
+    """Helper function to create standard instrument configurations for testing."""
+    return [
+        ControlInstrumentConfig(
+            name="control",
+            type=InstrumentType.CONTROL,
+            ip_addr="192.168.1.1",
+            slew_rate=1.0,
+        ),
+        MeasurementInstrumentConfig(
+            name="measurement",
+            type=InstrumentType.MEASUREMENT,
+            ip_addr="192.168.1.2",
+            measurement_duration=1.0,
+            sample_time=0.5,
+        ),
+    ]
+
+
+@pytest.fixture
+def control_instrument_config():
+    """Fixture providing a standard ControlInstrumentConfig for testing."""
+    return ControlInstrumentConfig(
+        name="control",
+        type=InstrumentType.CONTROL,
+        ip_addr="192.168.1.1",
+        slew_rate=1.0,
+    )
+
+
+@pytest.fixture
+def measurement_instrument_config():
+    """Fixture providing a standard MeasurementInstrumentConfig for testing."""
+    return MeasurementInstrumentConfig(
+        name="measurement",
+        type=InstrumentType.MEASUREMENT,
+        ip_addr="192.168.1.2",
+        measurement_duration=1.0,
+        sample_time=0.5,
+    )
+
+
+@pytest.fixture
+def sample_gate():
+    """Fixture providing a standard Gate for testing."""
+    return Gate(
+        type=GateType.PLUNGER,
+        control_channel=1,
+        v_lower_bound=0.0,
+        v_upper_bound=1.0,
+    )
+
+
+@pytest.fixture
+def sample_contact():
+    """Fixture providing a standard Contact for testing."""
+    return Contact(
+        type=ContactType.SOURCE,
+        measure_channel=2,
+        v_lower_bound=0.0,
+        v_upper_bound=1.0,
+    )
+
+
+@pytest.fixture
+def sample_gpio():
+    """Fixture providing a standard GPIO for testing."""
+    return GPIO(
+        type=GPIOType.OUTPUT,
+        control_channel=3,
+        v_lower_bound=0.0,
+        v_upper_bound=3.3,
+    )
+
+
+@pytest.fixture
+def create_device():
+    """Fixture that returns a function to create a Device from a DeviceConfig."""
+
+    def _create_device(
+        device_config: DeviceConfig,
+        control_instrument: MockControlInstrument | None = None,
+        measurement_instrument: MockMeasurementInstrument | None = None,
+    ) -> Device:
+        """Create a Device instance from a DeviceConfig."""
+        channel_configs = generate_channel_configs(device_config)
+        return Device(
+            name=device_config.name,
+            device_config=device_config,
+            channel_configs=channel_configs,
+            control_instrument=control_instrument or MockControlInstrument(),
+            measurement_instrument=measurement_instrument
+            or MockMeasurementInstrument(),
+        )
+
+    return _create_device
 
 
 @pytest.fixture(autouse=True)

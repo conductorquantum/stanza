@@ -237,6 +237,20 @@ class TestComputeIndicesFromThresholds:
         assert isinstance(cutoff_idx, int)
         assert isinstance(saturation_idx, int)
 
+    def test_negative_current_magnitude_decreasing(self):
+        """Test that negative currents use magnitude to determine inversion when magnitude decreases."""
+        # Current becomes less negative (magnitude decreases) - should NOT be inverted
+        original_current = np.array([-0.9, -0.7, -0.5, -0.3, -0.1])
+        fitted_current = normalize(original_current)  # Normalized to [0, 1]
+        cutoff_idx, saturation_idx = compute_indices_from_threshold(
+            fitted_current, 0.05, original_current=original_current
+        )
+        # Saturation should always be the higher index
+        assert saturation_idx >= cutoff_idx
+        # Since magnitude is decreasing (becoming less negative), it's NOT inverted
+        # So cutoff should be at early index (low current) and saturation at late index (high current)
+        assert fitted_current[cutoff_idx] < fitted_current[saturation_idx]
+
 
 class TestPinchoffFitResult:
     def test_fit_curve_method(self):

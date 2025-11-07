@@ -51,7 +51,7 @@ def routine(
     def decorator(f: Callable[..., Any]) -> Callable[..., Any]:
         routine_name = name or f.__name__
         _routine_registry[routine_name] = f
-        logger.debug(f"Registered routine: {routine_name}")
+        logger.debug("Registered routine: %s", routine_name)
         return f
 
     if func is None:
@@ -132,7 +132,8 @@ class RoutineRunner:
         self.context = RoutineContext(self.resources, self.results)
 
         logger.info(
-            f"Initialized RoutineRunner with {len(self.resources.list_resources())} resources"
+            "Initialized RoutineRunner with %s resources",
+            len(self.resources.list_resources()),
         )
 
     def _build_resources_from_configs(
@@ -198,8 +199,15 @@ class RoutineRunner:
             routine_config: The routine configuration to extract from
             routine_configs: Dictionary to store extracted parameters
         """
+        # Store parameters and group information
+        config_data: dict[str, Any] = {}
         if routine_config.parameters:
-            routine_configs[routine_config.name] = routine_config.parameters
+            config_data.update(routine_config.parameters)
+        if hasattr(routine_config, "group") and routine_config.group is not None:
+            config_data["group"] = routine_config.group
+
+        if config_data:
+            routine_configs[routine_config.name] = config_data
 
         if routine_config.routines:
             current_path = (
@@ -271,36 +279,50 @@ class RoutineRunner:
         config = self.configs.get(routine_name, {})
         merged_params = {**parent_params, **config, **params}
 
+        # Extract group information if present (not passed to routine as parameter)
+        group_name = merged_params.pop("group", None)
+
         # Get the routine function from global registry
         routine_func = _routine_registry[routine_name]
+
+        # Filter device by group if specified
+        if group_name is not None:
+            device = getattr(self.resources, "device", None)
+            if device is not None:
+                group = device.filter_by_group(group_name)
+                # Add group configs to resources for routine access
+                self.resources.add("group", group)
+                # Only one group can be available at a time
+                logger.info("Filtering device to group: %s", group_name)
 
         # Create logger session if logger exists and has create_session method
         data_logger = getattr(self.resources, "logger", None)
         session = None
         if data_logger is not None and hasattr(data_logger, "create_session"):
             session_id = self._get_routine_path(routine_name)
-            session = data_logger.create_session(session_id=session_id)
+            session = data_logger.create_session(
+                session_id=session_id, group_name=group_name
+            )
             merged_params["session"] = session
 
         try:
-            logger.info(f"Running routine: {routine_name}")
+            logger.info("Running routine: %s", routine_name)
             result = routine_func(self.context, **merged_params)
 
             # Store result
             self.results.store(routine_name, result)
-            logger.info(f"Completed routine: {routine_name}")
+            logger.info("Completed routine: %s", routine_name)
 
             return result
 
         except Exception as e:
-            logger.error(f"Routine {routine_name} failed: {e}")
+            logger.error("Routine %s failed: %s", routine_name, e)
             raise RuntimeError(f"Routine '{routine_name}' failed: {e}") from e
 
         finally:
             # Close logger session if it was created
             if session is not None and data_logger is not None:
-                session_id = self._get_routine_path(routine_name)
-                data_logger.close_session(session_id=session_id)
+                data_logger.close_session(session_id=session.session_id)
 
     def run_all(self, parent_routine: str | None = None) -> dict[str, Any]:
         """Execute all routines from config in order.
@@ -339,12 +361,33 @@ class RoutineRunner:
             parent_params: Parameters from parent routine to inherit
         """
         if routine_config.name in _routine_registry:
+            # Extract group from routine_config if present
+            group_override = {}
+            if hasattr(routine_config, "group") and routine_config.group is not None:
+                group_override["group"] = routine_config.group
+
             if parent_params:
-                merged = {**parent_params, **(routine_config.parameters or {})}
+                merged = {
+                    **parent_params,
+                    **(routine_config.parameters or {}),
+                    **group_override,
+                }
                 result = self.run(routine_config.name, **merged)
             else:
-                result = self.run(routine_config.name)
-            results[routine_config.name] = result
+                # Merge config parameters with group override
+                merged = {**(routine_config.parameters or {}), **group_override}
+                if merged:
+                    result = self.run(routine_config.name, **merged)
+                else:
+                    result = self.run(routine_config.name)
+
+            # Store result with unique key if there's a group
+            result_key = (
+                f"{routine_config.name}_{routine_config.group}"
+                if hasattr(routine_config, "group") and routine_config.group
+                else routine_config.name
+            )
+            results[result_key] = result
 
         if routine_config.routines:
             current_params = routine_config.parameters or {}
