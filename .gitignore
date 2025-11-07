@@ -33,12 +33,3 @@ archive.zip
 
 # uv
 uv.lock
-
-# AI Code Generation
-CLAUDE.md
-AGENTS.md
-
-# Dev Files
-temp/
-logs/
-data/
