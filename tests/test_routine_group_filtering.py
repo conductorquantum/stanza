@@ -3,7 +3,7 @@
 import pytest
 
 from stanza.exceptions import DeviceError
-from stanza.models import DeviceConfig, DeviceGroup, GateType
+from stanza.models import DeviceConfig, DeviceGroup, GateType, PadType
 from stanza.routines import (
     RoutineContext,
     RoutineRunner,
@@ -130,7 +130,7 @@ class TestRoutineDeviceFiltering:
             received_device_name = ctx.resources.device.name
             return {}
 
-        runner.run("test_routine", group=group)
+        runner.run("test_routine", group="control")
 
         # Device name should still be "device" (not "device_control")
         assert received_device_name == "device"

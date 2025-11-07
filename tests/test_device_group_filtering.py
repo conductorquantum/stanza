@@ -131,7 +131,7 @@ def test_device_filter_by_group_unknown_group(create_device):
 
 
 def test_device_filter_by_group_shares_instruments(create_device):
-    """Test that filtered devices share the same instrument instances."""
+    """Test that filtering by group doesn't affect the original device's instruments."""
     device_config = DeviceConfig(
         name="test_device",
         gates={
@@ -152,15 +152,17 @@ def test_device_filter_by_group_shares_instruments(create_device):
 
     device = create_device(device_config, control_inst, measure_inst)
 
-    # Filter by groups
-    control_device = device.filter_by_group("control")
-    sensor_device = device.filter_by_group("sensor")
+    # Filter by groups (returns dict, not Device)
+    control_configs = device.filter_by_group("control")
+    sensor_configs = device.filter_by_group("sensor")
 
-    # Check that instruments are shared (same instance)
-    assert control_device.control_instrument is control_inst
-    assert control_device.measurement_instrument is measure_inst
-    assert sensor_device.control_instrument is control_inst
-    assert sensor_device.measurement_instrument is measure_inst
+    # Check that original device still has the same instruments
+    assert device.control_instrument is control_inst
+    assert device.measurement_instrument is measure_inst
+
+    # Verify that filter_by_group returns dicts with the expected gates
+    assert "G1" in control_configs
+    assert "G2" in sensor_configs
 
 
 class TestConditionalFiltering:
