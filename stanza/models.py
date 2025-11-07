@@ -235,8 +235,8 @@ class DeviceGroup(BaseModel):
 
     name: str | None = None
     gates: list[str] = Field(default_factory=list)
-    contacts: list[str] = Field(default_factory=list)
-    gpios: list[str] = Field(default_factory=list)
+    contacts: list[str] | None = None
+    gpios: list[str] | None = None
 
 
 class DeviceConfig(BaseModel):
@@ -321,18 +321,20 @@ class DeviceConfig(BaseModel):
                 gate_assignments.setdefault(gate, []).append(group_name)
 
             # Validate contacts (can be shared, no tracking needed)
-            for contact in group.contacts:
-                if contact not in contact_names:
-                    raise ValueError(
-                        f"Group '{group_name}' references unknown contact '{contact}'"
-                    )
+            if group.contacts is not None:
+                for contact in group.contacts:
+                    if contact not in contact_names:
+                        raise ValueError(
+                            f"Group '{group_name}' references unknown contact '{contact}'"
+                        )
 
             # Validate gpios (can be shared, no tracking needed)
-            for gpio in group.gpios:
-                if gpio not in gpio_names:
-                    raise ValueError(
-                        f"Group '{group_name}' references unknown gpio '{gpio}'"
-                    )
+            if group.gpios is not None:
+                for gpio in group.gpios:
+                    if gpio not in gpio_names:
+                        raise ValueError(
+                            f"Group '{group_name}' references unknown gpio '{gpio}'"
+                        )
 
         # Check gate uniqueness (except RESERVOIR gates)
         for gate, groups in gate_assignments.items():

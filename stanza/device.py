@@ -177,11 +177,13 @@ class Device:
 
     def group_contacts(self, group_name: str) -> list[str]:
         """List of contact pad names associated with a specific group."""
-        return list(self._get_group(group_name).contacts)
+        contacts = self._get_group(group_name).contacts
+        return list(contacts) if contacts is not None else []
 
     def group_gpios(self, group_name: str) -> list[str]:
         """List of GPIO pad names associated with a specific group."""
-        return list(self._get_group(group_name).gpios)
+        gpios = self._get_group(group_name).gpios
+        return list(gpios) if gpios is not None else []
 
     def filter_by_group(self, group_name: str) -> dict[str, ChannelConfig]:
         """Get filtered channel configurations for electrodes in the specified group.
@@ -222,7 +224,7 @@ class Device:
         group_pad_names = set(group.gates)
 
         # Contacts: conditional filtering
-        if "contacts" in group.model_fields_set:
+        if group.contacts is not None:
             # User explicitly specified contacts - include ONLY these
             group_pad_names.update(group.contacts)
         else:
@@ -235,7 +237,7 @@ class Device:
             group_pad_names.update(all_contacts)
 
         # GPIOs: conditional filtering
-        if "gpios" in group.model_fields_set:
+        if group.gpios is not None:
             # User explicitly specified gpios - include ONLY these
             group_pad_names.update(group.gpios)
         else:
