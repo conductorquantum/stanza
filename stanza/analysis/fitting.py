@@ -238,35 +238,23 @@ def compute_indices_from_threshold(
         fitted_current.max() - fitted_current.min()
     )
 
-    # Use magnitude to determine inversion when original current is negative
-    if original_current is not None and np.all(original_current < 0):
-        # All negative: check if magnitude is increasing (current becoming more negative)
-        # If magnitude increases, current is decreasing (more negative), so it's inverted
-        is_inverted = np.abs(original_current[-1]) > np.abs(original_current[0])
-    else:
-        # Use standard comparison for mixed or positive currents
-        is_inverted = fitted_current[-1] < fitted_current[0]
-
-    cutoff_idx = int(
-        np.argmax(
-            fitted_current <= min_threshold
-            if is_inverted
-            else fitted_current >= min_threshold
-        )
+    is_inverted = fitted_current[-1] < fitted_current[0]
+    return (
+        int(
+            np.argmax(
+                fitted_current <= min_threshold
+                if is_inverted
+                else fitted_current >= min_threshold
+            )
+        ),
+        int(
+            np.argmax(
+                fitted_current <= max_threshold
+                if is_inverted
+                else fitted_current >= max_threshold
+            )
+        ),
     )
-    saturation_idx = int(
-        np.argmax(
-            fitted_current <= max_threshold
-            if is_inverted
-            else fitted_current >= max_threshold
-        )
-    )
-
-    # Ensure saturation_index is always the higher index (later in voltage sweep)
-    if saturation_idx < cutoff_idx:
-        cutoff_idx, saturation_idx = saturation_idx, cutoff_idx
-
-    return cutoff_idx, saturation_idx
 
 
 def fit_pinchoff_parameters(
