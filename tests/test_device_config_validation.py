@@ -184,7 +184,7 @@ def test_device_config_groups_enforce_unique_assignments(
 
     with pytest.raises(
         ValueError,
-        match="Gate 'g1' referenced by group 'sensor' already assigned to group 'control'",
+        match="Gate 'g1' is assigned to multiple groups: control, sensor",
     ):
         DeviceConfig(
             name="test_device",
@@ -580,7 +580,7 @@ def test_device_config_rejects_shared_non_reservoir_gates(
     # Should raise error - PLUNGER gates cannot be shared
     with pytest.raises(
         ValueError,
-        match="Gate 'p1' referenced by group 'sensor' already assigned to group 'control'. Only RESERVOIR gates can be shared",
+        match="Gate 'p1' is assigned to multiple groups: control, sensor",
     ):
         DeviceConfig(
             name="test_device",

@@ -309,58 +309,38 @@ class DeviceConfig(BaseModel):
         contact_names = set(self.contacts.keys())
         gpio_names = set(self.gpios.keys())
 
-        gate_assignments: dict[str, str | list[str]] = {}
-        contact_assignments: dict[str, list[str]] = {}
-        gpio_assignments: dict[str, list[str]] = {}
+        gate_assignments: dict[str, list[str]] = {}
 
         for group_name, group in self.groups.items():
+            # Validate and track gates
             for gate in group.gates:
                 if gate not in gate_names:
                     raise ValueError(
                         f"Group '{group_name}' references unknown gate '{gate}'"
                     )
-                if gate in gate_assignments:
-                    # Allow RESERVOIR gates to be shared between groups
-                    gate_obj = self.gates[gate]
-                    if gate_obj.type != GateType.RESERVOIR:
-                        existing_group = gate_assignments[gate]
-                        if isinstance(existing_group, list):
-                            existing_group = existing_group[0]
-                        raise ValueError(
-                            f"Gate '{gate}' referenced by group '{group_name}' already assigned to group '{existing_group}'. "
-                            f"Only RESERVOIR gates can be shared between groups."
-                        )
-                    # For RESERVOIR gates, track multiple assignments
-                    if not isinstance(gate_assignments[gate], list):
-                        gate_assignments[gate] = [gate_assignments[gate]]  # type: ignore[list-item]
-                    gate_assignments[gate].append(group_name)  # type: ignore[union-attr]
-                else:
-                    gate_assignments[gate] = group_name
+                gate_assignments.setdefault(gate, []).append(group_name)
 
+            # Validate contacts (can be shared, no tracking needed)
             for contact in group.contacts:
                 if contact not in contact_names:
                     raise ValueError(
                         f"Group '{group_name}' references unknown contact '{contact}'"
                     )
-                if contact in contact_assignments:
-                    if group_name not in contact_assignments[contact]:
-                        contact_assignments[contact].append(group_name)
-                else:
-                    contact_assignments[contact] = [group_name]
 
+            # Validate gpios (can be shared, no tracking needed)
             for gpio in group.gpios:
                 if gpio not in gpio_names:
                     raise ValueError(
                         f"Group '{group_name}' references unknown gpio '{gpio}'"
                     )
-                # Allow GPIOs to be shared between groups (like contacts)
-                # This is consistent with conditional filtering where omitted GPIOs
-                # are available to all groups
-                if gpio in gpio_assignments:
-                    if group_name not in gpio_assignments[gpio]:
-                        gpio_assignments[gpio].append(group_name)
-                else:
-                    gpio_assignments[gpio] = [group_name]
+
+        # Check gate uniqueness (except RESERVOIR gates)
+        for gate, groups in gate_assignments.items():
+            if len(groups) > 1 and self.gates[gate].type != GateType.RESERVOIR:
+                raise ValueError(
+                    f"Gate '{gate}' is assigned to multiple groups: {', '.join(groups)}. "
+                    f"Only RESERVOIR gates can be shared between groups."
+                )
 
         return self
 

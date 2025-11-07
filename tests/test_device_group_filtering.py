@@ -473,7 +473,7 @@ class TestConditionalFiltering:
         """Test that non-RESERVOIR gates cannot be explicitly shared between groups."""
         with pytest.raises(
             ValueError,
-            match="Gate 'G1' referenced by group 'sensor' already assigned to group 'control'",
+            match="Gate 'G1' is assigned to multiple groups: control, sensor",
         ):
             DeviceConfig(
                 name="test_device",
