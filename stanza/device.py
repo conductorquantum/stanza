@@ -262,42 +262,6 @@ class Device:
             breakout_box_instrument=self.breakout_box_instrument,
         )
 
-    def zero_gates(self, gate_list: list[str]) -> None:
-        """Set specific gates to 0V.
-
-        Safely brings specified gates to ground voltage (0V) with settling
-        time and verification. Similar to zero() but accepts an explicit list
-        of gate names.
-
-        Args:
-            gate_list: List of gate names to zero.
-
-        Raises:
-            DeviceError: If any gate fails to reach 0V within tolerance (1e-6V)
-                after the operation, or if any gate in the list is not a valid
-                control gate.
-
-        Example:
-            >>> device.zero_gates(["G1", "G2", "G3"])
-        """
-        if not gate_list:
-            return
-
-        # Validate all gates are controllable
-        control_gate_set = set(self.control_gates)
-        invalid_gates = [g for g in gate_list if g not in control_gate_set]
-        if invalid_gates:
-            raise DeviceError(
-                f"Cannot zero gates {invalid_gates}: not controllable or not found in device"
-            )
-
-        gate_voltages = dict.fromkeys(gate_list, 0.0)
-        self.jump(gate_voltages, wait_for_settling=True)
-
-        actual_voltages = self.check(gate_list)
-        if not np.allclose(actual_voltages, [0.0] * len(actual_voltages), atol=1e-6):
-            raise DeviceError(f"Failed to set gates {gate_list} to 0V")
-
     def get_gates_by_type(self, gate_type: str | GateType) -> list[str]:
         """Get the gate electrodes of a given type.
 
