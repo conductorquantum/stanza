@@ -54,8 +54,7 @@ dev = [
     "scipy-stubs>=1.11.0"
 ]
 routines = [
-    "scipy>=1.14.1",
-    "matplotlib>=3.0.0"
+    "scipy>=1.14.1"
 ]
 docs = [
     "mkdocs>=1.5.0",
