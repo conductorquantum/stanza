@@ -316,7 +316,7 @@ def global_accumulation(
     ]
 
     ctx.resources.device.jump({bias_gate: bias_voltage}, wait_for_settling=True)
-
+    # Filter control gates by group if group is available in ctx.resources
     control_gates = filter_gates_by_group(ctx, ctx.resources.device.control_gates)
     num_points = max(2, int(abs(voltage_bound) / step_size))
     sweep_voltages = np.linspace(0, voltage_bound, num_points)
@@ -435,7 +435,7 @@ def reservoir_characterization(
     barrier_gates = ctx.resources.device.get_gates_by_type(GateType.BARRIER)
     reservoirs = ctx.resources.device.get_gates_by_type(GateType.RESERVOIR)
 
-    # Filter gates by group if group_configs is available
+    # Filter gates by group if group is available in ctx.resources
     plunger_gates = filter_gates_by_group(ctx, plunger_gates)
     barrier_gates = filter_gates_by_group(ctx, barrier_gates)
     reservoirs = filter_gates_by_group(ctx, reservoirs)
@@ -570,7 +570,7 @@ def finger_gate_characterization(
     barrier_gates = ctx.resources.device.get_gates_by_type(GateType.BARRIER)
     reservoirs = ctx.resources.device.get_gates_by_type(GateType.RESERVOIR)
 
-    # Filter gates by group if group_configs is available
+    # Filter gates by group if group is available in ctx.resources
     plunger_gates = filter_gates_by_group(ctx, plunger_gates)
     barrier_gates = filter_gates_by_group(ctx, barrier_gates)
     reservoirs = filter_gates_by_group(ctx, reservoirs)

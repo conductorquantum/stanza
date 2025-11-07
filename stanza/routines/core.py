@@ -289,9 +289,9 @@ class RoutineRunner:
         if group_name is not None:
             device = getattr(self.resources, "device", None)
             if device is not None and hasattr(device, "filter_by_group"):
-                group_configs = device.filter_by_group(group_name)
+                group = device.filter_by_group(group_name)
                 # Add group configs to resources for routine access
-                self.resources.add("group_configs", group_configs)
+                self.resources.add("group", group)
                 logger.info("Filtering device to group: %s", group_name)
 
         # Create logger session if logger exists and has create_session method

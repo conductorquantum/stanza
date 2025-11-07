@@ -88,20 +88,20 @@ class TestRoutineDeviceFiltering:
         group,
         expected_gates,
     ):
-        """Test that routine receives full device plus group_configs with only the group's gates."""
+        """Test that routine receives full device plus group with only the group's gates."""
         runner, original_device, control_inst, measure_inst = (
             routine_runner_with_grouped_device
         )
 
-        # Track what device and group_configs the routine receives
+        # Track what device and group the routine receives
         received_device = None
-        received_group_configs = None
+        received_group = None
 
         @routine(name="test_routine")
         def capture_device_routine(ctx: RoutineContext) -> dict:
-            nonlocal received_device, received_group_configs
+            nonlocal received_device, received_group
             received_device = ctx.resources.device
-            received_group_configs = getattr(ctx.resources, "group_configs", None)
+            received_group = getattr(ctx.resources, "group", None)
             return {"gates": list(ctx.resources.device.gates)}
 
         # Run with specified group
@@ -112,9 +112,9 @@ class TestRoutineDeviceFiltering:
         assert received_device is original_device
         assert set(received_device.gates) == set(original_device.gates)
 
-        # Verify group_configs were added and contain only group gates
-        assert received_group_configs is not None
-        assert set(get_gates_from_configs(received_group_configs)) == expected_gates
+        # Verify group were added and contain only group gates
+        assert received_group is not None
+        assert set(get_gates_from_configs(received_group)) == expected_gates
 
     def test_device_name_unchanged_with_group(
         self, registry_fixture, routine_runner_with_grouped_device
@@ -156,23 +156,23 @@ class TestRoutineDeviceFiltering:
         runner, original_device, _, _ = routine_runner_with_grouped_device
 
         received_device = None
-        received_group_configs = None
+        received_group = None
 
         @routine(name="test_routine")
         def capture_device_routine(ctx: RoutineContext) -> dict:
-            nonlocal received_device, received_group_configs
+            nonlocal received_device, received_group
             received_device = ctx.resources.device
-            received_group_configs = getattr(ctx.resources, "group_configs", None)
+            received_group = getattr(ctx.resources, "group", None)
             return {"gates": list(ctx.resources.device.gates)}
 
         # Run with 'group' parameter
         runner.run("test_routine", group="control")
 
-        # Verify routine received original device and group_configs
+        # Verify routine received original device and group
         assert received_device is not None
         assert received_device is original_device
-        assert received_group_configs is not None
-        assert set(get_gates_from_configs(received_group_configs)) == {
+        assert received_group is not None
+        assert set(get_gates_from_configs(received_group)) == {
             "G1",
             "G2",
             "RES1",
