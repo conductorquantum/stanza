@@ -309,8 +309,13 @@ class RoutineRunner:
             logger.info("Running routine: %s", routine_name)
             result = routine_func(self.context, **merged_params)
 
-            # Store result
-            self.results.store(routine_name, result)
+            # Store result with group suffix if group is specified
+            result_key = (
+                f"{routine_name}_{group_name}"
+                if group_name is not None
+                else routine_name
+            )
+            self.results.store(result_key, result)
             logger.info("Completed routine: %s", routine_name)
 
             return result
