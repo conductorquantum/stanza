@@ -680,11 +680,15 @@ def _single_window_sensor_plunger_sweep(
             measure_electrode=measure_electrode,
             session=session,
         )
-
+        plt.plot(current_trace)
+        plt.savefig(f"current_trace_single_window.png")
+        plt.close()
         # Append to aggregated trace
         aggregated_voltages = np.concatenate([aggregated_voltages, sp_sweep_voltages])
         aggregated_currents = np.concatenate([aggregated_currents, current_trace])
-
+        plt.plot(aggregated_currents)
+        plt.savefig(f"aggregated_currents_single_window.png")
+        plt.close()
         fitted_peak = analyze_single_window_barrier_sweep(
             aggregated_currents, aggregated_voltages, session
         )
@@ -795,12 +799,15 @@ def many_window_barrier_sweep(  # pylint: disable=too-many-locals,too-many-state
             measure_electrode=measure_electrode,
             session=session,
         )
-
+        plt.plot(current_trace)
+        plt.savefig(f"current_trace_window_{idx}.png")
+        plt.close()
         # Append to aggregated trace
         aggregated_voltages = np.concatenate([aggregated_voltages, sp_sweep_voltages])
         aggregated_currents = np.concatenate([aggregated_currents, current_trace])
         plt.plot(aggregated_currents)
-        plt.savefig(f"aggregated_currents_{idx}.png")
+        plt.savefig(f"aggregated_currents_window_{idx}.png")
+        plt.close()
         # Run coulomb blockade classifier on aggregated trace
         # Model handles sliding windows internally for inputs > 128
         try:
@@ -1235,18 +1242,25 @@ def run_compensation(  # pylint: disable=too-many-locals,too-many-statements
         baseline_control_state = dict.fromkeys(control_non_reservoir_gates, 0.0)
         device.jump(baseline_control_state, wait_for_settling=True)
 
-        # Perform baseline sweep (result not used but sweep updates device state)
+        # Perform baseline sweep 5 times and average for better estimate
         try:
-            _ = _single_window_sensor_plunger_sweep(
-                ctx=ctx,
-                sensor_gates_list=sensor_gates_list,
-                sensor_plunger_range=narrowed_sensor_plunger_range,
-                mean_reservoir_saturation_voltage=mean_reservoir_saturation_voltage,
-                sensor_plunger_index=sensor_plunger_index,
-                step_size=new_step_size,
-                measure_electrode=measure_electrode,
-                session=session,
-            )
+            baseline_sensitivity_voltages = []
+            for _ in range(5):
+                baseline_sweep_output = _single_window_sensor_plunger_sweep(
+                    ctx=ctx,
+                    sensor_gates_list=sensor_gates_list,
+                    sensor_plunger_range=narrowed_sensor_plunger_range,
+                    mean_reservoir_saturation_voltage=mean_reservoir_saturation_voltage,
+                    sensor_plunger_index=sensor_plunger_index,
+                    step_size=new_step_size,
+                    measure_electrode=measure_electrode,
+                    session=session,
+                )
+                baseline_sensitivity_voltages.append(
+                    baseline_sweep_output.best_peak.sensitivity_voltage
+                )
+            
+            reference_max_gradient_voltage = float(np.mean(baseline_sensitivity_voltages))
         except Exception as e:
             raise RoutineError(f"Error in baseline measurement: {str(e)}") from e
 
@@ -1260,24 +1274,31 @@ def run_compensation(  # pylint: disable=too-many-locals,too-many-statements
                 # Apply control side voltage changes to device
                 device.jump(device_state, wait_for_settling=True)
 
-                # Do sensor plunger sweep with narrowed range
-                iteration_sweep_output = _single_window_sensor_plunger_sweep(
-                    ctx=ctx,
-                    sensor_gates_list=sensor_gates_list,
-                    sensor_plunger_range=narrowed_sensor_plunger_range,
-                    mean_reservoir_saturation_voltage=mean_reservoir_saturation_voltage,
-                    sensor_plunger_index=sensor_plunger_index,
-                    step_size=new_step_size,
-                    measure_electrode=measure_electrode,
-                    session=session,
-                )
-                # Track this iteration's sensitivity voltage
-                # (optimal sensing point at max gradient)
-                best_peak = iteration_sweep_output.best_peak
-                peak_positions_list.append(best_peak.sensitivity_voltage)
+                # Repeat sensor plunger sweep 5 times and average results
+                sensitivity_voltages = []
+                for _ in range(5):
+                    # Do sensor plunger sweep with narrowed range
+                    iteration_sweep_output = _single_window_sensor_plunger_sweep(
+                        ctx=ctx,
+                        sensor_gates_list=sensor_gates_list,
+                        sensor_plunger_range=narrowed_sensor_plunger_range,
+                        mean_reservoir_saturation_voltage=mean_reservoir_saturation_voltage,
+                        sensor_plunger_index=sensor_plunger_index,
+                        step_size=new_step_size,
+                        measure_electrode=measure_electrode,
+                        session=session,
+                    )
+                    # Track this iteration's sensitivity voltage
+                    # (optimal sensing point at max gradient)
+                    best_peak = iteration_sweep_output.best_peak
+                    sensitivity_voltages.append(best_peak.sensitivity_voltage)
+                
+                # Take average of 5 measurements
+                avg_sensitivity_voltage = float(np.mean(sensitivity_voltages))
+                peak_positions_list.append(avg_sensitivity_voltage)
 
             peak_positions = np.array(peak_positions_list)
-            peak_positions_difference = peak_positions - original_max_gradient_voltage
+            peak_positions_difference = peak_positions - reference_max_gradient_voltage
             compensation_gradients = peak_positions_difference / voltage_differences
             mean_compensation_gradient_for_gate = float(np.mean(compensation_gradients))
             compensation_gradients_dict[gate] = mean_compensation_gradient_for_gate
