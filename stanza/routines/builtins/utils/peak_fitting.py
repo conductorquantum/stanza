@@ -129,7 +129,9 @@ def sech_squared(
     # For large |u|, sech(u) ≈ 2*exp(-|u|), so sech²(u) ≈ 4*exp(-2|u|)
     # Clamp u to prevent overflow in cosh
     u_clamped = np.clip(u, -700, 700)  # cosh(700) is near float64 max
-    sech_sq = 1 / np.cosh(u_clamped) ** 2
+    # Compute sech first, then square to avoid overflow in cosh²
+    sech = 1 / np.cosh(u_clamped)
+    sech_sq = sech ** 2
     
     # For values beyond the clamp, use exponential approximation
     large_mask = np.abs(u) > 700
