@@ -1,6 +1,7 @@
 """Grid-based search utilities for DQD discovery."""
 
 from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
 from numpy.typing import NDArray
@@ -38,6 +39,34 @@ class SearchSquare:
     @property
     def is_dqd(self) -> bool:
         return self.high_res_csd_classification
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert SearchSquare to JSON-serializable dictionary."""
+        return {
+            "grid_idx": self.grid_idx,
+            "current_trace_currents": self.current_trace_currents.tolist(),
+            "current_trace_voltages": self.current_trace_voltages.tolist(),
+            "current_trace_score": self.current_trace_score,
+            "current_trace_classification": self.current_trace_classification,
+            "low_res_csd_currents": self.low_res_csd_currents.tolist()
+            if self.low_res_csd_currents is not None
+            else None,
+            "low_res_csd_voltages": self.low_res_csd_voltages.tolist()
+            if self.low_res_csd_voltages is not None
+            else None,
+            "low_res_csd_score": self.low_res_csd_score,
+            "low_res_csd_classification": self.low_res_csd_classification,
+            "high_res_csd_currents": self.high_res_csd_currents.tolist()
+            if self.high_res_csd_currents is not None
+            else None,
+            "high_res_csd_voltages": self.high_res_csd_voltages.tolist()
+            if self.high_res_csd_voltages is not None
+            else None,
+            "high_res_csd_score": self.high_res_csd_score,
+            "high_res_csd_classification": self.high_res_csd_classification,
+            "total_score": self.total_score,
+            "is_dqd": self.is_dqd,
+        }
 
 
 def generate_grid_corners(

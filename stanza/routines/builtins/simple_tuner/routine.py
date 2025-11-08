@@ -69,9 +69,10 @@ def compute_peak_spacing(
     client = ctx.resources.models_client
     results = ctx.results
 
-    device.jump({"IN_A_B": 0.0005}, wait_for_settling=True)
-
     saturation_voltages = get_voltages(gates, "saturation_voltage", results)
+    transition_voltages = get_voltages(gates, "transition_voltage", results)
+    cutoff_voltages = get_voltages(gates, "cutoff_voltage", results)
+
     gate_idx = build_gate_indices(gates, device)
     plunger_gates = [gates[i] for i in gate_idx.plunger]
     plunger_gate_bounds = get_plunger_gate_bounds(plunger_gates, results)
@@ -111,7 +112,9 @@ def compute_peak_spacing(
                 sweep_voltages,
                 gates,
                 gate_idx,
-                saturation_voltages,
+                transition_voltages=transition_voltages,
+                cutoff_voltages=cutoff_voltages,
+                saturation_voltages=saturation_voltages,
             )
 
             # Measure
@@ -158,7 +161,7 @@ def compute_peak_spacing(
             # Extract peaks
             peak_indices = np.array(
                 client.models.execute(
-                    model="coulomb-blockade-peak-detector-v2", data=currents
+                    model="coulomb-blockade-peak-detector-v1", data=currents
                 ).output["peak_indices"]
             )
 
@@ -274,6 +277,9 @@ def run_dqd_search_fixed_barriers(
     results = ctx.results
 
     saturation_voltages = get_voltages(gates, "saturation_voltage", ctx.results)
+    transition_voltages = get_voltages(gates, "transition_voltage", ctx.results)
+    cutoff_voltages = get_voltages(gates, "cutoff_voltage", ctx.results)
+
     safe_bounds = get_gate_safe_bounds(gates, ctx.results)
     peak_spacing = ctx.results.get("compute_peak_spacing")["peak_spacing"]
     gate_idx = build_gate_indices(gates, device)
@@ -322,7 +328,12 @@ def run_dqd_search_fixed_barriers(
             corner, square_size, 8, charge_carrier_type
         )
         test_voltages = build_full_voltages(
-            test_sweep, gates, gate_idx, saturation_voltages
+            test_sweep,
+            gates,
+            gate_idx,
+            transition_voltages=transition_voltages,
+            cutoff_voltages=cutoff_voltages,
+            saturation_voltages=saturation_voltages,
         )
         if not check_voltages_in_bounds(test_voltages, safe_bounds):
             visited.append(
@@ -349,7 +360,12 @@ def run_dqd_search_fixed_barriers(
             corner, square_size, current_trace_points, charge_carrier_type
         )
         ct_voltages = build_full_voltages(
-            ct_sweep, gates, gate_idx, saturation_voltages
+            ct_sweep,
+            gates,
+            gate_idx,
+            saturation_voltages=saturation_voltages,
+            transition_voltages=transition_voltages,
+            cutoff_voltages=cutoff_voltages,
         )
         _, ct_currents = device.sweep_nd(gates, ct_voltages.tolist(), measure_electrode)
         ct_currents = np.array(ct_currents)
@@ -400,7 +416,12 @@ def run_dqd_search_fixed_barriers(
                 corner, square_size, low_res_csd_points, charge_carrier_type
             )
             lr_voltages = build_full_voltages(
-                lr_sweep, gates, gate_idx, saturation_voltages
+                lr_sweep,
+                gates,
+                gate_idx,
+                saturation_voltages=saturation_voltages,
+                transition_voltages=transition_voltages,
+                cutoff_voltages=cutoff_voltages,
             )
             _, lr_currents = device.sweep_nd(
                 gates,
@@ -428,7 +449,8 @@ def run_dqd_search_fixed_barriers(
                 )
 
             lr_result = client.models.execute(
-                model="csd-dqd-classifier-v1", data=lr_currents
+                model="charge-stability-diagram-binary-classifier-v2-16x16",
+                data=lr_currents,
             ).output
             lr_classification = lr_result["classification"]
             lr_score = lr_result.get("score", 0.0)
@@ -452,7 +474,12 @@ def run_dqd_search_fixed_barriers(
                 corner, square_size, high_res_csd_points, charge_carrier_type
             )
             hr_voltages = build_full_voltages(
-                hr_sweep, gates, gate_idx, saturation_voltages
+                hr_sweep,
+                gates,
+                gate_idx,
+                saturation_voltages=saturation_voltages,
+                transition_voltages=transition_voltages,
+                cutoff_voltages=cutoff_voltages,
             )
             _, hr_currents = device.sweep_nd(
                 gates,
@@ -480,7 +507,8 @@ def run_dqd_search_fixed_barriers(
                 )
 
             hr_result = client.models.execute(
-                model="csd-dqd-classifier-v1", data=hr_currents
+                model="charge-stability-diagram-binary-classifier-v1-48x48",
+                data=hr_currents,
             ).output
             hr_classification = hr_result["classification"]
             hr_score = hr_result.get("score", 0.0)

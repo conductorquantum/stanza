@@ -149,6 +149,8 @@ def build_full_voltages(
     sweep_voltages: NDArray[np.float64],
     gates: list[str],
     gate_idx: GateIndices,
+    transition_voltages: dict[str, float],
+    cutoff_voltages: dict[str, float],
     saturation_voltages: dict[str, float],
 ) -> NDArray[np.float64]:
     """Construct full voltage array from plunger sweep voltages.
@@ -173,8 +175,11 @@ def build_full_voltages(
     # Fixed voltages
     for idx in gate_idx.reservoir:
         voltages[..., idx] = saturation_voltages[gates[idx]]
-    for idx in gate_idx.barrier:
-        voltages[..., idx] = saturation_voltages[gates[idx]]
+    for i, idx in enumerate(gate_idx.barrier):
+        if i == 1:
+            voltages[..., idx] = transition_voltages[gates[idx]]
+        else:
+            voltages[..., idx] = saturation_voltages[gates[idx]]
 
     return voltages
 
@@ -219,6 +224,20 @@ def compute_peak_spacings(
 
     # Inter-peak spacings
     return np.diff(distances)
+
+
+def get_global_turn_on_voltage(results: ResultsRegistry) -> float:
+    """Get global turn voltage from results.
+
+    Args:
+        results: ResultsRegistry instance
+
+    Returns:
+        Global turn voltage
+    """
+    if not (res := results.get("global_accumulation")["global_turn_on_voltage"]):
+        raise ValueError("Global turn on voltage not found")
+    return float(res["global_turn_on_voltage"])
 
 
 def get_voltages(
