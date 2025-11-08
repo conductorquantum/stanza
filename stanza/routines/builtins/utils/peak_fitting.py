@@ -120,7 +120,23 @@ def sech_squared(
         width: Width parameter (controls peak sharpness)
         offset: Baseline offset
     """
-    return amplitude / np.cosh((x - center) / width) ** 2 + offset
+    # Avoid division by zero
+    if width == 0:
+        width = np.finfo(float).eps
+    
+    u = (x - center) / width
+    # Use numerically stable formula to avoid overflow
+    # For large |u|, sech(u) ≈ 2*exp(-|u|), so sech²(u) ≈ 4*exp(-2|u|)
+    # Clamp u to prevent overflow in cosh
+    u_clamped = np.clip(u, -700, 700)  # cosh(700) is near float64 max
+    sech_sq = 1 / np.cosh(u_clamped) ** 2
+    
+    # For values beyond the clamp, use exponential approximation
+    large_mask = np.abs(u) > 700
+    if np.any(large_mask):
+        sech_sq[large_mask] = 4 * np.exp(-2 * np.abs(u[large_mask]))
+    
+    return amplitude * sech_sq + offset
 
 
 def pseudo_voigt(
