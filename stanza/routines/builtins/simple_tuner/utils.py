@@ -152,6 +152,7 @@ def build_full_voltages(
     transition_voltages: dict[str, float],
     cutoff_voltages: dict[str, float],
     saturation_voltages: dict[str, float],
+    barrier_voltages: dict[str, float] | None = None,
 ) -> NDArray[np.float64]:
     """Construct full voltage array from plunger sweep voltages.
 
@@ -162,6 +163,7 @@ def build_full_voltages(
         gates: List of all gate names
         gate_idx: Indices for each gate type
         saturation_voltages: Fixed saturation voltages for all gates
+        barrier_voltages: Optional explicit barrier voltages. If None, uses default logic.
 
     Returns:
         (..., num_gates) array of voltages
@@ -175,11 +177,17 @@ def build_full_voltages(
     # Fixed voltages
     for idx in gate_idx.reservoir:
         voltages[..., idx] = saturation_voltages[gates[idx]]
-    for i, idx in enumerate(gate_idx.barrier):
-        if i == 1:
-            voltages[..., idx] = transition_voltages[gates[idx]]
-        else:
-            voltages[..., idx] = saturation_voltages[gates[idx]]
+
+    # Barrier voltages - use override if provided, otherwise default logic
+    if barrier_voltages is not None:
+        for idx in gate_idx.barrier:
+            voltages[..., idx] = barrier_voltages[gates[idx]]
+    else:
+        for i, idx in enumerate(gate_idx.barrier):
+            if i == 1:
+                voltages[..., idx] = transition_voltages[gates[idx]]
+            else:
+                voltages[..., idx] = saturation_voltages[gates[idx]]
 
     return voltages
 

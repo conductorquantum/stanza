@@ -21,6 +21,7 @@ from stanza.routines.builtins.simple_tuner.utils import (
     generate_linear_sweep,
     generate_random_sweep,
     get_gate_safe_bounds,
+    get_global_turn_on_voltage,
     get_plunger_gate_bounds,
     get_voltages,
 )
@@ -41,6 +42,7 @@ def compute_peak_spacing(
     number_of_samples_for_scale_computation: int = 10,
     seed: int = 42,
     session: LoggerSession | None = None,
+    barrier_voltages: dict[str, float] | None = None,
     **kwargs: Any,
 ) -> dict[str, float]:
     """Compute peak spacing by analyzing Coulomb blockade patterns in random sweeps.
@@ -115,6 +117,7 @@ def compute_peak_spacing(
                 transition_voltages=transition_voltages,
                 cutoff_voltages=cutoff_voltages,
                 saturation_voltages=saturation_voltages,
+                barrier_voltages=barrier_voltages,
             )
 
             # Measure
@@ -249,6 +252,7 @@ def run_dqd_search_fixed_barriers(
     charge_carrier_type: str = "electrons",
     seed: int = 42,
     session: LoggerSession | None = None,
+    barrier_voltages: dict[str, float] | None = None,
     **kwargs: Any,
 ) -> list[SearchSquare]:
     """Run DQD search with fixed barrier voltages using adaptive grid sampling.
@@ -334,6 +338,7 @@ def run_dqd_search_fixed_barriers(
             transition_voltages=transition_voltages,
             cutoff_voltages=cutoff_voltages,
             saturation_voltages=saturation_voltages,
+            barrier_voltages=barrier_voltages,
         )
         if not check_voltages_in_bounds(test_voltages, safe_bounds):
             visited.append(
@@ -366,6 +371,7 @@ def run_dqd_search_fixed_barriers(
             saturation_voltages=saturation_voltages,
             transition_voltages=transition_voltages,
             cutoff_voltages=cutoff_voltages,
+            barrier_voltages=barrier_voltages,
         )
         _, ct_currents = device.sweep_nd(gates, ct_voltages.tolist(), measure_electrode)
         ct_currents = np.array(ct_currents)
@@ -422,6 +428,7 @@ def run_dqd_search_fixed_barriers(
                 saturation_voltages=saturation_voltages,
                 transition_voltages=transition_voltages,
                 cutoff_voltages=cutoff_voltages,
+                barrier_voltages=barrier_voltages,
             )
             _, lr_currents = device.sweep_nd(
                 gates,
@@ -480,6 +487,7 @@ def run_dqd_search_fixed_barriers(
                 saturation_voltages=saturation_voltages,
                 transition_voltages=transition_voltages,
                 cutoff_voltages=cutoff_voltages,
+                barrier_voltages=barrier_voltages,
             )
             _, hr_currents = device.sweep_nd(
                 gates,
@@ -574,3 +582,111 @@ def run_dqd_search_fixed_barriers(
         )
 
     return dqd_squares
+
+
+@routine
+def run_dqd_search(
+    ctx: RoutineContext,
+    gates: list[str],
+    measure_electrode: str,
+    min_peak_spacing: float,
+    max_peak_spacing: float,
+    current_trace_points: int,
+    outer_barrier_points: int = 5,
+    inner_barrier_points: int = 5,
+    session: LoggerSession | None = None,
+    **kwargs: Any,
+) -> dict[str, Any]:
+    """Run peak spacing and DQD search over barrier voltage sweeps.
+
+    Sweeps outer barriers (0, 2) from global turn-on to mean transition voltage.
+    Sweeps inner barrier (1) from transition to global turn-on voltage.
+    Runs compute_peak_spacing and run_dqd_search_fixed_barriers at each point.
+
+    Args:
+        ctx: Routine context
+        gates: Gate electrode names
+        measure_electrode: Current measurement electrode
+        outer_barrier_points: Number of sweep points for outer barriers
+        inner_barrier_points: Number of sweep points for inner barrier
+        min_peak_spacing: Minimum peak spacing for compute_peak_spacing
+        max_peak_spacing: Maximum peak spacing for compute_peak_spacing
+        current_trace_points: Points per current trace
+        session: Logger session
+        **kwargs: Additional arguments passed to sub-routines
+
+    Returns:
+        Dict with barrier sweep results
+    """
+    device = ctx.resources.device
+    results = ctx.results
+
+    # Get voltages
+    global_turn_on = get_global_turn_on_voltage(results)
+    transition_voltages = get_voltages(gates, "transition_voltage", results)
+
+    # Get barrier gates
+    gate_idx = build_gate_indices(gates, device)
+    barrier_gates = [gates[i] for i in gate_idx.barrier]
+
+    # Calculate mean transition voltage for outer barriers
+    mean_outer_transition = np.mean(
+        [transition_voltages[barrier_gates[0]], transition_voltages[barrier_gates[2]]]
+    )
+
+    # Create sweep ranges
+    outer_voltages = np.linspace(
+        global_turn_on, mean_outer_transition, outer_barrier_points
+    )
+    inner_voltages = np.linspace(
+        transition_voltages[barrier_gates[1]], global_turn_on, inner_barrier_points
+    )
+
+    sweep_results = []
+
+    for outer_v in outer_voltages:
+        for inner_v in inner_voltages:
+            # Set barrier voltages
+            barrier_v = {
+                barrier_gates[0]: outer_v,
+                barrier_gates[1]: inner_v,
+                barrier_gates[2]: outer_v,
+            }
+
+            logger.info(
+                f"Sweeping barriers: outer={outer_v:.4f}V, inner={inner_v:.4f}V"
+            )
+
+            # Run peak spacing
+            peak_result = compute_peak_spacing(
+                ctx,
+                gates,
+                measure_electrode,
+                min_peak_spacing,
+                max_peak_spacing,
+                current_trace_points,
+                barrier_voltages=barrier_v,
+                session=session,
+                **kwargs,
+            )
+
+            # Run DQD search
+            dqd_result = run_dqd_search_fixed_barriers(
+                ctx,
+                gates,
+                measure_electrode,
+                barrier_voltages=barrier_v,
+                session=session,
+                **kwargs,
+            )
+
+            sweep_results.append(
+                {
+                    "outer_barrier_voltage": float(outer_v),
+                    "inner_barrier_voltage": float(inner_v),
+                    "peak_spacing": peak_result,
+                    "dqd_squares": [sq.to_dict() for sq in dqd_result],
+                }
+            )
+
+    return {"barrier_sweep_results": sweep_results}
