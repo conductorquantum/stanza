@@ -4,7 +4,6 @@ from logging import getLogger
 import numpy as np
 
 try:
-    from scipy.ndimage import gaussian_filter
     from scipy.optimize import curve_fit
 
     HAS_SCIPY = True
@@ -328,7 +327,6 @@ def fit_peak_multi_model(
     window_start_idx: int,
     window_end_idx: int,
     peak_idx_aggregated: int,
-    sigma: float = 2.0,
 ) -> FittedPeak:
     """
     Fit Lorentzian, sech², and pseudo-Voigt models to a peak, select best by AICc.
@@ -349,7 +347,6 @@ def fit_peak_multi_model(
         window_start_idx: Start index of window in aggregated trace
         window_end_idx: End index of window in aggregated trace
         peak_idx_aggregated: Peak index in aggregated trace
-        sigma: Gaussian filter bandwidth for smoothing
 
     Returns:
         FittedPeak object with all three model fits and best model selected
@@ -360,7 +357,6 @@ def fit_peak_multi_model(
     amplitude_guess = window_currents[peak_idx_in_window] - offset_guess
     center_guess = float(peak_idx_in_window)
     width_guess = 10.0
-    filtered_currents = gaussian_filter(window_currents, sigma=sigma)
 
     # Storage for model fits
     model_fits = {}
@@ -376,7 +372,7 @@ def fit_peak_multi_model(
         popt_lorentz, _ = curve_fit(
             lorentzian,
             window_indices,
-            filtered_currents,
+            window_currents,
             p0=initial_guess_lorentzian,
             maxfev=20000,
         )
@@ -438,7 +434,7 @@ def fit_peak_multi_model(
         popt_sech2, _ = curve_fit(
             sech_squared,
             window_indices,
-            filtered_currents,
+            window_currents,
             p0=initial_guess_sech2,
             maxfev=20000,
         )
@@ -508,7 +504,7 @@ def fit_peak_multi_model(
         popt_voigt, _ = curve_fit(
             pseudo_voigt,
             window_indices,
-            filtered_currents,
+            window_currents,
             p0=initial_guess_voigt,
             bounds=bounds,
             maxfev=20000,
