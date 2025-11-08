@@ -33,9 +33,10 @@ The module includes two main routines:
 
 # Standard library imports
 import logging
+import time
 from dataclasses import dataclass
 from typing import Any
-
+from matplotlib import pyplot as plt
 # Third-party imports
 import numpy as np
 
@@ -50,11 +51,15 @@ from stanza.routines.builtins.utils.peak_fitting import (
     calculate_quality_score,
     fit_peak_multi_model,
 )
-
+from conductorquantum import ConductorQuantum
+from stanza.device import Device
 # Configure logger
 logger = logging.getLogger(__name__)
 
 # Configuration constants
+
+# Default settling time before sweeps to avoid current spikes
+DEFAULT_SETTLING_TIME_S = 10
 
 # ML model input constraint: the coulomb blockade classifier model requires
 # exactly 128 points per input window for inference
@@ -662,6 +667,11 @@ def _single_window_sensor_plunger_sweep(
         plunger_voltages=sp_sweep_voltages,
     )
 
+    # Set device to first voltage point and allow settling time to avoid current spikes
+    first_voltage_point = dict(zip(sensor_gates_list, voltage_list[0], strict=False))
+    device.jump(first_voltage_point, wait_for_settling=True)
+    time.sleep(DEFAULT_SETTLING_TIME_S)
+
     # Perform current trace measurement
     try:
         _, current_trace = device.sweep_nd(
@@ -737,8 +747,8 @@ def many_window_barrier_sweep(  # pylint: disable=too-many-locals,too-many-state
     Returns:
         SensorDotPlungerSweepOutput containing the result of the sweep.
     """
-    client = ctx.resources.models_client
-    device = ctx.resources.device
+    client: ConductorQuantum = ctx.resources.models_client
+    device: Device = ctx.resources.device
 
     # Calculate sequential sweep parameters
     min_v, max_v = sensor_plunger_range
@@ -773,6 +783,11 @@ def many_window_barrier_sweep(  # pylint: disable=too-many-locals,too-many-state
             plunger_voltages=sp_sweep_voltages,
         )
 
+        # Set device to first voltage point and allow settling time to avoid current spikes
+        first_voltage_point = dict(zip(sensor_gates_list, voltage_list[0], strict=False))
+        device.jump(first_voltage_point, wait_for_settling=True)
+        time.sleep(DEFAULT_SETTLING_TIME_S)
+
         # Perform current trace measurement using device.sweep_nd
         _, current_trace = device.sweep_nd(
             gate_electrodes=sensor_gates_list,
@@ -784,7 +799,8 @@ def many_window_barrier_sweep(  # pylint: disable=too-many-locals,too-many-state
         # Append to aggregated trace
         aggregated_voltages = np.concatenate([aggregated_voltages, sp_sweep_voltages])
         aggregated_currents = np.concatenate([aggregated_currents, current_trace])
-
+        plt.plot(aggregated_currents)
+        plt.savefig(f"aggregated_currents_{idx}.png")
         # Run coulomb blockade classifier on aggregated trace
         # Model handles sliding windows internally for inputs > 128
         try:
@@ -802,7 +818,7 @@ def many_window_barrier_sweep(  # pylint: disable=too-many-locals,too-many-state
             try:
                 aggregated_peak_indices = client.models.execute(
                     model=PEAK_DETECTOR_MODEL, data=aggregated_currents
-                )["peak_indices"]
+                ).output["peak_indices"]
             except Exception as e:
                 raise RoutineError(f"ML model execution failed: {e}") from e
 
@@ -952,30 +968,40 @@ def find_sensor_peak(  # pylint: disable=too-many-locals
     device = ctx.resources.device
 
     # Get groups from device config
-    sensor_group = device.config.groups[sensor_group_name]
-    sensor_gates = list(sensor_group["gates"])
+    sensor_group = device.device_config.groups[sensor_group_name]
+    sensor_gates = list(sensor_group.gates)
     sensor_gates = filter_gates_by_group(ctx, sensor_gates)
 
     # Get global turn-on voltage from global_accumulation results
-    global_accumulation_results = ctx.results.get("global_accumulation", {})
+    global_accumulation_results = ctx.results.get(
+        f"global_accumulation_{sensor_group_name}",
+        ctx.results.get("global_accumulation", {}),
+    )
     global_turn_on_voltage = global_accumulation_results.get("global_turn_on_voltage")
 
     if global_turn_on_voltage is None:
         raise RoutineError(
-            "global_turn_on_voltage not found in ctx.results. "
-            "Please run global_accumulation routine first."
+            f"global_turn_on_voltage not found in ctx.results for group '{sensor_group_name}'. "
+            "Please run global_accumulation routine first for this group."
         )
 
     # Use global turn-on voltage as the saturation voltage for all gates
     mean_reservoir_saturation_voltage = float(global_turn_on_voltage)
 
     # Get sensor plunger gate parameters from health check results
-    finger_gate_char = ctx.results.get("finger_gate_characterization", {})
+    finger_gate_char = ctx.results.get(
+        f"finger_gate_characterization_{sensor_group_name}",
+        ctx.results.get("finger_gate_characterization", {}),
+    )
     if not finger_gate_char:
         raise RoutineError(
-            "finger_gate_characterization not found in ctx.results. "
-            "Please run finger_gate_characterization routine first."
+            f"finger_gate_characterization not found in ctx.results for group '{sensor_group_name}'. "
+            "Please run finger_gate_characterization routine first for this group."
         )
+    # Extract nested "finger_gate_characterization" dict if present
+    # (finger_gate_characterization routine returns {"finger_gate_characterization": {...}})
+    if "finger_gate_characterization" in finger_gate_char:
+        finger_gate_char = finger_gate_char["finger_gate_characterization"]
     if sensor_plunger_gate not in finger_gate_char:
         raise RoutineError(
             f"Sensor plunger gate '{sensor_plunger_gate}' not found in "
@@ -1146,8 +1172,8 @@ def run_compensation(  # pylint: disable=too-many-locals,too-many-statements
     device = ctx.resources.device
 
     # Get groups from device config
-    control_group = device.config.groups[control_group_name]
-    control_gates = list(control_group["gates"])
+    control_group = device.device_config.groups[control_group_name]
+    control_gates = list(control_group.gates)
     control_gates = filter_gates_by_group(ctx, control_gates)
 
     # Get results from find_sensor_peak routine
