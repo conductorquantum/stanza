@@ -54,7 +54,7 @@ from stanza.exceptions import RoutineError
 from stanza.logger.session import LoggerSession
 from stanza.models import GateType
 from stanza.routines import RoutineContext, routine
-from stanza.routines.builtins.utils import filter_gates_by_group
+from stanza.routines.builtins.utils.group_handling import filter_gates_by_group
 
 logger = logging.getLogger(__name__)
 
