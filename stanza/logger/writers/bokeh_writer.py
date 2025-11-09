@@ -45,7 +45,7 @@ class BokehLiveWriter(AbstractDataWriter):
             gate_variances = np.var(x_data, axis=0)
             changing_gates_mask = gate_variances > 1e-6
             num_changing = np.sum(changing_gates_mask)
-            
+
             if num_changing == 0:
                 # All gates constant (edge case), use first gate for 1D plot
                 x_data = x_data[:, 0]
@@ -60,7 +60,7 @@ class BokehLiveWriter(AbstractDataWriter):
             else:
                 # More than 2 changing gates: average them for 1D plot
                 x_data = np.mean(x_data[:, changing_gates_mask], axis=1)
-        
+
         # Determine dimension after reduction
         dim = data.metadata.get("_dim") or (
             1 if x_data.ndim == 1 else x_data.shape[1] if x_data.ndim == 2 else 1
@@ -71,7 +71,7 @@ class BokehLiveWriter(AbstractDataWriter):
 
         # Generate unique plot name if duplicate exists
         plot_name = self._get_unique_plot_name(data.name)
-        
+
         # Create modified SweepData with reduced x_data and unique name
         reduced_data = SweepData(
             name=plot_name,
@@ -92,32 +92,32 @@ class BokehLiveWriter(AbstractDataWriter):
 
     def _plot_name_exists(self, name: str) -> bool:
         """Check if a plot name exists in either our registry or the backend's registry.
-        
+
         Args:
             name: Plot name to check
-            
+
         Returns:
             True if plot exists, False otherwise
         """
         # Check our own registry
         if name in self._plots:
             return True
-        
+
         # Check backend's registry (both backends have _plots or _plot_specs)
         backend_plots = getattr(self.backend, "_plots", {})
         backend_specs = getattr(self.backend, "_plot_specs", {})
-        
+
         return name in backend_plots or name in backend_specs
-    
+
     def _get_unique_plot_name(self, base_name: str) -> str:
         """Generate a unique plot name by appending a counter if name already exists.
-        
+
         Scans all existing plots to find the highest counter, ensuring no duplicates
         even if the counter variable gets out of sync.
-        
+
         Args:
             base_name: Original plot name
-            
+
         Returns:
             Unique plot name (base_name if first occurrence, base_name_N for duplicates)
         """
@@ -126,11 +126,11 @@ class BokehLiveWriter(AbstractDataWriter):
             # First occurrence, use base name
             self._name_counters[base_name] = 0
             return base_name
-        
+
         # Name exists, scan all existing plots to find the highest counter
         # This ensures we don't create duplicates even if counter gets out of sync
         max_counter = -1
-        
+
         # Check our registry
         for plot_name in self._plots.keys():
             if plot_name == base_name:
@@ -141,11 +141,11 @@ class BokehLiveWriter(AbstractDataWriter):
                     max_counter = max(max_counter, counter)
                 except (ValueError, IndexError):
                     pass
-        
+
         # Check backend registries
         backend_plots = getattr(self.backend, "_plots", {})
         backend_specs = getattr(self.backend, "_plot_specs", {})
-        
+
         for plot_name in list(backend_plots.keys()) + list(backend_specs.keys()):
             if plot_name == base_name:
                 max_counter = max(max_counter, 0)
@@ -155,7 +155,7 @@ class BokehLiveWriter(AbstractDataWriter):
                     max_counter = max(max_counter, counter)
                 except (ValueError, IndexError):
                     pass
-        
+
         # Start from max_counter + 1 and find first available name
         counter = max_counter + 1
         while True:

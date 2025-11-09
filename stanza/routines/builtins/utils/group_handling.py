@@ -60,7 +60,9 @@ def get_routine_result(
         # Look for routine_name_* keys
         all_keys = ctx.results.list_results()
         routine_keys = [
-            k for k in all_keys if k.startswith(f"{routine_name}_") and k != routine_name
+            k
+            for k in all_keys
+            if k.startswith(f"{routine_name}_") and k != routine_name
         ]
         if routine_keys:
             # Extract group name from first matching key

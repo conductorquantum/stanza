@@ -281,8 +281,8 @@ def charge_sensor_readout(  # pylint: disable=too-many-locals,too-many-statement
         total_points = sweep_resolution * sweep_resolution
         point_counter = 0
 
-        for i, v_g1 in enumerate(g1_voltages):
-            for j, v_g2 in enumerate(g2_voltages):
+        for _i, v_g1 in enumerate(g1_voltages):
+            for _j, v_g2 in enumerate(g2_voltages):
                 point_counter += 1
 
                 # Calculate total compensation if enabled
@@ -329,7 +329,10 @@ def charge_sensor_readout(  # pylint: disable=too-many-locals,too-many-statement
                 compensation_applied.append(float(total_compensation))
 
                 # Progress logging every 10%
-                if point_counter % (total_points // 10) == 0 or point_counter == total_points:
+                if (
+                    point_counter % (total_points // 10) == 0
+                    or point_counter == total_points
+                ):
                     progress = 100.0 * point_counter / total_points
                     logger.info(
                         "Progress: %.0f%% (%d/%d points)",

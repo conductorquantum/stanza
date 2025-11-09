@@ -123,7 +123,7 @@ def sech_squared(
     # Avoid division by zero
     if width == 0:
         width = np.finfo(float).eps
-    
+
     u = (x - center) / width
     # Use numerically stable formula to avoid overflow
     # For large |u|, sech(u) ≈ 2*exp(-|u|), so sech²(u) ≈ 4*exp(-2|u|)
@@ -131,13 +131,13 @@ def sech_squared(
     u_clamped = np.clip(u, -700, 700)  # cosh(700) is near float64 max
     # Compute sech first, then square to avoid overflow in cosh²
     sech = 1 / np.cosh(u_clamped)
-    sech_sq = sech ** 2
-    
+    sech_sq = sech**2
+
     # For values beyond the clamp, use exponential approximation
     large_mask = np.abs(u) > 700
     if np.any(large_mask):
         sech_sq[large_mask] = 4 * np.exp(-2 * np.abs(u[large_mask]))
-    
+
     return amplitude * sech_sq + offset
 
 

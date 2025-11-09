@@ -36,9 +36,13 @@ import logging
 import time
 from dataclasses import dataclass
 from typing import Any
-from matplotlib import pyplot as plt
+
 # Third-party imports
 import numpy as np
+from conductorquantum import ConductorQuantum
+from matplotlib import pyplot as plt  # type: ignore[import-untyped]
+
+from stanza.device import Device
 
 # First-party imports
 from stanza.exceptions import RoutineError
@@ -51,8 +55,7 @@ from stanza.routines.builtins.utils.peak_fitting import (
     calculate_quality_score,
     fit_peak_multi_model,
 )
-from conductorquantum import ConductorQuantum
-from stanza.device import Device
+
 # Configure logger
 logger = logging.getLogger(__name__)
 
@@ -688,13 +691,13 @@ def _single_window_sensor_plunger_sweep(
             session=session,
         )
         plt.plot(current_trace)
-        plt.savefig(f"current_trace_single_window.png")
+        plt.savefig("current_trace_single_window.png")
         plt.close()
         # Append to aggregated trace
         aggregated_voltages = np.concatenate([aggregated_voltages, sp_sweep_voltages])
         aggregated_currents = np.concatenate([aggregated_currents, current_trace])
         plt.plot(aggregated_currents)
-        plt.savefig(f"aggregated_currents_single_window.png")
+        plt.savefig("aggregated_currents_single_window.png")
         plt.close()
         fitted_peak = analyze_single_window_barrier_sweep(
             aggregated_currents, aggregated_voltages, session
@@ -781,13 +784,16 @@ def many_window_barrier_sweep(  # pylint: disable=too-many-locals,too-many-state
     last_classification = False  # Track last classification result
     last_peak_indices = []  # Track last peak indices
 
-    for idx, sp_start_voltage in enumerate(sensor_plunger_start_voltages):
+    max_v_float = float(max_v)  # type: ignore[assignment]
+    for idx, sp_start_voltage in enumerate(sensor_plunger_start_voltages):  # type: ignore[assignment]
         # Generate sensor plunger voltages for this window
         # Check if the end voltage is within the range
-        sp_end_voltage = min(sp_start_voltage + window_size, max_v)
+        sp_start_voltage_float = float(sp_start_voltage)
+        end_voltage_candidate = sp_start_voltage_float + window_size
+        sp_end_voltage = float(np.minimum(end_voltage_candidate, max_v_float))
 
         sp_sweep_voltages = np.linspace(
-            sp_start_voltage,
+            sp_start_voltage_float,
             sp_end_voltage,
             current_trace_number_of_points,
             endpoint=False,
@@ -802,7 +808,9 @@ def many_window_barrier_sweep(  # pylint: disable=too-many-locals,too-many-state
         )
 
         # Set device to first voltage point and allow settling time to avoid current spikes
-        first_voltage_point = dict(zip(sensor_gates_list, voltage_list[0], strict=False))
+        first_voltage_point = dict(
+            zip(sensor_gates_list, voltage_list[0], strict=False)
+        )
         device.jump(first_voltage_point, wait_for_settling=True)
         time.sleep(DEFAULT_SETTLING_TIME_S)
 
@@ -861,8 +869,8 @@ def many_window_barrier_sweep(  # pylint: disable=too-many-locals,too-many-state
                 name=f"sensor_plunger_window_{idx}",
                 data={
                     "window_idx": idx,
-                    "sensor_plunger_start_voltage": float(sp_start_voltage),
-                    "sensor_plunger_end_voltage": float(sp_end_voltage),
+                    "sensor_plunger_start_voltage": sp_start_voltage_float,
+                    "sensor_plunger_end_voltage": sp_end_voltage,
                     "classification": classification,
                     "score": score,
                     "num_peaks": len(aggregated_peak_indices) if classification else 0,
@@ -1305,7 +1313,9 @@ def run_compensation(  # pylint: disable=too-many-locals,too-many-statements
     else:
         logger.info(
             "Acquiring baseline measurement with control gates at current voltages: %s",
-            dict(zip(control_non_reservoir_gates, initial_control_voltages, strict=False)),
+            dict(
+                zip(control_non_reservoir_gates, initial_control_voltages, strict=False)
+            ),
         )
         baseline_control_state = dict(
             zip(control_non_reservoir_gates, initial_control_voltages, strict=False)
@@ -1334,8 +1344,10 @@ def run_compensation(  # pylint: disable=too-many-locals,too-many-statements
                 baseline_sensitivity_voltages.append(
                     baseline_sweep_output.best_peak.sensitivity_voltage
                 )
-            
-            reference_max_gradient_voltage = float(np.mean(baseline_sensitivity_voltages))
+
+            reference_max_gradient_voltage = float(
+                np.mean(baseline_sensitivity_voltages)
+            )
         except Exception as e:
             raise RoutineError(f"Error in baseline measurement: {str(e)}") from e
 
@@ -1370,7 +1382,7 @@ def run_compensation(  # pylint: disable=too-many-locals,too-many-statements
                     # (optimal sensing point at max gradient)
                     best_peak = iteration_sweep_output.best_peak
                     sensitivity_voltages.append(best_peak.sensitivity_voltage)
-                
+
                 # Take average of 5 measurements
                 avg_sensitivity_voltage = float(np.mean(sensitivity_voltages))
                 peak_positions_list.append(avg_sensitivity_voltage)

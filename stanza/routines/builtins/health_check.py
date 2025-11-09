@@ -54,7 +54,10 @@ from stanza.exceptions import RoutineError
 from stanza.logger.session import LoggerSession
 from stanza.models import GateType
 from stanza.routines import RoutineContext, routine
-from stanza.routines.builtins.utils.group_handling import filter_gates_by_group, get_routine_result
+from stanza.routines.builtins.utils.group_handling import (
+    filter_gates_by_group,
+    get_routine_result,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -191,7 +194,9 @@ def leakage_test(
     ).voltage_range[0]
 
     # Get noise floor measurement results for the current group
-    noise_floor_measurement_results = get_routine_result(ctx, "noise_floor_measurement", session)
+    noise_floor_measurement_results = get_routine_result(
+        ctx, "noise_floor_measurement", session
+    )
     min_current_threshold = noise_floor_measurement_results.get("current_std", 1e-10)
     leakage_test_results = {}
 
@@ -311,13 +316,13 @@ def global_accumulation(
 
     # Get leakage_test results for the current group
     leakage_test_results = get_routine_result(ctx, "leakage_test", session)
-    
+
     voltage_bound_key = (
         "max_safe_voltage_bound"
         if charge_carrier_type == "electron"
         else "min_safe_voltage_bound"
     )
-    
+
     voltage_bound = leakage_test_results[voltage_bound_key]
 
     ctx.resources.device.jump({bias_gate: bias_voltage}, wait_for_settling=True)
@@ -335,12 +340,12 @@ def global_accumulation(
         session=session,
     )
     # Subtract noise floor offset to correct for DC measurement offset
-    current_mean_offset = get_routine_result(ctx, "noise_floor_measurement", session).get("current_mean", 0.0)
+    current_mean_offset = get_routine_result(
+        ctx, "noise_floor_measurement", session
+    ).get("current_mean", 0.0)
     currents = np.array(currents) - current_mean_offset
     try:
-        turn_on_analysis = analyze_single_gate_heuristic(
-            sweep_voltages, currents
-        )
+        turn_on_analysis = analyze_single_gate_heuristic(sweep_voltages, currents)
     except Exception as e:
         raise RoutineError(f"Error in global_accumulation: {str(e)}") from e
 
@@ -421,7 +426,9 @@ def reservoir_characterization(
 
     # Get routine results for the current group
     leakage_test_results = get_routine_result(ctx, "leakage_test", session)
-    global_accumulation_results = get_routine_result(ctx, "global_accumulation", session)
+    global_accumulation_results = get_routine_result(
+        ctx, "global_accumulation", session
+    )
 
     max_safe_voltage_bound = leakage_test_results["max_safe_voltage_bound"]
     min_safe_voltage_bound = leakage_test_results["min_safe_voltage_bound"]
@@ -471,7 +478,9 @@ def reservoir_characterization(
             session,
         )
         # Subtract noise floor offset to correct for DC measurement offset
-        current_mean_offset = get_routine_result(ctx, "noise_floor_measurement", session).get("current_mean", 0.0)
+        current_mean_offset = get_routine_result(
+            ctx, "noise_floor_measurement", session
+        ).get("current_mean", 0.0)
         currents = np.array(currents) - current_mean_offset
         try:
             reservoir_analysis = analyze_single_gate_heuristic(
@@ -554,7 +563,9 @@ def finger_gate_characterization(
 
     # Get routine results for the current group
     leakage_test_results = get_routine_result(ctx, "leakage_test", session)
-    global_accumulation_results = get_routine_result(ctx, "global_accumulation", session)
+    global_accumulation_results = get_routine_result(
+        ctx, "global_accumulation", session
+    )
 
     max_safe_voltage_bound = leakage_test_results["max_safe_voltage_bound"]
     min_safe_voltage_bound = leakage_test_results["min_safe_voltage_bound"]
@@ -608,7 +619,9 @@ def finger_gate_characterization(
             session,
         )
         # Subtract noise floor offset to correct for DC measurement offset
-        current_mean_offset = get_routine_result(ctx, "noise_floor_measurement", session).get("current_mean", 0.0)
+        current_mean_offset = get_routine_result(
+            ctx, "noise_floor_measurement", session
+        ).get("current_mean", 0.0)
         currents = np.array(currents) - current_mean_offset
         try:
             finger_gate_analysis = analyze_single_gate_heuristic(
