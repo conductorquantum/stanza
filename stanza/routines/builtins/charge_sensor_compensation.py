@@ -1293,9 +1293,6 @@ def run_compensation(  # pylint: disable=too-many-locals,too-many-statements
     sensor_plunger_index = find_sensor_peak_results["sensor_plunger_index"]
     new_step_size = find_sensor_peak_results["step_size"]
 
-    # Store baseline max gradient voltage for compensation gradient calculation
-    original_max_gradient_voltage = float(best_peak_max_gradient_voltage)
-
     number_of_voltages_to_test = PERTURBATION_DIVISOR
     voltage_range = peak_spacing / PERTURBATION_DIVISOR
     # Create symmetric voltage points around zero, excluding zero itself
