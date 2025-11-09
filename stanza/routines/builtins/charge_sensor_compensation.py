@@ -1280,9 +1280,6 @@ def run_compensation(  # pylint: disable=too-many-locals,too-many-statements
         )
 
     # Extract values from find_sensor_peak results
-    best_peak_max_gradient_voltage = find_sensor_peak_results[
-        "best_peak_max_gradient_voltage"
-    ]
     narrowed_sensor_plunger_range = find_sensor_peak_results[
         "narrowed_sensor_plunger_range"
     ]
