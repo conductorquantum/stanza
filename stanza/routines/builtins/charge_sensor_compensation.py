@@ -616,6 +616,8 @@ def _single_window_sensor_plunger_sweep(
     sensor_plunger_index: int,
     step_size: float,
     measure_electrode: str,
+    bias_gate: str,
+    bias_voltage: float,
     session: LoggerSession | None = None,
 ) -> PeakWindowSweepOutput:
     """
@@ -637,6 +639,8 @@ def _single_window_sensor_plunger_sweep(
         sensor_plunger_index: Index of sensor plunger in sensor_gates_list
         step_size: Voltage increment between points
         measure_electrode: Electrode to measure current from
+        bias_gate: Name of the bias gate (contact) to apply bias voltage
+        bias_voltage: Voltage to apply to bias gate during measurements
         session: Logger session for logging measurements and analysis
 
     Returns:
@@ -644,6 +648,9 @@ def _single_window_sensor_plunger_sweep(
         three model fits and quality metrics) and trace data.
     """
     device = ctx.resources.device
+
+    # Apply bias voltage to bias gate
+    device.jump({bias_gate: bias_voltage}, wait_for_settling=True)
 
     # Calculate sequential sweep parameters
     min_v, max_v = sensor_plunger_range
@@ -728,6 +735,8 @@ def many_window_barrier_sweep(  # pylint: disable=too-many-locals,too-many-state
     mean_reservoir_saturation_voltage: float,
     sensor_plunger_index: int,
     measure_electrode: str,
+    bias_gate: str,
+    bias_voltage: float,
     session: LoggerSession | None = None,
 ) -> SensorDotPlungerSweepOutput:
     """
@@ -746,6 +755,8 @@ def many_window_barrier_sweep(  # pylint: disable=too-many-locals,too-many-state
         mean_reservoir_saturation_voltage: Voltage for all gates except sensor plunger
         sensor_plunger_index: Index of sensor plunger in sensor_gates_list
         measure_electrode: Electrode to measure current from
+        bias_gate: Name of the bias gate (contact) to apply bias voltage
+        bias_voltage: Voltage to apply to bias gate during measurements
         session: Logger session for measurements and analysis
 
     Returns:
@@ -753,6 +764,9 @@ def many_window_barrier_sweep(  # pylint: disable=too-many-locals,too-many-state
     """
     client: ConductorQuantum = ctx.resources.models_client
     device: Device = ctx.resources.device
+
+    # Apply bias voltage to bias gate
+    device.jump({bias_gate: bias_voltage}, wait_for_settling=True)
 
     # Calculate sequential sweep parameters
     min_v, max_v = sensor_plunger_range
@@ -923,6 +937,9 @@ def find_sensor_peak(  # pylint: disable=too-many-locals
     sensor_group_name: str,
     sensor_plunger_gate: str,
     measure_electrode: str,
+    bias_gate: str,
+    bias_voltage: float,
+    zero_control_side: bool = True,
     session: LoggerSession | None = None,
     **kwargs: Any,  # pylint: disable=unused-argument
 ) -> dict[str, Any]:
@@ -943,6 +960,11 @@ def find_sensor_peak(  # pylint: disable=too-many-locals
         sensor_group_name: Name of sensor side group (e.g., "side_B")
         sensor_plunger_gate: Name of the sensor plunger gate on sensor side
         measure_electrode: Electrode to measure current from (e.g., "OUT_B")
+        bias_gate: Name of the bias gate (contact) to apply bias voltage (e.g., "IN_A_B")
+        bias_voltage: Voltage to apply to bias gate during measurements (V)
+        zero_control_side: If True, set control group gates to 0V before sweep.
+            If False, maintain current control voltages. Shared reservoirs always
+            set to sensor group's global turn-on voltage. (default: True)
         session: Logger session for measurements and analysis
 
     Returns:
@@ -964,6 +986,8 @@ def find_sensor_peak(  # pylint: disable=too-many-locals
         - Uses 2x peak_spacing for initial window size
         - Automatically sets device to optimal sensing point after finding peak
         - Calculates narrowed range based on neighboring peaks or fallback spacing
+        - Control group handling: specific gates zeroed or maintained, reservoirs
+          always set to sensor's global turn-on
     """
     if peak_spacing <= 0:
         raise RoutineError("peak_spacing must be greater than 0")
@@ -1031,6 +1055,33 @@ def find_sensor_peak(  # pylint: disable=too-many-locals
     sensor_gates_list = list(sensor_gates)
     sensor_plunger_index = sensor_gates_list.index(sensor_plunger_gate)
 
+    # Handle control side gates before sensor sweep
+    # Identify all gates and separate control from sensor
+    all_control_gates = device.control_gates
+    sensor_gates_set = set(sensor_gates_list)
+    control_gates = [g for g in all_control_gates if g not in sensor_gates_set]
+
+    # Set control side state (if there are any control gates)
+    # Note: Shared reservoirs are in sensor_gates_list and handled by sensor sweep
+    if control_gates:
+        if zero_control_side:
+            # Set control gates to 0V
+            logger.info("Setting control gates to 0V: %s", control_gates)
+            control_state = dict.fromkeys(control_gates, 0.0)
+        else:
+            # Maintain current control voltages
+            current_control_voltages = device.check(control_gates)
+            control_state = dict(
+                zip(control_gates, current_control_voltages, strict=False)
+            )
+            logger.info(
+                "Maintaining control gates at current voltages: %s",
+                control_state,
+            )
+
+        # Apply control state
+        device.jump(control_state, wait_for_settling=True)
+
     # Use 2x peak spacing for initial multi-window sweep
     window_size = peak_spacing * INITIAL_WINDOW_MULTIPLIER
 
@@ -1043,6 +1094,8 @@ def find_sensor_peak(  # pylint: disable=too-many-locals
         mean_reservoir_saturation_voltage=mean_reservoir_saturation_voltage,
         sensor_plunger_index=sensor_plunger_index,
         measure_electrode=measure_electrode,
+        bias_gate=bias_gate,
+        bias_voltage=bias_voltage,
         session=session,
     )
 
@@ -1142,6 +1195,9 @@ def run_compensation(  # pylint: disable=too-many-locals,too-many-statements
     peak_spacing: float,
     control_group_name: str,
     measure_electrode: str,
+    bias_gate: str,
+    bias_voltage: float,
+    zero_control_side: bool = True,
     session: LoggerSession | None = None,
     **kwargs: Any,  # pylint: disable=unused-argument
 ) -> dict[str, float]:
@@ -1150,8 +1206,8 @@ def run_compensation(  # pylint: disable=too-many-locals,too-many-statements
 
     This routine measures how control gate voltages affect the sensor peak position
     and calculates compensation gradients to maintain optimal charge sensing. It
-    performs baseline measurements with control gates at zero, then sweeps each
-    control gate individually while measuring peak shifts.
+    performs baseline measurements with control gates at a specified state, then
+    sweeps each control gate individually while measuring peak shifts.
 
     Args:
         ctx: Routine context containing device resources and previous results. Requires:
@@ -1159,18 +1215,26 @@ def run_compensation(  # pylint: disable=too-many-locals,too-many-statements
         peak_spacing: Expected peak spacing in volts (e.g., 0.020 for 20mV)
         control_group_name: Name of control side group (e.g., "side_A")
         measure_electrode: Electrode to measure current from (e.g., "OUT_B")
+        bias_gate: Name of the bias gate (contact) to apply bias voltage (e.g., "IN_A_B")
+        bias_voltage: Voltage to apply to bias gate during measurements (V)
+        zero_control_side: If True, measure gradients relative to 0V baseline.
+            If False, measure gradients relative to current control voltages.
+            Useful for measuring compensation at non-zero operating points. (default: True)
         session: Logger session for measurements and analysis
 
     Returns:
-        dict: Dictionary mapping gate names to compensation gradients
+        dict: Dictionary mapping gate names to compensation gradients (V/V)
 
     Raises:
         RoutineError: If find_sensor_peak results are missing or invalid
 
     Notes:
         - Requires find_sensor_peak to be run first
-        - Tests 10 voltage points per gate in symmetric range around zero
-        - Automatically resets each gate to zero after testing
+        - Tests 10 voltage points per gate in symmetric range around baseline
+        - Voltage perturbations applied relative to baseline (0V or current voltages)
+        - Automatically resets to initial state after testing
+        - For non-linear cross-talk, use zero_control_side=False to measure at
+          actual operating point
     """
     if peak_spacing <= 0:
         raise RoutineError("peak_spacing must be greater than 0")
@@ -1230,16 +1294,25 @@ def run_compensation(  # pylint: disable=too-many-locals,too-many-statements
         g for g in (all_plungers + all_barriers) if g in control_gates
     ]
 
-    # Get baseline fit parameters with all control side gates at zero
-    logger.info("Acquiring baseline measurement with control gates at 0V.")
-
     # Capture initial device state for cleanup in finally block
     initial_control_voltages = device.check(control_non_reservoir_gates)
     initial_sensor_voltages = device.check(sensor_gates_list)
 
-    try:
-        # Set all non-reservoir control side gates to zero
+    # Determine baseline control state
+    if zero_control_side:
+        logger.info("Acquiring baseline measurement with control gates at 0V.")
         baseline_control_state = dict.fromkeys(control_non_reservoir_gates, 0.0)
+    else:
+        logger.info(
+            "Acquiring baseline measurement with control gates at current voltages: %s",
+            dict(zip(control_non_reservoir_gates, initial_control_voltages, strict=False)),
+        )
+        baseline_control_state = dict(
+            zip(control_non_reservoir_gates, initial_control_voltages, strict=False)
+        )
+
+    try:
+        # Set control side gates to baseline state
         device.jump(baseline_control_state, wait_for_settling=True)
 
         # Perform baseline sweep 5 times and average for better estimate
@@ -1254,6 +1327,8 @@ def run_compensation(  # pylint: disable=too-many-locals,too-many-statements
                     sensor_plunger_index=sensor_plunger_index,
                     step_size=new_step_size,
                     measure_electrode=measure_electrode,
+                    bias_gate=bias_gate,
+                    bias_voltage=bias_voltage,
                     session=session,
                 )
                 baseline_sensitivity_voltages.append(
@@ -1269,8 +1344,9 @@ def run_compensation(  # pylint: disable=too-many-locals,too-many-statements
         for gate in control_non_reservoir_gates:
             peak_positions_list: list[float] = []  # Reset for each gate
             for voltage_difference in voltage_differences:
-                device_state = dict.fromkeys(control_non_reservoir_gates, 0.0)
-                device_state[gate] = voltage_difference
+                # Apply voltage perturbation relative to baseline
+                device_state = baseline_control_state.copy()
+                device_state[gate] = baseline_control_state[gate] + voltage_difference
                 # Apply control side voltage changes to device
                 device.jump(device_state, wait_for_settling=True)
 
@@ -1286,6 +1362,8 @@ def run_compensation(  # pylint: disable=too-many-locals,too-many-statements
                         sensor_plunger_index=sensor_plunger_index,
                         step_size=new_step_size,
                         measure_electrode=measure_electrode,
+                        bias_gate=bias_gate,
+                        bias_voltage=bias_voltage,
                         session=session,
                     )
                     # Track this iteration's sensitivity voltage
@@ -1311,8 +1389,8 @@ def run_compensation(  # pylint: disable=too-many-locals,too-many-statements
                 "mean_gradient": mean_compensation_gradient_for_gate,
             }
 
-            # Reset this gate back to zero before moving to next gate
-            reset_state = {gate: 0.0}
+            # Reset this gate back to baseline before moving to next gate
+            reset_state = {gate: baseline_control_state[gate]}
             device.jump(reset_state, wait_for_settling=True)
 
         logger.info("Compensation gradients: %s", compensation_gradients_dict)

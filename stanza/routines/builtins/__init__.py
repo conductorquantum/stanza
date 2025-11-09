@@ -1,5 +1,8 @@
 """Built-in routines for common health check and measurement tasks."""
 
+from stanza.routines.builtins.charge_sensor_readout import (
+    charge_sensor_readout,
+)
 from stanza.routines.builtins.health_check import (
     finger_gate_characterization,
     global_accumulation,
@@ -14,4 +17,5 @@ __all__ = [
     "global_accumulation",
     "reservoir_characterization",
     "finger_gate_characterization",
+    "charge_sensor_readout",
 ]
