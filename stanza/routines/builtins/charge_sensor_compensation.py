@@ -40,7 +40,7 @@ from typing import Any
 # Third-party imports
 import numpy as np
 from conductorquantum import ConductorQuantum
-from matplotlib import pyplot as plt  # type: ignore[import-untyped]
+from matplotlib import pyplot as plt
 
 from stanza.device import Device
 
@@ -784,8 +784,8 @@ def many_window_barrier_sweep(  # pylint: disable=too-many-locals,too-many-state
     last_classification = False  # Track last classification result
     last_peak_indices = []  # Track last peak indices
 
-    max_v_float = float(max_v)  # type: ignore[assignment]
-    for idx, sp_start_voltage in enumerate(sensor_plunger_start_voltages):  # type: ignore[assignment]
+    max_v_float = float(max_v)
+    for idx, sp_start_voltage in enumerate(sensor_plunger_start_voltages):
         # Generate sensor plunger voltages for this window
         # Check if the end voltage is within the range
         sp_start_voltage_float = float(sp_start_voltage)
@@ -986,6 +986,7 @@ def find_sensor_peak(  # pylint: disable=too-many-locals
             - sensor_gates_list: List of sensor gate names
             - sensor_plunger_index: Index of sensor plunger in sensor_gates_list
             - step_size: Calculated step size for narrowed sweeps (V)
+            - sensor_park_point: Dict of all sensor gate voltages at park point {gate: voltage}
 
     Raises:
         RoutineError: If required previous results are missing or peak finding fails
@@ -1182,6 +1183,20 @@ def find_sensor_peak(  # pylint: disable=too-many-locals
         narrowed_sensor_plunger_range[1],
     )
 
+    # Log park point analysis
+    if session:
+        session.log_analysis(
+            name="sensor_park_point",
+            data={
+                "sensor_park_point": sensor_dot_state,
+                "sensor_plunger_gate": sensor_plunger_gate,
+                "sensor_plunger_park_voltage": float(best_peak_max_gradient_voltage),
+                "other_gates_voltage": float(mean_reservoir_saturation_voltage),
+                "best_peak_center_voltage": float(best_peak_voltage),
+                "best_peak_max_gradient_voltage": float(best_peak_max_gradient_voltage),
+            },
+        )
+
     result = {
         "best_peak_voltage": float(best_peak_voltage),
         "best_peak_max_gradient_voltage": float(best_peak_max_gradient_voltage),
@@ -1192,6 +1207,7 @@ def find_sensor_peak(  # pylint: disable=too-many-locals
         "sensor_gates_list": sensor_gates_list,
         "sensor_plunger_index": sensor_plunger_index,
         "step_size": float(new_step_size),
+        "sensor_park_point": sensor_dot_state,
     }
 
     return result
@@ -1435,7 +1451,7 @@ def run_compensation(  # pylint: disable=too-many-locals,too-many-statements
                     "gradients": {
                         k: float(v) for k, v in compensation_gradients_dict.items()
                     },
-                    "baseline_peak_voltage": original_max_gradient_voltage,
+                    "reference_max_gradient_voltage": reference_max_gradient_voltage,
                     "narrowed_range": [
                         float(narrowed_sensor_plunger_range[0]),
                         float(narrowed_sensor_plunger_range[1]),
