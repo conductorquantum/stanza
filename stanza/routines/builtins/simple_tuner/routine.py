@@ -254,7 +254,7 @@ def run_dqd_search_fixed_barriers(
     session: LoggerSession | None = None,
     barrier_voltages: dict[str, float] | None = None,
     **kwargs: Any,
-) -> list[SearchSquare]:
+) -> dict[str, list[dict[str, Any]]]:
     """Run DQD search with fixed barrier voltages using adaptive grid sampling.
 
     Args:
@@ -270,9 +270,11 @@ def run_dqd_search_fixed_barriers(
         charge_carrier_type: "electrons" or "holes" - determines sweep direction
         seed: Random seed for reproducibility
         session: Logger session for telemetry
+        barrier_voltages: Barrier voltages to use
+        **kwargs: Additional arguments passed to sub-routines
 
     Returns:
-        List of all DQD squares found, sorted by score descending
+        Dictionary with "dqd_squares" key containing list of all DQD squares found
     """
     np.random.seed(seed)
 
@@ -581,7 +583,7 @@ def run_dqd_search_fixed_barriers(
             routine_name="run_dqd_search_fixed_barriers",
         )
 
-    return dqd_squares
+    return {"dqd_squares": [sq.to_dict() for sq in dqd_squares]}
 
 
 @routine
@@ -594,6 +596,7 @@ def run_dqd_search(
     current_trace_points: int,
     outer_barrier_points: int = 5,
     inner_barrier_points: int = 5,
+    num_dqds_for_exit: int = 1,
     session: LoggerSession | None = None,
     **kwargs: Any,
 ) -> dict[str, Any]:
@@ -611,6 +614,7 @@ def run_dqd_search(
         inner_barrier_points: Number of sweep points for inner barrier
         min_peak_spacing: Minimum peak spacing for compute_peak_spacing
         max_peak_spacing: Maximum peak spacing for compute_peak_spacing
+        num_dqds_for_exit: Number of DQDs for exit
         current_trace_points: Points per current trace
         session: Logger session
         **kwargs: Additional arguments passed to sub-routines
@@ -675,6 +679,7 @@ def run_dqd_search(
                 ctx,
                 gates,
                 measure_electrode,
+                num_dqds_for_exit=num_dqds_for_exit,
                 barrier_voltages=barrier_v,
                 session=session,
                 **kwargs,
@@ -688,5 +693,12 @@ def run_dqd_search(
                     "dqd_squares": [sq.to_dict() for sq in dqd_result],
                 }
             )
+
+            if len(dqd_result) >= num_dqds_for_exit:
+                logger.info(
+                    f"Found {len(dqd_result)} DQDs at outer={outer_v:.4f}V, "
+                    f"inner={inner_v:.4f}V - exiting barrier search"
+                )
+                return {"barrier_sweep_results": sweep_results}
 
     return {"barrier_sweep_results": sweep_results}
