@@ -110,7 +110,7 @@ def generate_diagonal_sweep(
     corner: NDArray[np.float64],
     size: float,
     num_points: int,
-    charge_carrier_type: str = "electrons",
+    charge_carrier_type: str,
 ) -> NDArray[np.float64]:
     """Generate diagonal line through a square.
 
@@ -126,10 +126,14 @@ def generate_diagonal_sweep(
     Returns:
         (num_points, 2) array of voltage coordinates
     """
-    if charge_carrier_type == "electrons":
-        t = np.linspace(0, size, num_points)
-    else:  # holes - sweep in negative direction towards pinch-off
-        t = np.linspace(0, -size, num_points)
+    charge_carrier_type = charge_carrier_type.lower()
+    match charge_carrier_type:
+        case "electron":
+            t = np.linspace(0, size, num_points)
+        case "hole":
+            t = np.linspace(0, -size, num_points)
+        case _:
+            raise ValueError(f"Invalid charge carrier type: {charge_carrier_type}")
 
     return corner + np.column_stack([t, t])
 
@@ -138,7 +142,7 @@ def generate_2d_sweep(
     corner: NDArray[np.float64],
     size: float,
     num_points: int,
-    charge_carrier_type: str = "electrons",
+    charge_carrier_type: str,
 ) -> NDArray[np.float64]:
     """Generate 2D grid sweep over a square.
 
@@ -154,10 +158,14 @@ def generate_2d_sweep(
     Returns:
         (num_points, num_points, 2) array of voltage coordinates
     """
-    if charge_carrier_type == "electrons":
-        t = np.linspace(0, size, num_points)
-    else:  # holes - sweep in negative direction towards pinch-off
-        t = np.linspace(0, -size, num_points)
+    charge_carrier_type = charge_carrier_type.lower()
+    match charge_carrier_type:
+        case "electron":
+            t = np.linspace(0, size, num_points)
+        case "hole":
+            t = np.linspace(0, -size, num_points)
+        case _:
+            raise ValueError(f"Invalid charge carrier type: {charge_carrier_type}")
 
     x_mesh, y_mesh = np.meshgrid(t, t)
     return np.stack([x_mesh + corner[0], y_mesh + corner[1]], axis=-1)
