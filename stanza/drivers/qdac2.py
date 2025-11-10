@@ -295,9 +295,7 @@ class QDAC2(GeneralInstrument):
             channels_suffix = f",(@{channel_str})"
 
             currents_str = self.driver.query(f"read? {channels_suffix}")
-            currents = [
-                -1 * float(current.strip()) for current in currents_str.split(",")
-            ]
+            currents = [float(current.strip()) for current in currents_str.split(",")]
             return currents
 
     def close(self) -> None:
