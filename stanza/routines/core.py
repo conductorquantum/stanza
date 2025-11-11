@@ -1,5 +1,6 @@
 import logging
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 from stanza.context import StanzaSession
@@ -98,6 +99,7 @@ class RoutineRunner:
         self,
         resources: list[Any] | None = None,
         configs: list[Any] | None = None,
+        base_dir: str | Path | None = None,
     ):
         """Initialize runner with resources or configs.
 
@@ -115,6 +117,8 @@ class RoutineRunner:
             raise ValueError("Cannot provide both 'resources' and 'configs'")
 
         self._routine_hierarchy: dict[str, str] = {}
+        self._base_dir_override: Path | None = Path(base_dir) if base_dir else None
+        self._manages_logger_base_dir = False
 
         if resources is not None:
             self.resources = ResourceRegistry(*resources)
@@ -156,16 +160,13 @@ class RoutineRunner:
                 resources.append(device)
                 device.name = "device"
 
-                # Get active Stanza session directory, fallback to ./data
-                session_dir = StanzaSession.get_active_session()
-                base_dir = str(session_dir) if session_dir else "./data"
-
                 data_logger = DataLogger(
                     name="logger",
                     routine_name=device.name,
-                    base_dir=base_dir,
+                    base_dir=self._resolve_base_dir(),
                 )
                 resources.append(data_logger)
+                self._manages_logger_base_dir = True
 
         return resources
 
@@ -299,6 +300,7 @@ class RoutineRunner:
         data_logger = getattr(self.resources, "logger", None)
         session = None
         if data_logger is not None and hasattr(data_logger, "create_session"):
+            self._maybe_update_logger_base_dir()
             session_id = self._get_routine_path(routine_name)
             session = data_logger.create_session(
                 session_id=session_id, group_name=group_name
@@ -323,6 +325,34 @@ class RoutineRunner:
             # Close logger session if it was created
             if session is not None and data_logger is not None:
                 data_logger.close_session(session_id=session.session_id)
+
+    def set_logger_base_dir(self, base_dir: str | Path | None) -> None:
+        """Override the logger base directory or revert to session-based resolution."""
+        self._base_dir_override = Path(base_dir) if base_dir is not None else None
+        self._manages_logger_base_dir = True
+        self._maybe_update_logger_base_dir()
+
+    def _resolve_base_dir(self) -> Path:
+        """Resolve base directory from override or current active session."""
+        if self._base_dir_override is not None:
+            return self._base_dir_override
+
+        session_dir = StanzaSession.get_active_session()
+        if session_dir is not None:
+            return session_dir
+
+        return Path("./data")
+
+    def _maybe_update_logger_base_dir(self) -> None:
+        """Update logger base directory if managed by the runner."""
+        if not (self._manages_logger_base_dir or self._base_dir_override is not None):
+            return
+
+        data_logger = getattr(self.resources, "logger", None)
+        if data_logger is None or not hasattr(data_logger, "set_base_directory"):
+            return
+
+        data_logger.set_base_directory(self._resolve_base_dir())
 
     def run_all(self, parent_routine: str | None = None) -> dict[str, Any]:
         """Execute all routines from config in order.

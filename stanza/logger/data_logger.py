@@ -47,10 +47,10 @@ class DataLogger:
 
         self.name = name
         self.routine_name = routine_name
-        dir_name = routine_dir_name or self.routine_name
-        dir_name = self._slugify(dir_name)
-        self.base_directory = Path(base_dir) / dir_name
-        self.base_directory.mkdir(parents=True, exist_ok=True)
+        self._routine_dir_name = self._slugify(routine_dir_name or self.routine_name)
+        self._base_dir_root = Path(base_dir)
+        self.base_directory = Path()
+        self.set_base_directory(self._base_dir_root)
 
         if formats is None:
             formats = ["jsonl"]
@@ -71,6 +71,12 @@ class DataLogger:
         # Auto-enable live plotting if configured via CLI
         if bokeh_backend is None:
             self._auto_enable_live_plotting()
+
+    def set_base_directory(self, base_dir: str | Path) -> None:
+        """Update the base directory where sessions will be created."""
+        self._base_dir_root = Path(base_dir)
+        self.base_directory = self._base_dir_root / self._routine_dir_name
+        self.base_directory.mkdir(parents=True, exist_ok=True)
 
     def _auto_enable_live_plotting(self) -> None:
         """Auto-enable live plotting if configured."""
