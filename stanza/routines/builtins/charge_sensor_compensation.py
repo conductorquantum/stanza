@@ -40,6 +40,7 @@ from typing import Any
 # Third-party imports
 import numpy as np
 from conductorquantum import ConductorQuantum
+
 from stanza.device import Device
 
 # First-party imports
@@ -690,7 +691,7 @@ def _single_window_sensor_plunger_sweep(
         # Append to aggregated trace
         aggregated_voltages = np.concatenate([aggregated_voltages, sp_sweep_voltages])
         aggregated_currents = np.concatenate([aggregated_currents, current_trace])
-  
+
         fitted_peak = analyze_single_window_barrier_sweep(
             aggregated_currents, aggregated_voltages, session
         )
@@ -1284,7 +1285,7 @@ def run_compensation(  # pylint: disable=too-many-locals,too-many-statements
     sensor_gate_key = sensor_gates_list[sensor_plunger_index]
     new_step_size = find_sensor_peak_results["step_size"]
 
-    voltage_range = peak_spacing*4 / PERTURBATION_DIVISOR
+    voltage_range = peak_spacing * 4 / PERTURBATION_DIVISOR
     # Create symmetric voltage points around zero, excluding zero itself
     # to avoid division by zero
     half_n = PERTURBATION_DIVISOR // 2
@@ -1382,7 +1383,9 @@ def run_compensation(  # pylint: disable=too-many-locals,too-many-statements
             counter = 0
             for voltage_difference in voltage_differences:
                 counter += 1
-                print(f"Voltage difference {counter} of {len(voltage_differences)} for gate {gate}")
+                print(
+                    f"Voltage difference {counter} of {len(voltage_differences)} for gate {gate}"
+                )
                 # Apply voltage perturbation relative to baseline
                 device_state = baseline_control_state.copy()
                 device_state[gate] = baseline_control_state[gate] + voltage_difference
@@ -1392,7 +1395,9 @@ def run_compensation(  # pylint: disable=too-many-locals,too-many-statements
                 # Repeat sensor plunger sweep 5 times and average results
                 sensitivity_voltages = []
                 for i in range(NUM_OF_SAMPLES_FOR_AVERAGING):
-                    print(f"Iteration {i} of {NUM_OF_SAMPLES_FOR_AVERAGING} for gate {gate}")
+                    print(
+                        f"Iteration {i} of {NUM_OF_SAMPLES_FOR_AVERAGING} for gate {gate}"
+                    )
                     # Do sensor plunger sweep with narrowed range
                     iteration_sweep_output = _single_window_sensor_plunger_sweep(
                         ctx=ctx,
@@ -1464,9 +1469,9 @@ def run_compensation(  # pylint: disable=too-many-locals,too-many-statements
                         k: float(v) for k, v in compensation_gradients_dict.items()
                     },
                     "compensation_gradients": compensation_gradients_dict,
-            "sensor_park_point_voltages": sensor_park_point_voltages,
-            "sensor_plunger_key": sensor_gate_key,
-            "sensor_plunger_ranges": narrowed_sensor_plunger_range,
+                    "sensor_park_point_voltages": sensor_park_point_voltages,
+                    "sensor_plunger_key": sensor_gate_key,
+                    "sensor_plunger_ranges": narrowed_sensor_plunger_range,
                 },
             )
 
@@ -1475,7 +1480,6 @@ def run_compensation(  # pylint: disable=too-many-locals,too-many-statements
             "sensor_park_point_voltages": sensor_park_point_voltages,
             "sensor_plunger_key": sensor_gate_key,
             "sensor_plunger_ranges": narrowed_sensor_plunger_range,
-
         }
         return result
 

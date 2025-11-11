@@ -310,7 +310,7 @@ def charge_sensor_csd_readout(  # pylint: disable=too-many-locals,too-many-state
 
         # 3. Override control plungers to start of sweep range
         initial_control_plunger_voltages = {}
-        for gate, (start, end) in control_plunger_ranges.items():
+        for gate, (start, _end) in control_plunger_ranges.items():
             voltage_dict[gate] = float(start)
             initial_control_plunger_voltages[gate] = float(start)
 
@@ -322,7 +322,9 @@ def charge_sensor_csd_readout(  # pylint: disable=too-many-locals,too-many-state
         device.jump({bias_gate: bias_voltage}, wait_for_settling=True)
 
         # Allow settling time
-        logger.info("Waiting %d seconds for device settling...", DEFAULT_SETTLING_TIME_S)
+        logger.info(
+            "Waiting %d seconds for device settling...", DEFAULT_SETTLING_TIME_S
+        )
         time.sleep(DEFAULT_SETTLING_TIME_S)
 
         # Measure baseline park point current
@@ -416,7 +418,9 @@ def charge_sensor_csd_readout(  # pylint: disable=too-many-locals,too-many-state
         # Subtract baseline to get differential current signal
         differential_currents = average_currents - park_point_current
 
-        logger.info("Sweep completed: %d measurements acquired", len(differential_currents))
+        logger.info(
+            "Sweep completed: %d measurements acquired", len(differential_currents)
+        )
         logger.info(
             "Differential current range: %.3e to %.3e A",
             np.min(differential_currents),
