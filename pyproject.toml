@@ -38,6 +38,8 @@ dependencies = [
     "h5py>=3.8.0",
     "bokeh>=3.0.0",
     "conductorquantum>=0.1.2",
+    "matplotlib>=3.10.7",
+    "serial>=0.0.97",
 ]
 
 [project.optional-dependencies]

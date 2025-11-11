@@ -40,8 +40,6 @@ from typing import Any
 # Third-party imports
 import numpy as np
 from conductorquantum import ConductorQuantum
-from matplotlib import pyplot as plt
-
 from stanza.device import Device
 
 # First-party imports
@@ -62,7 +60,7 @@ logger = logging.getLogger(__name__)
 # Configuration constants
 
 # Default settling time before sweeps to avoid current spikes
-DEFAULT_SETTLING_TIME_S = 10
+DEFAULT_SETTLING_TIME_S = 5
 
 # ML model input constraint: the coulomb blockade classifier model requires
 # exactly 128 points per input window for inference
@@ -72,27 +70,25 @@ ML_MODEL_INPUT_SIZE = 128
 # full peak width plus sufficient context for accurate ML classification
 INITIAL_WINDOW_MULTIPLIER = 2
 
-# Divide peak spacing by 10 to create small voltage perturbations for
-# gradient measurement that don't significantly shift the peak position
 PERTURBATION_DIVISOR = 10
 
-# Use 70% of inter-peak distance for peak fitting windows to avoid
+# Use 80% of inter-peak distance for peak fitting windows to avoid
 # overlapping windows while maximizing window size for better fit quality
 # (empirically determined to balance resolution vs. overlap)
-WINDOW_FRACTION = 0.7
+WINDOW_FRACTION = 0.8
 
 # Default half-width (in points) for peak fitting windows when peaks are
-# widely spaced. 32 points provides sufficient context for Lorentzian/sech²/
+# widely spaced. 128 points provides sufficient context for Lorentzian/sech²/
 # Voigt fitting while avoiding edge effects
-DEFAULT_WINDOW_HALF_WIDTH = 32
+DEFAULT_WINDOW_HALF_WIDTH = 128
 
 # Use 0.5x (half) of the initial step size for refined narrowed-range sweeps
 # to improve peak center localization accuracy
 REFINED_STEP_MULTIPLIER = 0.5
 
-# Target 64 points between neighboring peaks for narrowed sweeps, balancing
-# measurement resolution with sweep time
-NARROWED_RANGE_POINTS = 64
+
+# Number of samples to average for each gate compensation measurement
+NUM_OF_SAMPLES_FOR_AVERAGING = 5
 
 # ML model constants
 COULOMB_CLASSIFIER_MODEL = "coulomb-blockade-classifier-v3"
@@ -690,15 +686,11 @@ def _single_window_sensor_plunger_sweep(
             measure_electrode=measure_electrode,
             session=session,
         )
-        plt.plot(current_trace)
-        plt.savefig("current_trace_single_window.png")
-        plt.close()
+
         # Append to aggregated trace
         aggregated_voltages = np.concatenate([aggregated_voltages, sp_sweep_voltages])
         aggregated_currents = np.concatenate([aggregated_currents, current_trace])
-        plt.plot(aggregated_currents)
-        plt.savefig("aggregated_currents_single_window.png")
-        plt.close()
+  
         fitted_peak = analyze_single_window_barrier_sweep(
             aggregated_currents, aggregated_voltages, session
         )
@@ -821,15 +813,11 @@ def many_window_barrier_sweep(  # pylint: disable=too-many-locals,too-many-state
             measure_electrode=measure_electrode,
             session=session,
         )
-        plt.plot(current_trace)
-        plt.savefig(f"current_trace_window_{idx}.png")
-        plt.close()
+
         # Append to aggregated trace
         aggregated_voltages = np.concatenate([aggregated_voltages, sp_sweep_voltages])
         aggregated_currents = np.concatenate([aggregated_currents, current_trace])
-        plt.plot(aggregated_currents)
-        plt.savefig(f"aggregated_currents_window_{idx}.png")
-        plt.close()
+
         # Run coulomb blockade classifier on aggregated trace
         # Model handles sliding windows internally for inputs > 128
         try:
@@ -1167,13 +1155,13 @@ def find_sensor_peak(  # pylint: disable=too-many-locals
 
     start_of_range = (
         prev_peak_voltage_fallback
-        if number_of_points_between_previous_and_best_peak < NARROWED_RANGE_POINTS
-        else best_peak_voltage - NARROWED_RANGE_POINTS * new_step_size
+        if number_of_points_between_previous_and_best_peak < DEFAULT_WINDOW_HALF_WIDTH
+        else best_peak_voltage - DEFAULT_WINDOW_HALF_WIDTH * new_step_size
     )
     end_of_range = (
         next_peak_voltage_fallback
-        if number_of_points_between_best_and_next_peak < NARROWED_RANGE_POINTS
-        else best_peak_voltage + NARROWED_RANGE_POINTS * new_step_size
+        if number_of_points_between_best_and_next_peak < DEFAULT_WINDOW_HALF_WIDTH
+        else best_peak_voltage + DEFAULT_WINDOW_HALF_WIDTH * new_step_size
     )
 
     narrowed_sensor_plunger_range = (start_of_range, end_of_range)
@@ -1222,6 +1210,7 @@ def run_compensation(  # pylint: disable=too-many-locals,too-many-statements
     bias_gate: str,
     bias_voltage: float,
     zero_control_side: bool = True,
+    gates_to_compensate: list[str] | None = None,
     session: LoggerSession | None = None,
     **kwargs: Any,  # pylint: disable=unused-argument
 ) -> dict[str, float]:
@@ -1244,6 +1233,10 @@ def run_compensation(  # pylint: disable=too-many-locals,too-many-statements
         zero_control_side: If True, measure gradients relative to 0V baseline.
             If False, measure gradients relative to current control voltages.
             Useful for measuring compensation at non-zero operating points. (default: True)
+        gates_to_compensate: Optional list of gate names to measure compensation for.
+            If provided, only these gates will be tested. Must be valid non-reservoir
+            gates (plunger or barrier) from the control group. Applied after automatic
+            type and group filtering. If None, all eligible gates are tested. (default: None)
         session: Logger session for measurements and analysis
 
     Returns:
@@ -1288,13 +1281,13 @@ def run_compensation(  # pylint: disable=too-many-locals,too-many-statements
     ]
     sensor_gates_list = find_sensor_peak_results["sensor_gates_list"]
     sensor_plunger_index = find_sensor_peak_results["sensor_plunger_index"]
+    sensor_gate_key = sensor_gates_list[sensor_plunger_index]
     new_step_size = find_sensor_peak_results["step_size"]
 
-    number_of_voltages_to_test = PERTURBATION_DIVISOR
-    voltage_range = peak_spacing / PERTURBATION_DIVISOR
+    voltage_range = peak_spacing*4 / PERTURBATION_DIVISOR
     # Create symmetric voltage points around zero, excluding zero itself
     # to avoid division by zero
-    half_n = number_of_voltages_to_test // 2
+    half_n = PERTURBATION_DIVISOR // 2
     voltage_differences = np.concatenate(
         [
             np.linspace(-voltage_range, -voltage_range / half_n, half_n),
@@ -1311,6 +1304,24 @@ def run_compensation(  # pylint: disable=too-many-locals,too-many-statements
     control_non_reservoir_gates = [
         g for g in (all_plungers + all_barriers) if g in control_gates
     ]
+
+    # Apply additional filtering if gates_to_compensate is specified
+    if gates_to_compensate is not None:
+        # Validate that all requested gates are in the eligible set
+        invalid_gates = [
+            g for g in gates_to_compensate if g not in control_non_reservoir_gates
+        ]
+        if invalid_gates:
+            raise RoutineError(
+                f"Invalid gates specified in gates_to_compensate: {invalid_gates}. "
+                f"Must be non-reservoir gates from control group "
+                f"'{control_group_name}'. "
+                f"Eligible gates: {control_non_reservoir_gates}"
+            )
+        # Filter to only include requested gates
+        control_non_reservoir_gates = [
+            g for g in control_non_reservoir_gates if g in gates_to_compensate
+        ]
 
     # Capture initial device state for cleanup in finally block
     initial_control_voltages = device.check(control_non_reservoir_gates)
@@ -1338,7 +1349,7 @@ def run_compensation(  # pylint: disable=too-many-locals,too-many-statements
         # Perform baseline sweep 5 times and average for better estimate
         try:
             baseline_sensitivity_voltages = []
-            for _ in range(5):
+            for _ in range(10):
                 baseline_sweep_output = _single_window_sensor_plunger_sweep(
                     ctx=ctx,
                     sensor_gates_list=sensor_gates_list,
@@ -1360,12 +1371,18 @@ def run_compensation(  # pylint: disable=too-many-locals,too-many-statements
             )
         except Exception as e:
             raise RoutineError(f"Error in baseline measurement: {str(e)}") from e
-
+        sensor_park_point_voltages = dict.fromkeys(
+            sensor_gates_list, mean_reservoir_saturation_voltage
+        )
+        sensor_park_point_voltages[sensor_gate_key] = reference_max_gradient_voltage
         compensation_gradients_dict = {}
         per_gate_details = {}  # Store detailed arrays for each gate
         for gate in control_non_reservoir_gates:
             peak_positions_list: list[float] = []  # Reset for each gate
+            counter = 0
             for voltage_difference in voltage_differences:
+                counter += 1
+                print(f"Voltage difference {counter} of {len(voltage_differences)} for gate {gate}")
                 # Apply voltage perturbation relative to baseline
                 device_state = baseline_control_state.copy()
                 device_state[gate] = baseline_control_state[gate] + voltage_difference
@@ -1374,7 +1391,8 @@ def run_compensation(  # pylint: disable=too-many-locals,too-many-statements
 
                 # Repeat sensor plunger sweep 5 times and average results
                 sensitivity_voltages = []
-                for _ in range(5):
+                for i in range(NUM_OF_SAMPLES_FOR_AVERAGING):
+                    print(f"Iteration {i} of {NUM_OF_SAMPLES_FOR_AVERAGING} for gate {gate}")
                     # Do sensor plunger sweep with narrowed range
                     iteration_sweep_output = _single_window_sensor_plunger_sweep(
                         ctx=ctx,
@@ -1445,16 +1463,21 @@ def run_compensation(  # pylint: disable=too-many-locals,too-many-statements
                     "gradients": {
                         k: float(v) for k, v in compensation_gradients_dict.items()
                     },
-                    "reference_max_gradient_voltage": reference_max_gradient_voltage,
-                    "narrowed_range": [
-                        float(narrowed_sensor_plunger_range[0]),
-                        float(narrowed_sensor_plunger_range[1]),
-                    ],
-                    "num_voltage_differences_tested": len(voltage_differences),
+                    "compensation_gradients": compensation_gradients_dict,
+            "sensor_park_point_voltages": sensor_park_point_voltages,
+            "sensor_plunger_key": sensor_gate_key,
+            "sensor_plunger_ranges": narrowed_sensor_plunger_range,
                 },
             )
 
-        return compensation_gradients_dict
+        result = {
+            "compensation_gradients": compensation_gradients_dict,
+            "sensor_park_point_voltages": sensor_park_point_voltages,
+            "sensor_plunger_key": sensor_gate_key,
+            "sensor_plunger_ranges": narrowed_sensor_plunger_range,
+
+        }
+        return result
 
     finally:
         # Restore initial device state for both control and sensor gates
