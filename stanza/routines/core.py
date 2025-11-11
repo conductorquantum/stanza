@@ -300,7 +300,7 @@ class RoutineRunner:
         data_logger = getattr(self.resources, "logger", None)
         session = None
         if data_logger is not None and hasattr(data_logger, "create_session"):
-            self._maybe_update_logger_base_dir()
+            self._update_logger_base_dir_if_needed()
             session_id = self._get_routine_path(routine_name)
             session = data_logger.create_session(
                 session_id=session_id, group_name=group_name
@@ -330,7 +330,7 @@ class RoutineRunner:
         """Override the logger base directory or revert to session-based resolution."""
         self._base_dir_override = Path(base_dir) if base_dir is not None else None
         self._manages_logger_base_dir = True
-        self._maybe_update_logger_base_dir()
+        self._update_logger_base_dir_if_needed()
 
     def _resolve_base_dir(self) -> Path:
         """Resolve base directory from override or current active session."""
@@ -343,8 +343,8 @@ class RoutineRunner:
 
         return Path("./data")
 
-    def _maybe_update_logger_base_dir(self) -> None:
-        """Update logger base directory if managed by the runner."""
+    def _update_logger_base_dir_if_needed(self) -> None:
+        """Synchronize the logger base directory if the runner manages it."""
         if not (self._manages_logger_base_dir or self._base_dir_override is not None):
             return
 
