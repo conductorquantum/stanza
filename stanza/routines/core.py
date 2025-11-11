@@ -117,7 +117,13 @@ class RoutineRunner:
             raise ValueError("Cannot provide both 'resources' and 'configs'")
 
         self._routine_hierarchy: dict[str, str] = {}
+        # _base_dir_override stores an explicit runner-level override (from ctor).
+        # When None, the DataLogger should follow the current session/override from
+        # StanzaSession. When set, we always use the provided directory.
         self._base_dir_override: Path | None = Path(base_dir) if base_dir else None
+        # _manages_logger_base_dir tracks whether the runner created the DataLogger and
+        # therefore owns its directory switching. If False (user provided their own logger),
+        # we never mutate its base directory unless a base_dir override was supplied.
         self._manages_logger_base_dir = False
 
         if resources is not None:
@@ -166,6 +172,8 @@ class RoutineRunner:
                     base_dir=self._resolve_base_dir(),
                 )
                 resources.append(data_logger)
+                # Runner instantiated the logger, so it is safe to retarget it when
+                # session overrides change.
                 self._manages_logger_base_dir = True
 
         return resources
@@ -326,14 +334,14 @@ class RoutineRunner:
             if session is not None and data_logger is not None:
                 data_logger.close_session(session_id=session.session_id)
 
-    def set_logger_base_dir(self, base_dir: str | Path | None) -> None:
-        """Override the logger base directory or revert to session-based resolution."""
-        self._base_dir_override = Path(base_dir) if base_dir is not None else None
-        self._manages_logger_base_dir = True
-        self._update_logger_base_dir_if_needed()
-
     def _resolve_base_dir(self) -> Path:
-        """Resolve base directory from override or current active session."""
+        """Resolve logger base directory in priority order.
+
+        Priority:
+            1. Runner-level override (`base_dir` ctor arg)
+            2. Session override/active session
+            3. Local ./data fallback when nothing else is configured
+        """
         if self._base_dir_override is not None:
             return self._base_dir_override
 
@@ -344,7 +352,15 @@ class RoutineRunner:
         return Path("./data")
 
     def _update_logger_base_dir_if_needed(self) -> None:
-        """Synchronize the logger base directory if the runner manages it."""
+        """Synchronize the logger base directory if we own it.
+
+        We only mutate the logger path when:
+            * the runner created the logger (so `_manages_logger_base_dir` is True), or
+            * the caller provided an explicit `base_dir` override.
+
+        This prevents clobbering user-provided loggers while still keeping runner-created
+        loggers aligned with session overrides.
+        """
         if not (self._manages_logger_base_dir or self._base_dir_override is not None):
             return
 
