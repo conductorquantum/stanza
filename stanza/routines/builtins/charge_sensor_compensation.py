@@ -1445,6 +1445,19 @@ def run_compensation(  # pylint: disable=too-many-locals,too-many-statements
                 "least_squares_gradient": least_squares_gradient,
                 "mean_per_point_gradient": float(np.mean(per_point_gradients)),
                 "mean_gradient": least_squares_gradient,
+                "peak_vs_gate_deltas": [
+                    {
+                        "control_delta": float(control_delta),
+                        "peak_position": float(peak_position),
+                        "peak_shift": float(peak_shift),
+                    }
+                    for control_delta, peak_position, peak_shift in zip(
+                        voltage_differences,
+                        peak_positions,
+                        peak_positions_difference,
+                        strict=False,
+                    )
+                ],
             }
 
             # Reset this gate back to baseline before moving to next gate
@@ -1470,6 +1483,7 @@ def run_compensation(  # pylint: disable=too-many-locals,too-many-statements
                         "per_point_gradients": details["per_point_gradients"].tolist(),
                         "least_squares_gradient": details["least_squares_gradient"],
                         "mean_per_point_gradient": details["mean_per_point_gradient"],
+                        "peak_vs_gate_deltas": details["peak_vs_gate_deltas"],
                         "voltage_differences": voltage_differences.tolist(),
                     },
                 )
