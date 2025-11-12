@@ -263,6 +263,42 @@ class TestStatusCommand:
             assert "Created:" not in result.output
 
 
+class TestDeleteSessionCommand:
+    """Test suite for 'stanza delete-session' command."""
+
+    def test_delete_session_keep_data_clears_pointer(self):
+        """Deleting with --keep-data clears the active session pointer."""
+        runner = CliRunner()
+
+        with runner.isolated_filesystem():
+            session_dir = StanzaSession.create_session_directory(base_path=Path.cwd())
+            StanzaSession.set_active_session(session_dir)
+
+            result = runner.invoke(cli, ["delete-session", "--keep-data"])
+
+            assert result.exit_code == 0
+            assert "Active session cleared" in result.output
+            assert session_dir.exists()
+            assert StanzaSession.get_active_session() is None
+
+    def test_delete_session_force_removes_directory(self):
+        """Deleting with --force removes the session directory."""
+        runner = CliRunner()
+
+        with runner.isolated_filesystem():
+            session_dir = StanzaSession.create_session_directory(base_path=Path.cwd())
+            StanzaSession.set_active_session(session_dir)
+
+            assert session_dir.exists()
+
+            result = runner.invoke(cli, ["delete-session", "--force"])
+
+            assert result.exit_code == 0
+            assert "Deleted session directory" in result.output
+            assert not session_dir.exists()
+            assert StanzaSession.get_active_session() is None
+
+
 class TestLivePlotCommand:
     """Test suite for 'stanza live-plot' commands."""
 

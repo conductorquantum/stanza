@@ -244,6 +244,28 @@ class TestStanzaSession:
             finally:
                 os.chdir(original_cwd)
 
+    def test_clear_active_session_removes_pointer_file(self):
+        """Test that clear_active_session deletes the pointer file."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            original_cwd = Path.cwd()
+            import os
+
+            os.chdir(tmpdir)
+            try:
+                session_dir = StanzaSession.create_session_directory(base_path=tmpdir)
+                StanzaSession.set_active_session(session_dir)
+
+                config_file = Path(tmpdir) / ".stanza" / "active_session.json"
+                assert config_file.exists()
+
+                assert StanzaSession.clear_active_session() is True
+                assert not config_file.exists()
+                assert StanzaSession.get_active_session() is None
+
+                assert StanzaSession.clear_active_session() is False
+            finally:
+                os.chdir(original_cwd)
+
     def test_timestamp_format_is_correct(self):
         """Test that session directory timestamp follows YYYYMMDDHHmmss format."""
         with tempfile.TemporaryDirectory() as tmpdir:

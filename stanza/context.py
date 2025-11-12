@@ -184,6 +184,22 @@ class StanzaSession:
             json.dump(data, f, indent=2)
 
     @staticmethod
+    def clear_active_session() -> bool:
+        """Remove the active session pointer file.
+
+        Returns:
+            True if a session reference was removed, False otherwise.
+        """
+        config_file = Path.cwd() / StanzaSession.CONFIG_DIR / "active_session.json"
+
+        try:
+            config_file.unlink()
+        except FileNotFoundError:
+            return False
+
+        return True
+
+    @staticmethod
     def get_session_metadata(session_dir: Path | str) -> dict[str, Any] | None:
         """Get metadata for a Stanza session directory.
 
