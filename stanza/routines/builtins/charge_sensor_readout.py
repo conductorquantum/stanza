@@ -25,6 +25,8 @@ import logging
 import time
 from typing import Any
 
+import matplotlib.pyplot as plt
+
 # Third-party imports
 import numpy as np
 
@@ -411,6 +413,28 @@ def charge_sensor_csd_readout(  # pylint: disable=too-many-locals,too-many-state
             )
 
             currents_list.append(current_measurements)
+            plt.imshow(
+                np.array(current_measurements).reshape(
+                    sweep_resolution, sweep_resolution
+                ),
+                cmap="viridis",
+                origin="lower",
+            )
+            plt.colorbar(label="Current (A)")
+            plt.xlabel("G10 Voltage (V)")
+            plt.ylabel("G8 Voltage (V)")
+            plt.title("Compensated Charge Sensor Readout")
+            plt.savefig(f"current_measurements_{i}.png")
+            plt.close()
+
+            session.log_sweep(
+                name="charge_sensor_csd_readout",
+                x_data=voltage_measurements,
+                y_data=current_measurements,
+                x_label=gate_electrodes,
+                y_label="current",
+                metadata={"repetition": i + 1},
+            )
 
         # Average currents across all sweeps
         average_currents = np.mean(currents_list, axis=0)

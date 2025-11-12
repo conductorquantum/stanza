@@ -1422,16 +1422,29 @@ def run_compensation(  # pylint: disable=too-many-locals,too-many-statements
 
             peak_positions = np.array(peak_positions_list)
             peak_positions_difference = peak_positions - reference_max_gradient_voltage
-            compensation_gradients = peak_positions_difference / voltage_differences
-            mean_compensation_gradient_for_gate = float(np.mean(compensation_gradients))
-            compensation_gradients_dict[gate] = mean_compensation_gradient_for_gate
+            # Keep per-point gradients for diagnostics, but use least squares for the
+            # actual gradient estimate to avoid noise amplification near zero deltas.
+            per_point_gradients = peak_positions_difference / voltage_differences
+
+            denominator = float(np.dot(voltage_differences, voltage_differences))
+            if denominator == 0:
+                raise RoutineError(
+                    "Cannot compute compensation gradient: voltage_differences sum to 0"
+                )
+            least_squares_gradient = float(
+                np.dot(voltage_differences, peak_positions_difference) / denominator
+            )
+
+            compensation_gradients_dict[gate] = least_squares_gradient
 
             # Store detailed arrays for this gate for later analysis/logging
             per_gate_details[gate] = {
                 "peak_positions": peak_positions,
                 "peak_positions_difference": peak_positions_difference,
-                "compensation_gradients": compensation_gradients,
-                "mean_gradient": mean_compensation_gradient_for_gate,
+                "per_point_gradients": per_point_gradients,
+                "least_squares_gradient": least_squares_gradient,
+                "mean_per_point_gradient": float(np.mean(per_point_gradients)),
+                "mean_gradient": least_squares_gradient,
             }
 
             # Reset this gate back to baseline before moving to next gate
@@ -1454,9 +1467,9 @@ def run_compensation(  # pylint: disable=too-many-locals,too-many-statements
                         "peak_positions_difference": details[
                             "peak_positions_difference"
                         ].tolist(),
-                        "compensation_gradients": details[
-                            "compensation_gradients"
-                        ].tolist(),
+                        "per_point_gradients": details["per_point_gradients"].tolist(),
+                        "least_squares_gradient": details["least_squares_gradient"],
+                        "mean_per_point_gradient": details["mean_per_point_gradient"],
                         "voltage_differences": voltage_differences.tolist(),
                     },
                 )
