@@ -1,5 +1,6 @@
 import logging
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 from stanza.context import StanzaSession
@@ -98,6 +99,7 @@ class RoutineRunner:
         self,
         resources: list[Any] | None = None,
         configs: list[Any] | None = None,
+        base_dir: str | Path | None = None,
     ):
         """Initialize runner with resources or configs.
 
@@ -115,6 +117,14 @@ class RoutineRunner:
             raise ValueError("Cannot provide both 'resources' and 'configs'")
 
         self._routine_hierarchy: dict[str, str] = {}
+        # _base_dir_override stores an explicit runner-level override (from ctor).
+        # When None, the DataLogger should follow the current session/override from
+        # StanzaSession. When set, we always use the provided directory.
+        self._base_dir_override: Path | None = Path(base_dir) if base_dir else None
+        # _manages_logger_base_dir tracks whether the runner created the DataLogger and
+        # therefore owns its directory switching. If False (user provided their own logger),
+        # we never mutate its base directory unless a base_dir override was supplied.
+        self._manages_logger_base_dir = False
 
         if resources is not None:
             self.resources = ResourceRegistry(*resources)
@@ -156,16 +166,15 @@ class RoutineRunner:
                 resources.append(device)
                 device.name = "device"
 
-                # Get active Stanza session directory, fallback to ./data
-                session_dir = StanzaSession.get_active_session()
-                base_dir = str(session_dir) if session_dir else "./data"
-
                 data_logger = DataLogger(
                     name="logger",
                     routine_name=device.name,
-                    base_dir=base_dir,
+                    base_dir=self._resolve_base_dir(),
                 )
                 resources.append(data_logger)
+                # Runner instantiated the logger, so it is safe to retarget it when
+                # session overrides change.
+                self._manages_logger_base_dir = True
 
         return resources
 
@@ -299,6 +308,7 @@ class RoutineRunner:
         data_logger = getattr(self.resources, "logger", None)
         session = None
         if data_logger is not None and hasattr(data_logger, "create_session"):
+            self._update_logger_base_dir_if_needed()
             session_id = self._get_routine_path(routine_name)
             session = data_logger.create_session(
                 session_id=session_id, group_name=group_name
@@ -323,6 +333,42 @@ class RoutineRunner:
             # Close logger session if it was created
             if session is not None and data_logger is not None:
                 data_logger.close_session(session_id=session.session_id)
+
+    def _resolve_base_dir(self) -> Path:
+        """Resolve logger base directory in priority order.
+
+        Priority:
+            1. Runner-level override (`base_dir` ctor arg)
+            2. Session override/active session
+            3. Local ./data fallback when nothing else is configured
+        """
+        if self._base_dir_override is not None:
+            return self._base_dir_override
+
+        session_dir = StanzaSession.get_active_session()
+        if session_dir is not None:
+            return session_dir
+
+        return Path("./data")
+
+    def _update_logger_base_dir_if_needed(self) -> None:
+        """Synchronize the logger base directory if we own it.
+
+        We only mutate the logger path when:
+            * the runner created the logger (so `_manages_logger_base_dir` is True), or
+            * the caller provided an explicit `base_dir` override.
+
+        This prevents clobbering user-provided loggers while still keeping runner-created
+        loggers aligned with session overrides.
+        """
+        if not (self._manages_logger_base_dir or self._base_dir_override is not None):
+            return
+
+        data_logger = getattr(self.resources, "logger", None)
+        if data_logger is None or not hasattr(data_logger, "set_base_directory"):
+            return
+
+        data_logger.set_base_directory(self._resolve_base_dir())
 
     def run_all(self, parent_routine: str | None = None) -> dict[str, Any]:
         """Execute all routines from config in order.
