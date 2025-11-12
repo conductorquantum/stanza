@@ -92,8 +92,19 @@ def compute_peak_spacing(
 
         while successful_measurements < max_number_of_samples:
             total_attempts += 1
-            if total_attempts > max_number_of_samples * 10:  # Safety limit
-                logger.warning(f"Exceeded max attempts for scale {scale:.4f} V")
+
+            # Safety limit to prevent infinite loops
+            if total_attempts > max_number_of_samples * 10:
+                logger.warning(
+                    f"Exceeded max attempts ({total_attempts}) for scale {scale:.4f} V"
+                )
+                break
+
+            # Early exit if we have enough successful peak spacings across all scales
+            if len(peak_spacings) >= number_of_samples_for_scale_computation:
+                logger.info(
+                    f"Collected {len(peak_spacings)} peak spacings, moving to next scale"
+                )
                 break
 
             x_bounds = plunger_gate_bounds[plunger_gates[0]]
@@ -164,7 +175,7 @@ def compute_peak_spacing(
             # Extract peaks
             peak_indices = np.array(
                 client.models.execute(
-                    model="coulomb-blockade-peak-detector-v1", data=currents
+                    model="coulomb-blockade-peak-detector-v2", data=currents
                 ).output["peak_indices"]
             )
 
@@ -244,12 +255,12 @@ def run_dqd_search_fixed_barriers(
     gates: list[str],
     measure_electrode: str,
     current_trace_points: int = 128,
-    low_res_csd_points: int = 25,
-    high_res_csd_points: int = 50,
+    low_res_csd_points: int = 16,
+    high_res_csd_points: int = 48,
     max_samples: int | None = None,
     num_dqds_for_exit: int = 1,
     include_diagonals: bool = False,
-    charge_carrier_type: str = "electrons",
+    charge_carrier_type: str = "electron",
     seed: int = 42,
     session: LoggerSession | None = None,
     barrier_voltages: dict[str, float] | None = None,
@@ -282,11 +293,11 @@ def run_dqd_search_fixed_barriers(
     client = ctx.resources.models_client
     results = ctx.results
 
-    saturation_voltages = get_voltages(gates, "saturation_voltage", ctx.results)
-    transition_voltages = get_voltages(gates, "transition_voltage", ctx.results)
-    cutoff_voltages = get_voltages(gates, "cutoff_voltage", ctx.results)
+    saturation_voltages = get_voltages(gates, "saturation_voltage", results)
+    transition_voltages = get_voltages(gates, "transition_voltage", results)
+    cutoff_voltages = get_voltages(gates, "cutoff_voltage", results)
 
-    safe_bounds = get_gate_safe_bounds(gates, ctx.results)
+    safe_bounds = get_gate_safe_bounds(gates, results)
     peak_spacing = ctx.results.get("compute_peak_spacing")["peak_spacing"]
     gate_idx = build_gate_indices(gates, device)
     plunger_gates = [gates[i] for i in gate_idx.plunger]
@@ -673,6 +684,7 @@ def run_dqd_search(
                 session=session,
                 **kwargs,
             )
+            ctx.results["compute_peak_spacing"] = peak_result
 
             # Run DQD search
             dqd_result = run_dqd_search_fixed_barriers(
@@ -684,19 +696,20 @@ def run_dqd_search(
                 session=session,
                 **kwargs,
             )
+            ctx.results["run_dqd_search_fixed_barriers"] = dqd_result
 
             sweep_results.append(
                 {
                     "outer_barrier_voltage": float(outer_v),
                     "inner_barrier_voltage": float(inner_v),
                     "peak_spacing": peak_result,
-                    "dqd_squares": [sq.to_dict() for sq in dqd_result],
+                    "dqd_squares": dqd_result["dqd_squares"],
                 }
             )
 
-            if len(dqd_result) >= num_dqds_for_exit:
+            if len(dqd_result["dqd_squares"]) >= num_dqds_for_exit:
                 logger.info(
-                    f"Found {len(dqd_result)} DQDs at outer={outer_v:.4f}V, "
+                    f"Found {len(dqd_result['dqd_squares'])} DQDs at outer={outer_v:.4f}V, "
                     f"inner={inner_v:.4f}V - exiting barrier search"
                 )
                 return {"barrier_sweep_results": sweep_results}

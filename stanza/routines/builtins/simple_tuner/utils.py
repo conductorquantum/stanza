@@ -243,7 +243,7 @@ def get_global_turn_on_voltage(results: ResultsRegistry) -> float:
     Returns:
         Global turn voltage
     """
-    if not (res := results.get("global_accumulation")["global_turn_on_voltage"]):
+    if not (res := results["global_accumulation"]):
         raise ValueError("Global turn on voltage not found")
     return float(res["global_turn_on_voltage"])
 

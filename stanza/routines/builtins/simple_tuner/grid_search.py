@@ -8,7 +8,11 @@ from numpy.typing import NDArray
 
 # Algorithm constants
 HIGH_SCORE_THRESHOLD: float = 1.5  # Minimum score for priority exploration
-GRID_SQUARE_MULTIPLIER: float = 4.0  # Peak spacing multiplier for grid size
+
+# Grid square sizing: diagonal should span 3 peak spacings (4 Coulomb peaks)
+GRID_SQUARE_MULTIPLIER: float = 3.0 / np.sqrt(
+    2
+)  # Peak spacing multiplier for grid size
 DISTANCE_DECAY_FACTOR: float = 1.0  # Weight decay with distance in weighted selection
 
 

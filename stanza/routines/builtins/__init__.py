@@ -10,6 +10,7 @@ from stanza.routines.builtins.health_check import (
 from stanza.routines.builtins.setup import setup_models_sdk
 from stanza.routines.builtins.simple_tuner import (
     compute_peak_spacing,
+    run_dqd_search,
     run_dqd_search_fixed_barriers,
 )
 
@@ -22,4 +23,5 @@ __all__ = [
     "finger_gate_characterization",
     "compute_peak_spacing",
     "run_dqd_search_fixed_barriers",
+    "run_dqd_search",
 ]
