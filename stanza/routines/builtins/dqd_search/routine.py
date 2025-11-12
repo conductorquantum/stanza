@@ -5,7 +5,7 @@ from typing import Any
 import numpy as np
 
 from stanza.logger.session import LoggerSession
-from stanza.routines.builtins.simple_tuner.grid_search import (
+from stanza.routines.builtins.dqd_search.grid_search import (
     GRID_SQUARE_MULTIPLIER,
     SearchSquare,
     generate_2d_sweep,
@@ -13,7 +13,7 @@ from stanza.routines.builtins.simple_tuner.grid_search import (
     generate_grid_corners,
     select_next_square,
 )
-from stanza.routines.builtins.simple_tuner.utils import (
+from stanza.routines.builtins.dqd_search.utils import (
     build_full_voltages,
     build_gate_indices,
     check_voltages_in_bounds,

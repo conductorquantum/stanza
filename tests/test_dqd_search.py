@@ -1,4 +1,4 @@
-"""Tests for simple tuner routines."""
+"""Tests for DQD search routines."""
 
 from unittest.mock import patch
 
@@ -8,7 +8,7 @@ import pytest
 from stanza.models import GateType
 from stanza.registry import ResourceRegistry, ResultsRegistry
 from stanza.routines import RoutineContext
-from stanza.routines.builtins.simple_tuner import (
+from stanza.routines.builtins.dqd_search import (
     compute_peak_spacing,
     run_dqd_search,
     run_dqd_search_fixed_barriers,
@@ -424,7 +424,7 @@ class TestRunDqdSearch:
 
 class TestUtilsErrorPaths:
     def test_get_global_turn_on_voltage_missing(self):
-        from stanza.routines.builtins.simple_tuner.utils import (
+        from stanza.routines.builtins.dqd_search.utils import (
             get_global_turn_on_voltage,
         )
 
@@ -434,7 +434,7 @@ class TestUtilsErrorPaths:
             get_global_turn_on_voltage(results)
 
     def test_get_voltages_missing_characterization(self):
-        from stanza.routines.builtins.simple_tuner.utils import get_voltages
+        from stanza.routines.builtins.dqd_search.utils import get_voltages
 
         results = ResultsRegistry()
         results.store("reservoir_characterization", {})
@@ -443,7 +443,7 @@ class TestUtilsErrorPaths:
             get_voltages(GATES, "saturation_voltage", results)
 
     def test_get_gate_safe_bounds_missing(self):
-        from stanza.routines.builtins.simple_tuner.utils import get_gate_safe_bounds
+        from stanza.routines.builtins.dqd_search.utils import get_gate_safe_bounds
 
         results = ResultsRegistry()
         with pytest.raises(ValueError, match="Leakage test results not found"):
@@ -452,7 +452,7 @@ class TestUtilsErrorPaths:
 
 class TestGridSearchWeightedSelection:
     def test_select_next_square_random_fallback(self):
-        from stanza.routines.builtins.simple_tuner.grid_search import (
+        from stanza.routines.builtins.dqd_search.grid_search import (
             SearchSquare,
             select_next_square,
         )
