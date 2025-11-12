@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
+from conductorquantum.base_client import BaseConductorQuantum
 from numpy.typing import NDArray
 
 from stanza.device import Device
@@ -52,8 +53,8 @@ def build_gate_indices(gates: list[str], device: Device) -> GateIndices:
 
 
 def generate_linear_sweep(
-    start_point: np.ndarray,
-    direction: np.ndarray,
+    start_point: NDArray[np.float64],
+    direction: NDArray[np.float64],
     total_sweep_dist: float,
     n_points: int,
 ) -> NDArray[np.float64]:
@@ -301,14 +302,14 @@ def get_gate_safe_bounds(results: ResultsRegistry) -> tuple[float, float]:
 
 
 def measure_and_classify(
-    device: Any,
-    client: Any,
+    device: Device,
+    client: BaseConductorQuantum,
     gates: list[str],
-    voltages: Any,
+    voltages: NDArray[np.float64],
     measure_electrode: str,
     model: str,
     reshape: tuple[int, ...] | None = None,
-) -> tuple[np.ndarray, bool, float]:
+) -> tuple[NDArray[np.float64], bool, float]:
     """Measure current and classify result.
 
     Performs device measurement sweep and classifies the resulting current data
@@ -326,15 +327,15 @@ def measure_and_classify(
     Returns:
         Tuple of (currents, classification, score).
     """
-    _, currents = device.sweep_nd(gates, voltages.tolist(), measure_electrode)
-    currents = np.array(currents)
+    _, currents_list = device.sweep_nd(gates, voltages.tolist(), measure_electrode)
+    currents: NDArray[np.float64] = np.array(currents_list)
 
     if reshape is not None:
         currents = currents.reshape(reshape)
 
     result = client.models.execute(model=model, data=currents).output
-    classification = result["classification"]
-    score = result.get("score", 0.0)
+    classification = bool(result["classification"])
+    score = float(result.get("score") or 0.0)
 
     return currents, classification, score
 
