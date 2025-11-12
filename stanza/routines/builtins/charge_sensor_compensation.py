@@ -89,7 +89,7 @@ REFINED_STEP_MULTIPLIER = 0.5
 
 
 # Number of samples to average for each gate compensation measurement
-NUM_OF_SAMPLES_FOR_AVERAGING = 5
+NUM_OF_SAMPLES_FOR_AVERAGING = 10
 
 # ML model constants
 COULOMB_CLASSIFIER_MODEL = "coulomb-blockade-classifier-v3"
@@ -1285,7 +1285,7 @@ def run_compensation(  # pylint: disable=too-many-locals,too-many-statements
     sensor_gate_key = sensor_gates_list[sensor_plunger_index]
     new_step_size = find_sensor_peak_results["step_size"]
 
-    voltage_range = peak_spacing * 4 / PERTURBATION_DIVISOR
+    voltage_range = 0.5 * peak_spacing
     # Create symmetric voltage points around zero, excluding zero itself
     # to avoid division by zero
     half_n = PERTURBATION_DIVISOR // 2
@@ -1350,7 +1350,7 @@ def run_compensation(  # pylint: disable=too-many-locals,too-many-statements
         # Perform baseline sweep 5 times and average for better estimate
         try:
             baseline_sensitivity_voltages = []
-            for _ in range(10):
+            for _ in range(NUM_OF_SAMPLES_FOR_AVERAGING):
                 baseline_sweep_output = _single_window_sensor_plunger_sweep(
                     ctx=ctx,
                     sensor_gates_list=sensor_gates_list,
