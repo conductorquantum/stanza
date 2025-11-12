@@ -651,6 +651,7 @@ def _single_window_sensor_plunger_sweep(
 
     # Apply bias voltage to bias gate
     device.jump({bias_gate: bias_voltage}, wait_for_settling=True)
+    time.sleep(DEFAULT_SETTLING_TIME_S)
 
     # Calculate sequential sweep parameters
     min_v, max_v = sensor_plunger_range
@@ -674,8 +675,25 @@ def _single_window_sensor_plunger_sweep(
         plunger_voltages=sp_sweep_voltages,
     )
 
+    if not voltage_list:
+        raise RoutineError("Sensor sweep voltage list is empty - cannot start sweep.")
+
     # Set device to first voltage point and allow settling time to avoid current spikes
-    first_voltage_point = dict(zip(sensor_gates_list, voltage_list[0], strict=False))
+    first_voltage_point = {
+        gate: float(voltage)
+        for gate, voltage in zip(sensor_gates_list, voltage_list[0], strict=False)
+    }
+    sensor_plunger_gate = sensor_gates_list[sensor_plunger_index]
+    first_plunger_voltage = first_voltage_point[sensor_plunger_gate]
+    if not np.isclose(first_plunger_voltage, sp_sweep_voltages[0]):
+        logger.debug(
+            "Adjusting first voltage point for %s from %.6fV to %.6fV to match sweep start",
+            sensor_plunger_gate,
+            first_plunger_voltage,
+            sp_sweep_voltages[0],
+        )
+        first_voltage_point[sensor_plunger_gate] = float(sp_sweep_voltages[0])
+
     device.jump(first_voltage_point, wait_for_settling=True)
     time.sleep(DEFAULT_SETTLING_TIME_S)
 
@@ -763,7 +781,7 @@ def many_window_barrier_sweep(  # pylint: disable=too-many-locals,too-many-state
 
     # Apply bias voltage to bias gate
     device.jump({bias_gate: bias_voltage}, wait_for_settling=True)
-
+    time.sleep(DEFAULT_SETTLING_TIME_S)
     # Calculate sequential sweep parameters
     min_v, max_v = sensor_plunger_range
 
@@ -936,7 +954,7 @@ def find_sensor_peak(  # pylint: disable=too-many-locals
     measure_electrode: str,
     bias_gate: str,
     bias_voltage: float,
-    zero_control_side: bool = True,
+    zero_control_side: bool = False,
     session: LoggerSession | None = None,
     **kwargs: Any,  # pylint: disable=unused-argument
 ) -> dict[str, Any]:
@@ -1210,7 +1228,7 @@ def run_compensation(  # pylint: disable=too-many-locals,too-many-statements
     measure_electrode: str,
     bias_gate: str,
     bias_voltage: float,
-    zero_control_side: bool = True,
+    zero_control_side: bool = False,
     gates_to_compensate: list[str] | None = None,
     session: LoggerSession | None = None,
     **kwargs: Any,  # pylint: disable=unused-argument
@@ -1285,7 +1303,7 @@ def run_compensation(  # pylint: disable=too-many-locals,too-many-statements
     sensor_gate_key = sensor_gates_list[sensor_plunger_index]
     new_step_size = find_sensor_peak_results["step_size"]
 
-    voltage_range = 0.5 * peak_spacing
+    voltage_range = 0.8 * peak_spacing
     # Create symmetric voltage points around zero, excluding zero itself
     # to avoid division by zero
     half_n = PERTURBATION_DIVISOR // 2
@@ -1295,6 +1313,7 @@ def run_compensation(  # pylint: disable=too-many-locals,too-many-statements
             np.linspace(voltage_range / half_n, voltage_range, half_n),
         ]
     )
+    rng = np.random.default_rng()
 
     # Get non-reservoir gates from control side
     # Apply filter_gates_by_group to honor device exclusions
@@ -1346,7 +1365,7 @@ def run_compensation(  # pylint: disable=too-many-locals,too-many-statements
     try:
         # Set control side gates to baseline state
         device.jump(baseline_control_state, wait_for_settling=True)
-
+        time.sleep(DEFAULT_SETTLING_TIME_S)
         # Perform baseline sweep 5 times and average for better estimate
         try:
             baseline_sensitivity_voltages = []
@@ -1379,62 +1398,108 @@ def run_compensation(  # pylint: disable=too-many-locals,too-many-statements
         compensation_gradients_dict = {}
         per_gate_details = {}  # Store detailed arrays for each gate
         for gate in control_non_reservoir_gates:
-            peak_positions_list: list[float] = []  # Reset for each gate
-            counter = 0
-            for voltage_difference in voltage_differences:
-                counter += 1
+            num_deltas = len(voltage_differences)
+            measurement_indices = np.repeat(
+                np.arange(num_deltas, dtype=int), NUM_OF_SAMPLES_FOR_AVERAGING
+            )
+            rng.shuffle(measurement_indices)
+            per_delta_measurements: dict[int, list[float]] = {
+                idx: [] for idx in range(num_deltas)
+            }
+            measurement_voltage_sequence: list[float] = []
+            measurement_samples: list[dict[str, float]] = []
+
+            total_measurements = len(measurement_indices)
+            for counter, delta_index in enumerate(measurement_indices, start=1):
+                voltage_difference = float(voltage_differences[delta_index])
+                measurement_voltage_sequence.append(voltage_difference)
                 print(
-                    f"Voltage difference {counter} of {len(voltage_differences)} for gate {gate}"
+                    f"Measurement {counter} of {total_measurements} for gate {gate}: "
+                    f"{voltage_difference:+.6f} V"
                 )
+
                 # Apply voltage perturbation relative to baseline
                 device_state = baseline_control_state.copy()
                 device_state[gate] = baseline_control_state[gate] + voltage_difference
-                # Apply control side voltage changes to device
                 device.jump(device_state, wait_for_settling=True)
+                time.sleep(DEFAULT_SETTLING_TIME_S)
 
-                # Repeat sensor plunger sweep 5 times and average results
-                sensitivity_voltages = []
-                for i in range(NUM_OF_SAMPLES_FOR_AVERAGING):
-                    print(
-                        f"Iteration {i} of {NUM_OF_SAMPLES_FOR_AVERAGING} for gate {gate}"
+                # Single sensor plunger sweep for this sample
+                iteration_sweep_output = _single_window_sensor_plunger_sweep(
+                    ctx=ctx,
+                    sensor_gates_list=sensor_gates_list,
+                    sensor_plunger_range=narrowed_sensor_plunger_range,
+                    mean_reservoir_saturation_voltage=mean_reservoir_saturation_voltage,
+                    sensor_plunger_index=sensor_plunger_index,
+                    step_size=new_step_size,
+                    measure_electrode=measure_electrode,
+                    bias_gate=bias_gate,
+                    bias_voltage=bias_voltage,
+                    session=session,
+                )
+
+                best_peak = iteration_sweep_output.best_peak
+                sensitivity_voltage = float(best_peak.sensitivity_voltage)
+                per_delta_measurements[delta_index].append(sensitivity_voltage)
+                # Log per-sample deltas explicitly (with clear names + aliases)
+                peak_shift = float(sensitivity_voltage - reference_max_gradient_voltage)
+                sample_record = {
+                    # Plunger delta (control gate change relative to baseline)
+                    "control_delta": voltage_difference,
+                    "delta_plunger": voltage_difference,  # alias for clarity
+                    # Peak location at this sample and its delta vs baseline
+                    "peak_position": sensitivity_voltage,
+                    "peak_shift": peak_shift,
+                    "delta_peak": peak_shift,  # alias for clarity
+                }
+                measurement_samples.append(sample_record)
+
+                # Emit per-sample analysis immediately so each measurement is logged in real time
+                if session:
+                    session.log_analysis(
+                        name=f"compensation_measurement_sample_{gate}",
+                        data={
+                            "gate": gate,
+                            "counter": counter,
+                            "total_measurements": total_measurements,
+                            **sample_record,
+                        },
                     )
-                    # Do sensor plunger sweep with narrowed range
-                    iteration_sweep_output = _single_window_sensor_plunger_sweep(
-                        ctx=ctx,
-                        sensor_gates_list=sensor_gates_list,
-                        sensor_plunger_range=narrowed_sensor_plunger_range,
-                        mean_reservoir_saturation_voltage=mean_reservoir_saturation_voltage,
-                        sensor_plunger_index=sensor_plunger_index,
-                        step_size=new_step_size,
-                        measure_electrode=measure_electrode,
-                        bias_gate=bias_gate,
-                        bias_voltage=bias_voltage,
-                        session=session,
+
+            peak_positions = np.empty_like(voltage_differences, dtype=np.float64)
+            for idx in range(num_deltas):
+                measurements = per_delta_measurements[idx]
+                if len(measurements) != NUM_OF_SAMPLES_FOR_AVERAGING:
+                    raise RoutineError(
+                        "Incomplete measurement set: expected "
+                        f"{NUM_OF_SAMPLES_FOR_AVERAGING} samples for voltage difference "
+                        f"{voltage_differences[idx]:+.6f} V, got {len(measurements)}"
                     )
-                    # Track this iteration's sensitivity voltage
-                    # (optimal sensing point at max gradient)
-                    best_peak = iteration_sweep_output.best_peak
-                    sensitivity_voltages.append(best_peak.sensitivity_voltage)
-
-                # Take average of 5 measurements
-                avg_sensitivity_voltage = float(np.mean(sensitivity_voltages))
-                peak_positions_list.append(avg_sensitivity_voltage)
-
-            peak_positions = np.array(peak_positions_list)
+                peak_positions[idx] = float(np.mean(measurements))
             peak_positions_difference = peak_positions - reference_max_gradient_voltage
-            # Keep per-point gradients for diagnostics, but use least squares for the
-            # actual gradient estimate to avoid noise amplification near zero deltas.
+            # Keep per-point gradients for diagnostics, but use least squares with a
+            # free intercept to avoid noise amplification and absorb slow drift.
             per_point_gradients = peak_positions_difference / voltage_differences
 
-            denominator = float(np.dot(voltage_differences, voltage_differences))
-            if denominator == 0:
+            if np.allclose(voltage_differences, voltage_differences[0]):
                 raise RoutineError(
-                    "Cannot compute compensation gradient: voltage_differences sum to 0"
+                    "Cannot compute compensation gradient: voltage_differences are identical"
                 )
-            least_squares_gradient = float(
-                np.dot(voltage_differences, peak_positions_difference) / denominator
-            )
 
+            design_matrix = np.column_stack(
+                (voltage_differences, np.ones_like(voltage_differences))
+            )
+            try:
+                least_squares_gradient, drift_intercept = np.linalg.lstsq(
+                    design_matrix, peak_positions_difference, rcond=None
+                )[0]
+            except np.linalg.LinAlgError as exc:
+                raise RoutineError(
+                    "Failed to compute compensation gradient: singular fit matrix"
+                ) from exc
+
+            least_squares_gradient = float(least_squares_gradient)
+            drift_intercept = float(drift_intercept)
             compensation_gradients_dict[gate] = least_squares_gradient
 
             # Store detailed arrays for this gate for later analysis/logging
@@ -1443,6 +1508,7 @@ def run_compensation(  # pylint: disable=too-many-locals,too-many-statements
                 "peak_positions_difference": peak_positions_difference,
                 "per_point_gradients": per_point_gradients,
                 "least_squares_gradient": least_squares_gradient,
+                "drift_intercept": drift_intercept,
                 "mean_per_point_gradient": float(np.mean(per_point_gradients)),
                 "mean_gradient": least_squares_gradient,
                 "peak_vs_gate_deltas": [
@@ -1458,11 +1524,14 @@ def run_compensation(  # pylint: disable=too-many-locals,too-many-statements
                         strict=False,
                     )
                 ],
+                "measurement_voltage_sequence": list(measurement_voltage_sequence),
+                "measurement_samples": measurement_samples,
             }
 
             # Reset this gate back to baseline before moving to next gate
             reset_state = {gate: baseline_control_state[gate]}
             device.jump(reset_state, wait_for_settling=True)
+            time.sleep(DEFAULT_SETTLING_TIME_S)
 
         logger.info("Compensation gradients: %s", compensation_gradients_dict)
 
@@ -1482,9 +1551,19 @@ def run_compensation(  # pylint: disable=too-many-locals,too-many-statements
                         ].tolist(),
                         "per_point_gradients": details["per_point_gradients"].tolist(),
                         "least_squares_gradient": details["least_squares_gradient"],
+                        "drift_intercept": details["drift_intercept"],
                         "mean_per_point_gradient": details["mean_per_point_gradient"],
                         "peak_vs_gate_deltas": details["peak_vs_gate_deltas"],
+                        "measurement_voltage_sequence": details[
+                            "measurement_voltage_sequence"
+                        ],
+                        "measurement_samples": details["measurement_samples"],
                         "voltage_differences": voltage_differences.tolist(),
+                        "num_deltas": len(voltage_differences),
+                        "samples_per_delta": NUM_OF_SAMPLES_FOR_AVERAGING,
+                        "total_samples": int(
+                            len(voltage_differences) * NUM_OF_SAMPLES_FOR_AVERAGING
+                        ),
                     },
                 )
 
