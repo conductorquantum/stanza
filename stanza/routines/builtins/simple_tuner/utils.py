@@ -110,43 +110,6 @@ def generate_random_sweep(
     return SweepGeometry(start, end, direction, angle, total_distance)
 
 
-def build_voltage_array(
-    sweep: SweepGeometry,
-    num_points: int,
-    gates: list[str],
-    gate_idx: GateIndices,
-    reservoir_voltages: dict[str, float],
-    barrier_voltages: dict[str, float],
-) -> NDArray[np.float64]:
-    """Construct full voltage array with sweep and fixed gate voltages.
-
-    Args:
-        sweep: Sweep geometry configuration.
-        num_points: Number of points in sweep.
-        gates: List of all gate names.
-        gate_idx: Indices for each gate type.
-        reservoir_voltages: Fixed voltages for reservoir gates.
-        barrier_voltages: Fixed voltages for barrier gates.
-
-    Returns:
-        (num_points, num_gates) array of voltages.
-    """
-    sweep_voltages = generate_linear_sweep(
-        sweep.start, sweep.direction, sweep.total_distance, num_points
-    )
-
-    voltages = np.zeros((num_points, len(gates)))
-    voltages[:, gate_idx.plunger] = sweep_voltages
-
-    # Vectorized assignment for fixed voltages
-    for idx in gate_idx.reservoir:
-        voltages[:, idx] = reservoir_voltages[gates[idx]]
-    for idx in gate_idx.barrier:
-        voltages[:, idx] = barrier_voltages[gates[idx]]
-
-    return voltages
-
-
 def build_full_voltages(
     sweep_voltages: NDArray[np.float64],
     gates: list[str],

@@ -313,6 +313,37 @@ class TestRunDqdSearchFixedBarriers:
         assert "dqd_squares" in result
 
 
+class TestRunDqdSearchFixedBarriersEdgeCases:
+    def test_handles_all_squares_visited(self, characterization_context):
+        result = run_dqd_search_fixed_barriers(
+            characterization_context,
+            gates=GATES,
+            measure_electrode="P1",
+            current_trace_points=16,
+            low_res_csd_points=8,
+            high_res_csd_points=16,
+            max_samples=1000,
+            num_dqds_for_exit=100,
+            seed=42,
+        )
+        assert "dqd_squares" in result
+
+    def test_skips_out_of_bounds_squares(self, characterization_context):
+        result = run_dqd_search_fixed_barriers(
+            characterization_context,
+            gates=GATES,
+            measure_electrode="P1",
+            current_trace_points=16,
+            low_res_csd_points=8,
+            high_res_csd_points=16,
+            max_samples=2,
+            num_dqds_for_exit=1,
+            barrier_voltages={"B0": 15.0, "B1": 15.0, "B2": 15.0},
+            seed=42,
+        )
+        assert "dqd_squares" in result
+
+
 class TestRunDqdSearch:
     def test_returns_barrier_sweep_results(self, characterization_context):
         result = run_dqd_search(
@@ -389,3 +420,59 @@ class TestRunDqdSearch:
             )
             assert isinstance(point["outer_barrier_voltage"], float)
             assert isinstance(point["inner_barrier_voltage"], float)
+
+
+class TestUtilsErrorPaths:
+    def test_get_global_turn_on_voltage_missing(self):
+        from stanza.routines.builtins.simple_tuner.utils import (
+            get_global_turn_on_voltage,
+        )
+
+        results = ResultsRegistry()
+        results.store("global_accumulation", None)
+        with pytest.raises(ValueError, match="Global turn on voltage not found"):
+            get_global_turn_on_voltage(results)
+
+    def test_get_voltages_missing_characterization(self):
+        from stanza.routines.builtins.simple_tuner.utils import get_voltages
+
+        results = ResultsRegistry()
+        results.store("reservoir_characterization", {})
+        results.store("finger_gate_characterization", {})
+        with pytest.raises(ValueError, match="Gate characterization results not found"):
+            get_voltages(GATES, "saturation_voltage", results)
+
+    def test_get_gate_safe_bounds_missing(self):
+        from stanza.routines.builtins.simple_tuner.utils import get_gate_safe_bounds
+
+        results = ResultsRegistry()
+        with pytest.raises(ValueError, match="Leakage test results not found"):
+            get_gate_safe_bounds(results)
+
+
+class TestGridSearchWeightedSelection:
+    def test_select_next_square_random_fallback(self):
+        from stanza.routines.builtins.simple_tuner.grid_search import (
+            SearchSquare,
+            select_next_square,
+        )
+
+        visited = [
+            SearchSquare(
+                grid_idx=0,
+                current_trace_currents=np.array([1.0]),
+                current_trace_voltages=np.array([[0.0, 0.0]]),
+                current_trace_score=0.5,
+                current_trace_classification=True,
+                low_res_csd_currents=None,
+                low_res_csd_voltages=None,
+                low_res_csd_score=0.0,
+                low_res_csd_classification=False,
+                high_res_csd_currents=None,
+                high_res_csd_voltages=None,
+                high_res_csd_score=0.0,
+                high_res_csd_classification=False,
+            )
+        ]
+        result = select_next_square(visited, [], 3, 3, False)
+        assert result is not None and 0 < result < 9
