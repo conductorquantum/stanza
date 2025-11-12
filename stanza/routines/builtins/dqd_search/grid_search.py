@@ -42,11 +42,11 @@ class SearchSquare:
     def is_dqd(self) -> bool:
         return self.high_res_csd_classification
 
+    def to_list(self, arr: NDArray[np.float64] | None) -> list[float] | None:
+        return arr.tolist() if arr is not None else None
+
     def to_dict(self) -> dict[str, Any]:
         """Convert to JSON-serializable dictionary."""
-
-        def _to_list(arr: NDArray[np.float64] | None) -> list[float] | None:
-            return arr.tolist() if arr is not None else None
 
         return {
             "grid_idx": self.grid_idx,
@@ -54,12 +54,12 @@ class SearchSquare:
             "current_trace_voltages": self.current_trace_voltages.tolist(),
             "current_trace_score": self.current_trace_score,
             "current_trace_classification": self.current_trace_classification,
-            "low_res_csd_currents": _to_list(self.low_res_csd_currents),
-            "low_res_csd_voltages": _to_list(self.low_res_csd_voltages),
+            "low_res_csd_currents": self.to_list(self.low_res_csd_currents),
+            "low_res_csd_voltages": self.to_list(self.low_res_csd_voltages),
             "low_res_csd_score": self.low_res_csd_score,
             "low_res_csd_classification": self.low_res_csd_classification,
-            "high_res_csd_currents": _to_list(self.high_res_csd_currents),
-            "high_res_csd_voltages": _to_list(self.high_res_csd_voltages),
+            "high_res_csd_currents": self.to_list(self.high_res_csd_currents),
+            "high_res_csd_voltages": self.to_list(self.high_res_csd_voltages),
             "high_res_csd_score": self.high_res_csd_score,
             "high_res_csd_classification": self.high_res_csd_classification,
             "total_score": self.total_score,
