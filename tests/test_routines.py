@@ -1,6 +1,10 @@
+from pathlib import Path
+from unittest.mock import Mock, patch
+
 import pytest
 import yaml
 
+from stanza.context import StanzaSession
 from stanza.logger.data_logger import DataLogger
 from stanza.models import DeviceConfig
 from stanza.registry import ResourceRegistry, ResultsRegistry
@@ -675,6 +679,83 @@ class TestRoutineRunnerLoggerIntegration:
         assert session_ids_seen == ["first_routine", "second_routine"]
         assert logger.current_session is None
 
+    def test_runner_updates_logger_base_dir_with_active_session_changes(
+        self, registry_fixture, simple_routines_yaml, tmp_path, monkeypatch
+    ):
+        """Ensure runner re-syncs logger base dir when active session changes."""
+
+        @routine
+        def routine1(ctx, param1, session=None):
+            assert param1 == "value1"
+            assert session is not None
+            return "ok"
+
+        device_config = DeviceConfig.model_validate(
+            yaml.safe_load(simple_routines_yaml)
+        )
+
+        monkeypatch.chdir(tmp_path)
+        session_one = tmp_path / "session_one"
+        session_two = tmp_path / "session_two"
+        session_one.mkdir()
+        session_two.mkdir()
+
+        mock_device = Mock()
+        mock_device.name = "device"
+
+        with patch("stanza.routines.core.device_from_config", return_value=mock_device):
+            runner = RoutineRunner(configs=[device_config])
+
+        logger = runner.resources.logger
+        logger_dir_name = DataLogger._slugify(mock_device.name)
+
+        StanzaSession.set_active_session(session_one)
+        runner.run("routine1")
+        assert logger.base_directory == session_one / logger_dir_name
+        assert (logger.base_directory / "routine1").exists()
+
+        StanzaSession.set_active_session(session_two)
+        runner.run("routine1")
+        assert logger.base_directory == session_two / logger_dir_name
+        assert (session_two / logger_dir_name / "routine1").exists()
+
+    def test_runner_respects_explicit_base_dir_override(
+        self, registry_fixture, simple_routines_yaml, tmp_path, monkeypatch
+    ):
+        """Ensure explicit base-dir override wins over session settings."""
+
+        @routine
+        def routine1(ctx, param1, session=None):
+            assert param1 == "value1"
+            assert session is not None
+            return "ok"
+
+        device_config = DeviceConfig.model_validate(
+            yaml.safe_load(simple_routines_yaml)
+        )
+
+        custom_dir = tmp_path / "custom_root"
+        other_session = tmp_path / "other_session"
+        other_session.mkdir()
+
+        mock_device = Mock()
+        mock_device.name = "device"
+
+        monkeypatch.chdir(tmp_path)
+
+        with patch("stanza.routines.core.device_from_config", return_value=mock_device):
+            runner = RoutineRunner(configs=[device_config], base_dir=custom_dir)
+
+        logger = runner.resources.logger
+        logger_dir_name = DataLogger._slugify(mock_device.name)
+
+        StanzaSession.set_active_session(other_session)
+        runner.run("routine1")
+
+        assert logger.base_directory == custom_dir / logger_dir_name
+        assert (logger.base_directory / "routine1").exists()
+        assert not (other_session / logger_dir_name).exists()
+
     def test_initialization_with_configs(self, registry_fixture):
         """Test initializing RoutineRunner with device and logger resources."""
         device = MockResource("device")
@@ -734,7 +815,7 @@ class TestRoutineRunnerLoggerIntegration:
                     assert runner.configs["routine2"]["param2"] == "value2"
 
                     mock_logger_class.assert_called_once_with(
-                        name="logger", routine_name="device", base_dir="./data"
+                        name="logger", routine_name="device", base_dir=Path("./data")
                     )
 
 

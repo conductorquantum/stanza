@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import webbrowser
 from datetime import datetime
 from pathlib import Path
@@ -99,6 +100,53 @@ def status() -> None:
     if metadata:
         created = datetime.fromtimestamp(metadata["created_at"])
         click.echo(f"  Created: {created.strftime('%Y-%m-%d %H:%M:%S')}")
+
+
+@cli.command("delete-session", short_help="Delete the current active session.")
+@click.option(
+    "--force",
+    is_flag=True,
+    help="Delete without confirmation prompt.",
+)
+@click.option(
+    "--keep-data",
+    is_flag=True,
+    help="Only clear the active session pointer without deleting files.",
+)
+def delete_session(force: bool, keep_data: bool) -> None:
+    """Delete the active session directory or clear the pointer."""
+    active_session = StanzaSession.get_active_session()
+
+    if active_session is None:
+        click.echo("No active session to delete")
+        return
+
+    if keep_data:
+        StanzaSession.clear_active_session()
+        click.echo(f"✓ Active session cleared (data kept at {active_session})")
+        return
+
+    if not active_session.exists():
+        StanzaSession.clear_active_session()
+        click.echo("Active session directory was not found. Pointer cleared.")
+        return
+
+    if not force:
+        prompt = f"This will permanently delete '{active_session}' and all contents. Continue?"
+        if not click.confirm(prompt, default=False):
+            click.echo("Deletion cancelled.")
+            return
+
+    try:
+        shutil.rmtree(active_session)
+    except Exception as e:
+        click.echo(f"✗ Failed to delete session directory: {e}", err=True)
+        raise click.Abort() from e
+
+    StanzaSession.clear_active_session()
+
+    click.echo(f"✓ Deleted session directory: {active_session}")
+    click.echo("  Active session cleared.")
 
 
 def _get_config_file() -> Path:
