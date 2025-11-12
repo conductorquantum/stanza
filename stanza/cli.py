@@ -132,9 +132,7 @@ def delete_session(force: bool, keep_data: bool) -> None:
         return
 
     if not force:
-        prompt = (
-            f"This will permanently delete '{active_session}' and all contents. Continue?"
-        )
+        prompt = f"This will permanently delete '{active_session}' and all contents. Continue?"
         if not click.confirm(prompt, default=False):
             click.echo("Deletion cancelled.")
             return
