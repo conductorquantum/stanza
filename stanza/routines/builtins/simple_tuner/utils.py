@@ -1,9 +1,11 @@
 from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
 from numpy.typing import NDArray
 
 from stanza.device import Device
+from stanza.logger.session import LoggerSession
 from stanza.models import GateType
 from stanza.registry import ResultsRegistry
 
@@ -32,11 +34,11 @@ def build_gate_indices(gates: list[str], device: Device) -> GateIndices:
     """Extract indices for each gate type from the gate list.
 
     Args:
-        gates: List of gate electrode names
-        device: Device instance with get_gate_by_type method
+        gates: List of gate electrode names.
+        device: Device instance with get_gate_by_type method.
 
     Returns:
-        GateIndices with plunger, reservoir, and barrier indices
+        GateIndices with plunger, reservoir, and barrier indices.
     """
     plunger_gates = device.get_gates_by_type(GateType.PLUNGER)
     reservoir_gates = device.get_gates_by_type(GateType.RESERVOIR)
@@ -58,13 +60,13 @@ def generate_linear_sweep(
     """Generate evenly-spaced points along a line segment.
 
     Args:
-        start_point: (d,) array with starting coordinates
-        direction: (d,) array with normalized direction vector
-        total_sweep_dist: The total sweep distance
-        n_points: The number of points in the trace
+        start_point: (d,) array with starting coordinates.
+        direction: (d,) array with normalized direction vector.
+        total_sweep_dist: Total sweep distance.
+        n_points: Number of points in the trace.
 
     Returns:
-        (n_points, d) array of coordinates along the line
+        (n_points, d) array of coordinates along the line.
     """
     t = np.linspace(0, total_sweep_dist, n_points)
     return start_point + np.outer(t, direction)
@@ -79,13 +81,13 @@ def generate_random_sweep(
     """Generate random sweep that stays within bounds.
 
     Args:
-        x_bounds: (min, max) voltage bounds for X axis
-        y_bounds: (min, max) voltage bounds for Y axis
-        scale: Voltage spacing per step
-        num_points: Number of points in sweep
+        x_bounds: (min, max) voltage bounds for X axis.
+        y_bounds: (min, max) voltage bounds for Y axis.
+        scale: Voltage spacing per step.
+        num_points: Number of points in sweep.
 
     Returns:
-        SweepGeometry if sweep stays in bounds, None otherwise
+        SweepGeometry if sweep stays in bounds, None otherwise.
     """
     angle = np.random.uniform(0, 2 * np.pi)
     direction = np.array([np.cos(angle), np.sin(angle)])
@@ -119,15 +121,15 @@ def build_voltage_array(
     """Construct full voltage array with sweep and fixed gate voltages.
 
     Args:
-        sweep: Sweep geometry configuration
-        num_points: Number of points in sweep
-        gates: List of all gate names
-        gate_idx: Indices for each gate type
-        reservoir_voltages: Fixed voltages for reservoir gates
-        barrier_voltages: Fixed voltages for barrier gates
+        sweep: Sweep geometry configuration.
+        num_points: Number of points in sweep.
+        gates: List of all gate names.
+        gate_idx: Indices for each gate type.
+        reservoir_voltages: Fixed voltages for reservoir gates.
+        barrier_voltages: Fixed voltages for barrier gates.
 
     Returns:
-        (num_points, num_gates) array of voltages
+        (num_points, num_gates) array of voltages.
     """
     sweep_voltages = generate_linear_sweep(
         sweep.start, sweep.direction, sweep.total_distance, num_points
@@ -150,44 +152,41 @@ def build_full_voltages(
     gates: list[str],
     gate_idx: GateIndices,
     transition_voltages: dict[str, float],
-    cutoff_voltages: dict[str, float],
     saturation_voltages: dict[str, float],
     barrier_voltages: dict[str, float] | None = None,
 ) -> NDArray[np.float64]:
     """Construct full voltage array from plunger sweep voltages.
 
-    Works with arbitrary-dimensional sweep arrays (1D, 2D, 3D, etc).
+    Works with arbitrary-dimensional sweep arrays (1D, 2D, 3D, etc). Applies
+    fixed voltages to reservoir and barrier gates based on characterization data.
 
     Args:
-        sweep_voltages: (..., 2) array of plunger voltages
-        gates: List of all gate names
-        gate_idx: Indices for each gate type
-        saturation_voltages: Fixed saturation voltages for all gates
-        barrier_voltages: Optional explicit barrier voltages. If None, uses default logic.
+        sweep_voltages: (..., 2) array of plunger voltages.
+        gates: List of all gate names.
+        gate_idx: Indices for each gate type.
+        transition_voltages: Transition voltages for all gates.
+        saturation_voltages: Saturation voltages for all gates.
+        barrier_voltages: Optional explicit barrier voltages (overrides defaults).
 
     Returns:
-        (..., num_gates) array of voltages
+        (..., num_gates) array of voltages.
     """
-    shape = sweep_voltages.shape[:-1]  # All dims except last (plunger coords)
+    shape = sweep_voltages.shape[:-1]
     voltages = np.zeros(shape + (len(gates),))
 
-    # Plunger voltages
     voltages[..., gate_idx.plunger] = sweep_voltages
 
-    # Fixed voltages
     for idx in gate_idx.reservoir:
         voltages[..., idx] = saturation_voltages[gates[idx]]
 
-    # Barrier voltages - use override if provided, otherwise default logic
-    if barrier_voltages is not None:
+    if barrier_voltages:
         for idx in gate_idx.barrier:
             voltages[..., idx] = barrier_voltages[gates[idx]]
     else:
+        # Default: middle barrier at transition, outer barriers at saturation
         for i, idx in enumerate(gate_idx.barrier):
-            if i == 1:
-                voltages[..., idx] = transition_voltages[gates[idx]]
-            else:
-                voltages[..., idx] = saturation_voltages[gates[idx]]
+            voltage = transition_voltages if i == 1 else saturation_voltages
+            voltages[..., idx] = voltage[gates[idx]]
 
     return voltages
 
@@ -198,11 +197,11 @@ def check_voltages_in_bounds(
     """Check if all voltages are within safe bounds.
 
     Args:
-        voltages: Array of voltages of any shape (..., num_gates)
-        safe_bounds: (min, max) safe voltage bounds
+        voltages: Array of voltages of any shape (..., num_gates).
+        safe_bounds: (min, max) safe voltage bounds.
 
     Returns:
-        True if all voltages are within bounds, False otherwise
+        True if all voltages are within bounds, False otherwise.
     """
     min_voltage, max_voltage = safe_bounds
     return bool(np.all((voltages >= min_voltage) & (voltages <= max_voltage)))
@@ -215,11 +214,11 @@ def compute_peak_spacings(
     """Calculate inter-peak spacings in voltage space.
 
     Args:
-        peak_indices: Indices of detected peaks
-        sweep_voltages: (num_points, 2) array of voltage coordinates
+        peak_indices: Indices of detected peaks.
+        sweep_voltages: (num_points, 2) array of voltage coordinates.
 
     Returns:
-        Array of inter-peak spacings, or None if fewer than 3 peaks
+        Array of inter-peak spacings, or None if fewer than 3 peaks.
     """
     if len(peak_indices) < 3:
         return None
@@ -235,17 +234,45 @@ def compute_peak_spacings(
 
 
 def get_global_turn_on_voltage(results: ResultsRegistry) -> float:
-    """Get global turn voltage from results.
+    """Get global turn-on voltage from results.
 
     Args:
-        results: ResultsRegistry instance
+        results: ResultsRegistry instance.
 
     Returns:
-        Global turn voltage
+        Global turn-on voltage.
+
+    Raises:
+        ValueError: If global accumulation results not found.
     """
     if not (res := results["global_accumulation"]):
         raise ValueError("Global turn on voltage not found")
     return float(res["global_turn_on_voltage"])
+
+
+def _get_gate_characterization(results: ResultsRegistry) -> dict[str, dict[str, float]]:
+    """Get combined gate characterization results.
+
+    Args:
+        results: ResultsRegistry instance.
+
+    Returns:
+        Combined dict of reservoir and finger gate characterization.
+
+    Raises:
+        ValueError: If characterization results not found.
+    """
+    reservoir = results.get("reservoir_characterization", {}).get(
+        "reservoir_characterization"
+    )
+    finger = results.get("finger_gate_characterization", {}).get(
+        "finger_gate_characterization"
+    )
+
+    if not reservoir or not finger:
+        raise ValueError("Gate characterization results not found")
+
+    return {**reservoir, **finger}
 
 
 def get_voltages(
@@ -256,22 +283,15 @@ def get_voltages(
     """Get voltages for all gates.
 
     Args:
-        gates: List of gate names
-        key: Key to extract from characterization results, one of ["saturation_voltage", "cutoff_voltage", "transition_voltage"]
-        results: ResultsRegistry instance
+        gates: List of gate names.
+        key: Key to extract ("saturation_voltage", "cutoff_voltage", or "transition_voltage").
+        results: ResultsRegistry instance.
 
     Returns:
-        Dict mapping gate names to voltages
+        Dict mapping gate names to voltages.
     """
-    if not (
-        res := results.get("reservoir_characterization")["reservoir_characterization"]
-    ) or not (
-        fg := results.get("finger_gate_characterization")[
-            "finger_gate_characterization"
-        ]
-    ):
-        raise ValueError("Reservoir and finger gate characterization results not found")
-    return {g: {**res, **fg}[g][key] for g in gates}
+    characterization = _get_gate_characterization(results)
+    return {g: characterization[g][key] for g in gates}
 
 
 def get_plunger_gate_bounds(
@@ -280,39 +300,135 @@ def get_plunger_gate_bounds(
     """Get plunger bounds for all plunger gates.
 
     Args:
-        plunger_gates: List of plunger gate names
-        results: ResultsRegistry instance
+        plunger_gates: List of plunger gate names.
+        results: ResultsRegistry instance.
 
     Returns:
-        Dict mapping plunger gate names to bounds
+        Dict mapping plunger gate names to (min, max) voltage bounds.
     """
-    if not (
-        res := results.get("reservoir_characterization")["reservoir_characterization"]
-    ) or not (
-        fg := results.get("finger_gate_characterization")[
-            "finger_gate_characterization"
-        ]
-    ):
-        raise ValueError("Reservoir and finger gate characterization results not found")
-    v = {**res, **fg}
-    return {
-        g: tuple(sorted([v[g]["saturation_voltage"], v[g]["cutoff_voltage"]]))
-        for g in plunger_gates
-    }
+    characterization = _get_gate_characterization(results)
+    bounds: dict[str, tuple[float, float]] = {}
+    for g in plunger_gates:
+        voltages = sorted(
+            [
+                characterization[g]["saturation_voltage"],
+                characterization[g]["cutoff_voltage"],
+            ]
+        )
+        bounds[g] = (voltages[0], voltages[1])
+    return bounds
 
 
-def get_gate_safe_bounds(
-    _gates: list[str], results: ResultsRegistry
-) -> tuple[float, float]:
-    """Get safe bounds for all gates.
+def get_gate_safe_bounds(results: ResultsRegistry) -> tuple[float, float]:
+    """Get safe voltage bounds.
 
     Args:
-        _gates: List of gate names (unused, kept for API consistency)
-        results: ResultsRegistry instance
+        results: ResultsRegistry instance.
 
     Returns:
-        Tuple of (min, max) safe voltage bounds
+        (min, max) safe voltage bounds.
+
+    Raises:
+        ValueError: If leakage test results not found.
     """
-    if not (res := results.get("leakage_test")):
+    leakage = results.get("leakage_test")
+    if not leakage:
         raise ValueError("Leakage test results not found")
-    return (res["min_safe_voltage_bound"], res["max_safe_voltage_bound"])
+    return (leakage["min_safe_voltage_bound"], leakage["max_safe_voltage_bound"])
+
+
+def measure_and_classify(
+    device: Any,
+    client: Any,
+    gates: list[str],
+    voltages: Any,
+    measure_electrode: str,
+    model: str,
+    reshape: tuple[int, ...] | None = None,
+) -> tuple[np.ndarray, bool, float]:
+    """Measure current and classify result.
+
+    Performs device measurement sweep and classifies the resulting current data
+    using a specified ML model.
+
+    Args:
+        device: Device instance.
+        client: Models client.
+        gates: Gate electrode names.
+        voltages: Voltage array.
+        measure_electrode: Current measurement electrode.
+        model: Classification model name.
+        reshape: Optional reshape dimensions for output.
+
+    Returns:
+        Tuple of (currents, classification, score).
+    """
+    _, currents = device.sweep_nd(gates, voltages.tolist(), measure_electrode)
+    currents = np.array(currents)
+
+    if reshape is not None:
+        currents = currents.reshape(reshape)
+
+    result = client.models.execute(model=model, data=currents).output
+    classification = result["classification"]
+    score = result.get("score", 0.0)
+
+    return currents, classification, score
+
+
+def log_measurement(
+    session: LoggerSession | None,
+    name: str,
+    measurement_id: str,
+    data: dict[str, Any],
+    metadata: dict[str, Any],
+    routine_name: str,
+) -> None:
+    """Log measurement data to session.
+
+    Args:
+        session: Logger session instance (optional).
+        name: Measurement name.
+        measurement_id: Unique measurement identifier.
+        data: Measurement data dict.
+        metadata: Measurement metadata dict.
+        routine_name: Name of the routine performing the measurement.
+    """
+    if session:
+        session.log_measurement(
+            name, {**data, "id": measurement_id}, metadata, routine_name
+        )
+
+
+def log_classification(
+    session: LoggerSession | None,
+    measurement_id: str,
+    measurement_type: str,
+    classification: bool,
+    score: float,
+    metadata: dict[str, Any],
+    routine_name: str,
+) -> None:
+    """Log classification result to session.
+
+    Args:
+        session: Logger session instance (optional).
+        measurement_id: Unique measurement identifier.
+        measurement_type: Type of measurement being classified.
+        classification: Classification result (True/False).
+        score: Classification confidence score.
+        metadata: Classification metadata dict.
+        routine_name: Name of the routine performing the classification.
+    """
+    if session:
+        session.log_analysis(
+            "dqd_search_classification",
+            {
+                "measurement_id": measurement_id,
+                "measurement_type": measurement_type,
+                "classification": bool(classification),
+                "score": float(score),
+            },
+            metadata,
+            routine_name,
+        )

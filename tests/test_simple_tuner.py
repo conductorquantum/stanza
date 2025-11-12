@@ -326,9 +326,9 @@ class TestRunDqdSearch:
             inner_barrier_points=2,
             num_dqds_for_exit=1,
         )
-        assert "barrier_sweep_results" in result
-        assert isinstance(result["barrier_sweep_results"], list)
-        assert len(result["barrier_sweep_results"]) > 0
+        assert "run_dqd_search" in result
+        assert isinstance(result["run_dqd_search"], list)
+        assert len(result["run_dqd_search"]) > 0
 
     def test_logs_to_session(self, characterization_context):
         session = MockLoggerSession()
@@ -358,7 +358,7 @@ class TestRunDqdSearch:
             inner_barrier_points=3,
             num_dqds_for_exit=1,
         )
-        assert len(result["barrier_sweep_results"]) >= 1
+        assert len(result["run_dqd_search"]) >= 1
 
     def test_result_structure(self, characterization_context, mock_models_client):
         mock_models_client.set_response(
@@ -376,8 +376,8 @@ class TestRunDqdSearch:
             inner_barrier_points=2,
             num_dqds_for_exit=10,
         )
-        assert len(result["barrier_sweep_results"]) == 4
-        for point in result["barrier_sweep_results"]:
+        assert len(result["run_dqd_search"]) == 4
+        for point in result["run_dqd_search"]:
             assert all(
                 k in point
                 for k in [
