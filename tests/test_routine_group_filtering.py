@@ -295,10 +295,10 @@ class TestGroupFilteringInstrumentSharing:
 class TestGroupFilteringWithLogger:
     """Tests for group filtering integration with data logger."""
 
-    def test_group_name_included_in_logger_session_path(
+    def test_group_name_not_in_logger_session_path(
         self, registry_fixture, routine_runner_with_grouped_device, tmp_path
     ):
-        """Test that group name is included in logger session directory path."""
+        """Test that group name is NOT included in logger session directory path."""
         import tempfile
 
         from stanza.logger.data_logger import DataLogger
@@ -315,22 +315,22 @@ class TestGroupFilteringWithLogger:
 
             @routine(name="test_routine")
             def test_routine(ctx: RoutineContext, session=None) -> dict:
-                # Session should have group in its ID
+                # Session should NOT have group in its ID (path), but should in metadata
                 if session:
-                    assert session.session_id == "test_routine_control"
-                    assert session.metadata.group_name == "control"
+                    assert session.session_id == "test_routine"  # No group suffix
+                    assert session.metadata.group_name == "control"  # But in metadata
                 return {}
 
             runner.run("test_routine", group="control")
 
-            # Verify directory with group suffix was created
-            session_dir = logger.base_directory / "test_routine_control"
+            # Verify directory WITHOUT group suffix was created
+            session_dir = logger.base_directory / "test_routine"
             assert session_dir.exists()
 
-    def test_different_groups_create_separate_directories(
+    def test_session_suffix_creates_separate_directories(
         self, registry_fixture, routine_runner_with_grouped_device
     ):
-        """Test that different groups create separate output directories."""
+        """Test that session_suffix creates separate output directories (not group)."""
         import tempfile
 
         from stanza.logger.data_logger import DataLogger
@@ -350,22 +350,22 @@ class TestGroupFilteringWithLogger:
                     session.log_measurement("value", {"data": 1})
                 return {}
 
-            # Run for control group
-            runner.run("test_routine", group="control")
+            # Run with session_suffix "run1"
+            runner.run("test_routine", session_suffix="run1", group="control")
 
-            # Run for sensor group
-            runner.run("test_routine", group="sensor")
+            # Run with session_suffix "run2"
+            runner.run("test_routine", session_suffix="run2", group="sensor")
 
-            # Verify separate directories exist
-            control_dir = logger.base_directory / "test_routine_control"
-            sensor_dir = logger.base_directory / "test_routine_sensor"
+            # Verify separate directories exist based on session_suffix (not group)
+            run1_dir = logger.base_directory / "test_routine_run1"
+            run2_dir = logger.base_directory / "test_routine_run2"
 
-            assert control_dir.exists()
-            assert sensor_dir.exists()
+            assert run1_dir.exists()
+            assert run2_dir.exists()
 
             # Verify both have their own data files
-            assert (control_dir / "measurement.jsonl").exists()
-            assert (sensor_dir / "measurement.jsonl").exists()
+            assert (run1_dir / "measurement.jsonl").exists()
+            assert (run2_dir / "measurement.jsonl").exists()
 
     def test_routine_without_group_creates_path_without_suffix(
         self, registry_fixture, routine_runner_with_grouped_device

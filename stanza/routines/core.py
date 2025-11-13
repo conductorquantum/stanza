@@ -272,7 +272,11 @@ class RoutineRunner:
 
         Args:
             routine_name: Name of the routine to run
-            **params: Additional parameters (will override config values)
+            **params: Additional parameters (will override config values), including:
+                - session_suffix: Optional suffix to append to session_id for unique save paths
+                                  (e.g., "OUT_A", "OUT_B"). Creates paths like "{routine_name}_{suffix}/"
+                - group: Filter device to specific gate group (does NOT affect save path)
+                - Other routine-specific parameters
 
         Returns:
             Result of the routine
@@ -287,6 +291,9 @@ class RoutineRunner:
         parent_params = self._get_parent_params(routine_name)
         config = self.configs.get(routine_name, {})
         merged_params = {**parent_params, **config, **params}
+
+        # Extract session_suffix if present (not passed to routine as parameter)
+        session_suffix = merged_params.pop("session_suffix", None)
 
         # Extract group information if present (not passed to routine as parameter)
         group_name = merged_params.pop("group", None)
@@ -310,8 +317,12 @@ class RoutineRunner:
         if data_logger is not None and hasattr(data_logger, "create_session"):
             self._update_logger_base_dir_if_needed()
             session_id = self._get_routine_path(routine_name)
+            # Append session_suffix if provided (for unique save paths)
+            if session_suffix is not None:
+                session_id = f"{session_id}_{session_suffix}"
             session = data_logger.create_session(
-                session_id=session_id, group_name=group_name
+                session_id=session_id,
+                group_name=group_name,  # stored in metadata, not path
             )
             merged_params["session"] = session
 

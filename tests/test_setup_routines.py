@@ -13,6 +13,18 @@ class MockLoggerSession:
     def __init__(self):
         self.measurements = []
         self.analyses = []
+        # Add mock metadata attribute
+        from stanza.logger.data_logger import SessionMetadata
+
+        self.metadata = SessionMetadata(
+            session_id="mock_session",
+            routine_name="mock_routine",
+            group_name=None,
+            start_time=0.0,
+            user="test_user",
+            device_config=None,
+            parameters={},
+        )
 
     def log_measurement(self, name, data):
         self.measurements.append((name, data))

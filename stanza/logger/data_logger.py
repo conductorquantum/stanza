@@ -128,15 +128,16 @@ class DataLogger:
     def create_session(
         self, session_id: str | None = None, group_name: str | None = None
     ) -> LoggerSession:
-        """Create a new logger session."""
+        """Create a new logger session.
+
+        Args:
+            session_id: Unique identifier for the session. If None, auto-generated.
+            group_name: Optional group name for metadata tracking (does NOT affect save path)
+        """
         if session_id is None:
             timestamp = str(int(time.time()))
             unique_id = str(uuid.uuid4())[:8]
             session_id = f"{self.routine_name}_{timestamp}_{unique_id}"
-
-        # Add group to session_id if provided
-        if group_name is not None:
-            session_id = f"{session_id}_{group_name}"
 
         if self.get_session(session_id) is not None:
             raise LoggingError(f"Session with ID {session_id} already exists")
