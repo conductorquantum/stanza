@@ -40,7 +40,7 @@ from stanza.routines.builtins.utils.group_handling import filter_gates_by_group
 logger = logging.getLogger(__name__)
 
 # Default settling time before sweeps to avoid current spikes
-DEFAULT_SETTLING_TIME_S = 10
+DEFAULT_SETTLING_TIME_S = 2.0
 
 
 def _calculate_compensated_voltages(
@@ -319,9 +319,9 @@ def charge_sensor_csd_readout(  # pylint: disable=too-many-locals,too-many-state
         # Apply initial voltages
         logger.info("Setting initial gate voltages...")
         device.jump(voltage_dict, wait_for_settling=True)
-
         # Apply bias voltage
         device.jump({bias_gate: bias_voltage}, wait_for_settling=True)
+        time.sleep(DEFAULT_SETTLING_TIME_S)
 
         # Allow settling time
         logger.info(
@@ -402,7 +402,7 @@ def charge_sensor_csd_readout(  # pylint: disable=too-many-locals,too-many-state
                 reset_dict[gate] = initial_control_plunger_voltages[gate]
 
             device.jump(reset_dict, wait_for_settling=True)
-            time.sleep(5)
+            time.sleep(DEFAULT_SETTLING_TIME_S)
 
             # Perform sweep
             voltage_measurements, current_measurements = device.sweep_nd(

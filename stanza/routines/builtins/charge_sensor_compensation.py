@@ -1370,7 +1370,14 @@ def run_compensation(  # pylint: disable=too-many-locals,too-many-statements
         try:
             baseline_sensitivity_voltages = []
             baseline_peak_center_voltages = []
-            for _ in range(NUM_OF_SAMPLES_FOR_AVERAGING):
+            total_baseline_measurements = NUM_OF_SAMPLES_FOR_AVERAGING
+            for baseline_idx in range(total_baseline_measurements):
+                logger.info(
+                    "Baseline measurement %d of %d for sensor plunger %s",
+                    baseline_idx + 1,
+                    total_baseline_measurements,
+                    sensor_gate_key,
+                )
                 baseline_sweep_output = _single_window_sensor_plunger_sweep(
                     ctx=ctx,
                     sensor_gates_list=sensor_gates_list,
@@ -1389,6 +1396,21 @@ def run_compensation(  # pylint: disable=too-many-locals,too-many-statements
                 baseline_peak_center_voltages.append(
                     baseline_sweep_output.best_peak.peak_voltage
                 )
+                if session:
+                    session.log_analysis(
+                        name="baseline_measurement_sample",
+                        data={
+                            "sensor_plunger_gate": sensor_gate_key,
+                            "iteration": baseline_idx + 1,
+                            "total_iterations": total_baseline_measurements,
+                            "sensitivity_voltage": float(
+                                baseline_sweep_output.best_peak.sensitivity_voltage
+                            ),
+                            "peak_center_voltage": float(
+                                baseline_sweep_output.best_peak.peak_voltage
+                            ),
+                        },
+                    )
 
             # Reference for parking (max gradient)
             reference_max_gradient_voltage = float(
