@@ -61,7 +61,7 @@ logger = logging.getLogger(__name__)
 # Configuration constants
 
 # Default settling time before sweeps to avoid current spikes
-DEFAULT_SETTLING_TIME_S = 5
+DEFAULT_SETTLING_TIME_S = 2.0
 
 # ML model input constraint: the coulomb blockade classifier model requires
 # exactly 128 points per input window for inference
@@ -1366,9 +1366,10 @@ def run_compensation(  # pylint: disable=too-many-locals,too-many-statements
         # Set control side gates to baseline state
         device.jump(baseline_control_state, wait_for_settling=True)
         time.sleep(DEFAULT_SETTLING_TIME_S)
-        # Perform baseline sweep 5 times and average for better estimate
+        # Perform baseline sweep NUM_OF_SAMPLES_FOR_AVERAGING times and average for better estimate
         try:
             baseline_sensitivity_voltages = []
+            baseline_peak_center_voltages = []
             for _ in range(NUM_OF_SAMPLES_FOR_AVERAGING):
                 baseline_sweep_output = _single_window_sensor_plunger_sweep(
                     ctx=ctx,
@@ -1385,9 +1386,17 @@ def run_compensation(  # pylint: disable=too-many-locals,too-many-statements
                 baseline_sensitivity_voltages.append(
                     baseline_sweep_output.best_peak.sensitivity_voltage
                 )
+                baseline_peak_center_voltages.append(
+                    baseline_sweep_output.best_peak.peak_voltage
+                )
 
+            # Reference for parking (max gradient)
             reference_max_gradient_voltage = float(
                 np.mean(baseline_sensitivity_voltages)
+            )
+            # Reference for gradient calculation (peak center)
+            reference_peak_center_voltage = float(
+                np.mean(baseline_peak_center_voltages)
             )
         except Exception as e:
             raise RoutineError(f"Error in baseline measurement: {str(e)}") from e
@@ -1439,18 +1448,19 @@ def run_compensation(  # pylint: disable=too-many-locals,too-many-statements
                 )
 
                 best_peak = iteration_sweep_output.best_peak
-                sensitivity_voltage = float(best_peak.sensitivity_voltage)
-                per_delta_measurements[delta_index].append(sensitivity_voltage)
+                peak_center_voltage = float(best_peak.peak_voltage)
+                per_delta_measurements[delta_index].append(peak_center_voltage)
                 # Log per-sample deltas explicitly (with clear names + aliases)
-                peak_shift = float(sensitivity_voltage - reference_max_gradient_voltage)
+                peak_shift = float(peak_center_voltage - reference_peak_center_voltage)
                 sample_record = {
                     # Plunger delta (control gate change relative to baseline)
                     "control_delta": voltage_difference,
                     "delta_plunger": voltage_difference,  # alias for clarity
-                    # Peak location at this sample and its delta vs baseline
-                    "peak_position": sensitivity_voltage,
+                    # Peak location at this sample and its delta vs baseline (using center)
+                    "peak_position": peak_center_voltage,
                     "peak_shift": peak_shift,
                     "delta_peak": peak_shift,  # alias for clarity
+                    "sensitivity_voltage": float(best_peak.sensitivity_voltage),
                 }
                 measurement_samples.append(sample_record)
 
@@ -1476,7 +1486,7 @@ def run_compensation(  # pylint: disable=too-many-locals,too-many-statements
                         f"{voltage_differences[idx]:+.6f} V, got {len(measurements)}"
                     )
                 peak_positions[idx] = float(np.mean(measurements))
-            peak_positions_difference = peak_positions - reference_max_gradient_voltage
+            peak_positions_difference = peak_positions - reference_peak_center_voltage
             # Keep per-point gradients for diagnostics, but use least squares with a
             # free intercept to avoid noise amplification and absorb slow drift.
             per_point_gradients = peak_positions_difference / voltage_differences
