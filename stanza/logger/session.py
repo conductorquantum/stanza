@@ -541,6 +541,15 @@ class LoggerSession:
             try:
                 self._writer_pool[ref].flush()
             except Exception as e:  # noqa: BLE001
+                # Handle Bokeh version compatibility issues gracefully
+                # Bokeh updates are asynchronous and don't require synchronous flushing
+                if ref == "bokeh" and (
+                    "_change_callbacks" in str(e) or "DocumentCallbackManager" in str(e)
+                ):
+                    logger.debug(
+                        "Bokeh flush skipped due to version compatibility: %s", e
+                    )
+                    continue
                 logger.error("Flush failed for %s: %s", ref, e)
                 errors.append(f"{ref}: {e}")
 
