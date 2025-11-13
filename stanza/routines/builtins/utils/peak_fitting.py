@@ -579,6 +579,7 @@ def fit_peak_multi_model(
 
     # ===== SELECT BEST MODEL BY AICc =====
     best_model_key = min(model_fits.keys(), key=lambda k: model_fits[k].aicc)
+    best_model_result = model_fits[best_model_key]
 
     logger.info(
         "Peak at idx %d: Best model = %s (AICc: L=%.2f, S=%.2f, V=%.2f)",
@@ -608,7 +609,20 @@ def fit_peak_multi_model(
     )
     max_gradient_voltage = aggregated_voltages[max_gradient_absolute_idx]
 
-    peak_voltage = aggregated_voltages[peak_idx_aggregated]
+    # Convert the fitted center index (which is continuous within the window) into
+    # an accurate voltage using interpolation so we are not limited by the sweep grid.
+    window_length = len(window_voltages)
+    window_index_axis = np.arange(window_length, dtype=float)
+    fitted_center_idx = float(
+        np.clip(best_model_result.center_idx, 0, window_length - 1)
+    )
+    peak_voltage = float(
+        np.interp(
+            fitted_center_idx,
+            window_index_axis,
+            window_voltages,
+        )
+    )
 
     # ===== CREATE FITTEDPEAK OBJECT =====
     fitted_peak = FittedPeak(
