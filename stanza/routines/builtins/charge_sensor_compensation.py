@@ -157,6 +157,7 @@ def _build_sensor_sweep_voltage_list(
     sensor_plunger_index: int,
     base_voltage: float,
     plunger_voltages: np.ndarray,
+    gate_voltage_overrides: dict[str, float] | None = None,
 ) -> list[list[float]]:
     """
     Build voltage list for sensor sweep with one varying plunger gate.
@@ -169,12 +170,21 @@ def _build_sensor_sweep_voltage_list(
         sensor_plunger_index: Index of plunger gate in sensor_gates_list
         base_voltage: Fixed voltage for all non-plunger gates
         plunger_voltages: Array of voltages to sweep on plunger gate
+        gate_voltage_overrides: Optional dict of {gate_name: voltage} to override
+                                specific gates instead of using base_voltage
 
     Returns:
         List of voltage arrays ready for device.sweep_nd()
     """
     number_of_gates = len(sensor_gates_list)
     base_voltages = np.full(number_of_gates, base_voltage)
+
+    # Apply gate voltage overrides if provided
+    if gate_voltage_overrides:
+        for gate_name, voltage in gate_voltage_overrides.items():
+            if gate_name in sensor_gates_list:
+                gate_index = sensor_gates_list.index(gate_name)
+                base_voltages[gate_index] = voltage
 
     voltage_list = []
     for plunger_voltage in plunger_voltages:
@@ -752,6 +762,7 @@ def many_window_barrier_sweep(  # pylint: disable=too-many-locals,too-many-state
     bias_gate: str,
     bias_voltage: float,
     session: LoggerSession | None = None,
+    gate_voltage_overrides: dict[str, float] | None = None,
 ) -> SensorDotPlungerSweepOutput:
     """
     Run a many window sensor plunger voltage sweep to detect single dot formation.
@@ -772,6 +783,8 @@ def many_window_barrier_sweep(  # pylint: disable=too-many-locals,too-many-state
         bias_gate: Name of the bias gate (contact) to apply bias voltage
         bias_voltage: Voltage to apply to bias gate during measurements
         session: Logger session for measurements and analysis
+        gate_voltage_overrides: Optional dict of {gate_name: voltage} to override
+                                specific gates instead of using mean_reservoir_saturation_voltage
 
     Returns:
         SensorDotPlungerSweepOutput containing the result of the sweep.
@@ -816,6 +829,7 @@ def many_window_barrier_sweep(  # pylint: disable=too-many-locals,too-many-state
             sensor_plunger_index=sensor_plunger_index,
             base_voltage=mean_reservoir_saturation_voltage,
             plunger_voltages=sp_sweep_voltages,
+            gate_voltage_overrides=gate_voltage_overrides,
         )
 
         # Set device to first voltage point and allow settling time to avoid current spikes
@@ -955,6 +969,7 @@ def find_sensor_peak(  # pylint: disable=too-many-locals
     bias_gate: str,
     bias_voltage: float,
     zero_control_side: bool = False,
+    gate_voltage_overrides: dict[str, float] | None = None,
     session: LoggerSession | None = None,
     **kwargs: Any,  # pylint: disable=unused-argument
 ) -> dict[str, Any]:
@@ -979,7 +994,10 @@ def find_sensor_peak(  # pylint: disable=too-many-locals
         bias_voltage: Voltage to apply to bias gate during measurements (V)
         zero_control_side: If True, set control group gates to 0V before sweep.
             If False, maintain current control voltages. Shared reservoirs always
-            set to sensor group's global turn-on voltage. (default: True)
+            set to sensor group's global turn-on voltage unless overridden. (default: True)
+        gate_voltage_overrides: Optional dict of {gate_name: voltage} to override
+                                specific sensor group gates (e.g., shared reservoirs)
+                                instead of using global_turn_on_voltage (default: None)
         session: Logger session for measurements and analysis
 
     Returns:
@@ -1113,6 +1131,7 @@ def find_sensor_peak(  # pylint: disable=too-many-locals
         bias_gate=bias_gate,
         bias_voltage=bias_voltage,
         session=session,
+        gate_voltage_overrides=gate_voltage_overrides,
     )
 
     # Handle cases with fewer than 3 peaks by using fallback boundaries
