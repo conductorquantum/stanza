@@ -56,7 +56,8 @@ dev = [
     "scipy-stubs>=1.11.0"
 ]
 routines = [
-    "scipy>=1.14.1"
+    "scikit-learn>=1.7.2",
+    "scipy>=1.14.1",
 ]
 docs = [
     "mkdocs>=1.5.0",

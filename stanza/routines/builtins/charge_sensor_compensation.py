@@ -40,6 +40,7 @@ from typing import Any
 # Third-party imports
 import numpy as np
 from conductorquantum import ConductorQuantum
+from sklearn.linear_model import RANSACRegressor
 
 from stanza.device import Device
 
@@ -94,6 +95,137 @@ NUM_OF_SAMPLES_FOR_AVERAGING = 10
 # ML model constants
 COULOMB_CLASSIFIER_MODEL = "coulomb-blockade-classifier-v3"
 PEAK_DETECTOR_MODEL = "coulomb-blockade-peak-detector-v2"
+
+
+@dataclass
+class RANSACFitResult:
+    """
+    Result from RANSAC regression fit for compensation gradient calculation.
+
+    Contains the fitted gradient (slope), intercept, and detailed outlier information
+    for all individual measurements.
+    """
+
+    gradient: float  # Fitted slope (compensation gradient)
+    intercept: float  # Fitted y-intercept (drift term)
+    inlier_mask: np.ndarray  # Boolean array marking inliers (True) vs outliers (False)
+    num_inliers: int  # Total number of inlier measurements
+    num_outliers: int  # Total number of outlier measurements
+    outlier_indices: list[int]  # Indices of outlier measurements
+    outlier_voltages: list[float]  # Control voltage deltas for outliers
+    outlier_peak_shifts: list[float]  # Peak shifts for outliers
+    all_control_deltas: np.ndarray  # All control voltage deltas (X values)
+    all_peak_shifts: np.ndarray  # All peak shifts (y values)
+
+
+def fit_compensation_gradient_ransac(
+    measurement_samples: list[dict[str, float]],
+    reference_peak_center_voltage: float,
+    gate_name: str,
+) -> RANSACFitResult:
+    """
+    Fit compensation gradient using RANSAC regression on raw measurement samples.
+
+    This function robustly estimates the compensation gradient by fitting a line
+    through all individual measurements (typically 100 points: 10 voltage points ×
+    10 samples each) while automatically detecting and rejecting outliers from
+    occasional bad measurements.
+
+    Args:
+        measurement_samples: List of measurement records, each containing:
+            - "control_delta": Control gate voltage change from baseline (V)
+            - "peak_position": Measured sensor peak center voltage (V)
+        reference_peak_center_voltage: Baseline sensor peak voltage (V)
+        gate_name: Name of gate being measured (for logging)
+
+    Returns:
+        RANSACFitResult containing fitted gradient, intercept, and outlier details
+
+    Raises:
+        RoutineError: If RANSAC fitting fails or data is invalid
+    """
+    # Extract all raw measurement pairs (control_delta, peak_shift)
+    all_control_deltas = np.array(
+        [sample["control_delta"] for sample in measurement_samples]
+    )
+    all_peak_shifts = np.array(
+        [
+            sample["peak_position"] - reference_peak_center_voltage
+            for sample in measurement_samples
+        ]
+    )
+
+    # Validate data
+    if len(all_control_deltas) == 0:
+        raise RoutineError("No measurement samples provided for RANSAC fitting")
+
+    if np.allclose(all_control_deltas, all_control_deltas[0]):
+        raise RoutineError(
+            f"Cannot compute compensation gradient for gate {gate_name}: "
+            "all control voltage deltas are identical"
+        )
+
+    # Reshape for sklearn (expects 2D array)
+    X = all_control_deltas.reshape(-1, 1)
+    y = all_peak_shifts
+
+    try:
+        ransac = RANSACRegressor(
+            min_samples=2,  # Minimum points to fit a line (slope + intercept)
+            residual_threshold=None,  # Auto-detect based on MAD
+            max_trials=1000,  # Sufficient for 100-point dataset
+            random_state=42,  # For reproducibility
+        )
+        ransac.fit(X, y)
+
+        # Extract gradient (slope) and intercept from fitted model
+        gradient = float(ransac.estimator_.coef_[0])
+        intercept = float(ransac.estimator_.intercept_)
+
+        # Store inlier mask and counts
+        inlier_mask = ransac.inlier_mask_
+        num_inliers = int(np.sum(inlier_mask))
+        num_outliers = len(inlier_mask) - num_inliers
+
+        # Identify outlier points for detailed logging
+        outlier_indices = [
+            i for i, is_inlier in enumerate(inlier_mask) if not is_inlier
+        ]
+        outlier_voltages = [float(all_control_deltas[i]) for i in outlier_indices]
+        outlier_peak_shifts = [float(all_peak_shifts[i]) for i in outlier_indices]
+
+        # Log outlier detection results
+        if num_outliers > 0:
+            logger.warning(
+                "RANSAC detected %d outlier(s) out of %d points for gate %s",
+                num_outliers,
+                len(inlier_mask),
+                gate_name,
+            )
+        else:
+            logger.info(
+                "RANSAC fit for gate %s: all %d points are inliers",
+                gate_name,
+                num_inliers,
+            )
+
+        return RANSACFitResult(
+            gradient=gradient,
+            intercept=intercept,
+            inlier_mask=inlier_mask,
+            num_inliers=num_inliers,
+            num_outliers=num_outliers,
+            outlier_indices=outlier_indices,
+            outlier_voltages=outlier_voltages,
+            outlier_peak_shifts=outlier_peak_shifts,
+            all_control_deltas=all_control_deltas,
+            all_peak_shifts=all_peak_shifts,
+        )
+
+    except Exception as exc:
+        raise RoutineError(
+            f"Failed to compute compensation gradient using RANSAC for gate {gate_name}: {exc}"
+        ) from exc
 
 
 @dataclass
@@ -1528,30 +1660,49 @@ def run_compensation(  # pylint: disable=too-many-locals,too-many-statements
                     )
                 peak_positions[idx] = float(np.mean(measurements))
             peak_positions_difference = peak_positions - reference_peak_center_voltage
-            # Keep per-point gradients for diagnostics, but use least squares with a
-            # free intercept to avoid noise amplification and absorb slow drift.
+            # Keep per-point gradients for diagnostics, but use RANSAC regression
+            # to robustly fit the gradient while rejecting outliers from bad measurements.
             per_point_gradients = peak_positions_difference / voltage_differences
 
-            if np.allclose(voltage_differences, voltage_differences[0]):
-                raise RoutineError(
-                    "Cannot compute compensation gradient: voltage_differences are identical"
-                )
-
-            design_matrix = np.column_stack(
-                (voltage_differences, np.ones_like(voltage_differences))
+            # Use RANSAC to robustly fit gradient through all individual measurements
+            ransac_result = fit_compensation_gradient_ransac(
+                measurement_samples=measurement_samples,
+                reference_peak_center_voltage=reference_peak_center_voltage,
+                gate_name=gate,
             )
-            try:
-                least_squares_gradient, drift_intercept = np.linalg.lstsq(
-                    design_matrix, peak_positions_difference, rcond=None
-                )[0]
-            except np.linalg.LinAlgError as exc:
-                raise RoutineError(
-                    "Failed to compute compensation gradient: singular fit matrix"
-                ) from exc
 
-            least_squares_gradient = float(least_squares_gradient)
-            drift_intercept = float(drift_intercept)
+            # Extract results
+            least_squares_gradient = ransac_result.gradient
+            drift_intercept = ransac_result.intercept
+            inlier_mask = ransac_result.inlier_mask
+            num_inliers = ransac_result.num_inliers
+            num_outliers = ransac_result.num_outliers
+            outlier_indices = ransac_result.outlier_indices
+            outlier_voltages = ransac_result.outlier_voltages
+            outlier_peak_shifts = ransac_result.outlier_peak_shifts
+            all_control_deltas = ransac_result.all_control_deltas
+            all_peak_shifts = ransac_result.all_peak_shifts
+
             compensation_gradients_dict[gate] = least_squares_gradient
+
+            # Mark each measurement sample with its inlier status
+            for i, sample in enumerate(measurement_samples):
+                sample["is_inlier"] = bool(inlier_mask[i])
+
+            # Calculate per-averaged-point inlier ratios
+            # For each of the 10 voltage points, count how many of its 10 samples were inliers
+            per_voltage_inlier_counts = []
+            for idx in range(num_deltas):
+                # Find which of the 100 measurements correspond to this voltage point
+                samples_for_this_voltage = [
+                    i
+                    for i, sample in enumerate(measurement_samples)
+                    if np.isclose(sample["control_delta"], voltage_differences[idx])
+                ]
+                num_inliers_for_voltage = sum(
+                    inlier_mask[i] for i in samples_for_this_voltage
+                )
+                per_voltage_inlier_counts.append(num_inliers_for_voltage)
 
             # Store detailed arrays for this gate for later analysis/logging
             per_gate_details[gate] = {
@@ -1562,16 +1713,30 @@ def run_compensation(  # pylint: disable=too-many-locals,too-many-statements
                 "drift_intercept": drift_intercept,
                 "mean_per_point_gradient": float(np.mean(per_point_gradients)),
                 "mean_gradient": least_squares_gradient,
+                # RANSAC-specific fields (based on 100 raw measurements)
+                "inlier_mask": inlier_mask.tolist(),
+                "num_inliers": num_inliers,
+                "num_outliers": num_outliers,
+                "outlier_indices": outlier_indices,
+                "outlier_voltages": outlier_voltages,
+                "outlier_peak_shifts": outlier_peak_shifts,
+                "all_control_deltas": all_control_deltas.tolist(),
+                "all_peak_shifts": all_peak_shifts.tolist(),
                 "peak_vs_gate_deltas": [
                     {
                         "control_delta": float(control_delta),
                         "peak_position": float(peak_position),
                         "peak_shift": float(peak_shift),
+                        "num_inliers": int(inlier_count),
+                        "inlier_fraction": float(
+                            inlier_count / NUM_OF_SAMPLES_FOR_AVERAGING
+                        ),
                     }
-                    for control_delta, peak_position, peak_shift in zip(
+                    for control_delta, peak_position, peak_shift, inlier_count in zip(
                         voltage_differences,
                         peak_positions,
                         peak_positions_difference,
+                        per_voltage_inlier_counts,
                         strict=False,
                     )
                 ],
@@ -1604,6 +1769,16 @@ def run_compensation(  # pylint: disable=too-many-locals,too-many-statements
                         "least_squares_gradient": details["least_squares_gradient"],
                         "drift_intercept": details["drift_intercept"],
                         "mean_per_point_gradient": details["mean_per_point_gradient"],
+                        # RANSAC-specific fields (based on 100 raw measurements)
+                        "regression_method": "ransac",
+                        "inlier_mask": details["inlier_mask"],
+                        "num_inliers": details["num_inliers"],
+                        "num_outliers": details["num_outliers"],
+                        "outlier_indices": details["outlier_indices"],
+                        "outlier_voltages": details["outlier_voltages"],
+                        "outlier_peak_shifts": details["outlier_peak_shifts"],
+                        "all_control_deltas": details["all_control_deltas"],
+                        "all_peak_shifts": details["all_peak_shifts"],
                         "peak_vs_gate_deltas": details["peak_vs_gate_deltas"],
                         "measurement_voltage_sequence": details[
                             "measurement_voltage_sequence"
