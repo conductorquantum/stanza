@@ -13,6 +13,14 @@ from stanza.routines.builtins.dqd_search import (
     run_dqd_search,
     run_dqd_search_fixed_barriers,
 )
+from stanza.routines.builtins.dqd_search.grid_search import (
+    GRID_SQUARE_MULTIPLIER,
+    SearchSquare,
+    generate_2d_sweep,
+    generate_diagonal_sweep,
+    generate_grid_corners,
+    select_next_square,
+)
 
 
 class MockResult:
@@ -169,8 +177,8 @@ class TestComputePeakSpacing:
             characterization_context,
             gates=GATES,
             measure_electrode="P1",
-            min_peak_scale=0.05,
-            max_peak_scale=0.2,
+            min_search_scale=0.05,
+            max_search_scale=0.2,
             current_trace_points=32,
             max_number_of_samples=5,
             number_of_samples_for_scale_computation=3,
@@ -184,8 +192,8 @@ class TestComputePeakSpacing:
             characterization_context,
             gates=GATES,
             measure_electrode="P1",
-            min_peak_scale=0.05,
-            max_peak_scale=0.2,
+            min_search_scale=0.05,
+            max_search_scale=0.2,
             current_trace_points=32,
             max_number_of_samples=10,
             number_of_samples_for_scale_computation=1,
@@ -205,8 +213,8 @@ class TestComputePeakSpacing:
                 characterization_context,
                 gates=GATES,
                 measure_electrode="P1",
-                min_peak_scale=0.05,
-                max_peak_scale=0.2,
+                min_search_scale=0.05,
+                max_search_scale=0.2,
                 current_trace_points=32,
                 max_number_of_samples=2,
                 number_of_samples_for_scale_computation=1,
@@ -224,8 +232,8 @@ class TestComputePeakSpacing:
                 characterization_context,
                 gates=GATES,
                 measure_electrode="P1",
-                min_peak_scale=0.05,
-                max_peak_scale=0.2,
+                min_search_scale=0.05,
+                max_search_scale=0.2,
                 current_trace_points=32,
                 max_number_of_samples=2,
                 number_of_samples_for_scale_computation=1,
@@ -233,7 +241,7 @@ class TestComputePeakSpacing:
             )
 
 
-class TestRunDqdSearchFixedBarriers:
+class TestRunDQDSearchFixedBarriers:
     def test_returns_dqd_squares(self, characterization_context):
         result = run_dqd_search_fixed_barriers(
             characterization_context,
@@ -313,7 +321,7 @@ class TestRunDqdSearchFixedBarriers:
         assert "dqd_squares" in result
 
 
-class TestRunDqdSearchFixedBarriersEdgeCases:
+class TestRunDQDSearchFixedBarriersEdgeCases:
     def test_handles_all_squares_visited(self, characterization_context):
         result = run_dqd_search_fixed_barriers(
             characterization_context,
@@ -344,14 +352,14 @@ class TestRunDqdSearchFixedBarriersEdgeCases:
         assert "dqd_squares" in result
 
 
-class TestRunDqdSearch:
+class TestRunDQDSearch:
     def test_returns_barrier_sweep_results(self, characterization_context):
         result = run_dqd_search(
             characterization_context,
             gates=GATES,
             measure_electrode="P1",
-            min_peak_scale=0.05,
-            max_peak_scale=0.2,
+            min_search_scale=0.05,
+            max_search_scale=0.2,
             current_trace_points=16,
             outer_barrier_points=2,
             inner_barrier_points=2,
@@ -367,8 +375,8 @@ class TestRunDqdSearch:
             characterization_context,
             gates=GATES,
             measure_electrode="P1",
-            min_peak_scale=0.05,
-            max_peak_scale=0.2,
+            min_search_scale=0.05,
+            max_search_scale=0.2,
             current_trace_points=16,
             outer_barrier_points=2,
             inner_barrier_points=2,
@@ -382,8 +390,8 @@ class TestRunDqdSearch:
             characterization_context,
             gates=GATES,
             measure_electrode="P1",
-            min_peak_scale=0.05,
-            max_peak_scale=0.2,
+            min_search_scale=0.05,
+            max_search_scale=0.2,
             current_trace_points=16,
             outer_barrier_points=3,
             inner_barrier_points=3,
@@ -400,8 +408,8 @@ class TestRunDqdSearch:
             characterization_context,
             gates=GATES,
             measure_electrode="P1",
-            min_peak_scale=0.05,
-            max_peak_scale=0.2,
+            min_search_scale=0.05,
+            max_search_scale=0.2,
             current_trace_points=16,
             outer_barrier_points=2,
             inner_barrier_points=2,
@@ -450,13 +458,90 @@ class TestUtilsErrorPaths:
             get_gate_safe_bounds(results)
 
 
-class TestGridSearchWeightedSelection:
-    def test_select_next_square_random_fallback(self):
-        from stanza.routines.builtins.dqd_search.grid_search import (
-            SearchSquare,
-            select_next_square,
+class TestGridGeometry:
+    def test_grid_fits_within_bounds_and_diagonal_trace_correct(
+        self, characterization_context
+    ):
+        peak_spacing = characterization_context.results.get("compute_peak_spacing")[
+            "peak_spacing"
+        ]
+        square_size = peak_spacing * GRID_SQUARE_MULTIPLIER
+
+        device = characterization_context.resources.device
+        plunger_gates = device.get_gates_by_type(GateType.PLUNGER)
+
+        results = characterization_context.results
+        finger_gate_char = results.get("finger_gate_characterization")[
+            "finger_gate_characterization"
+        ]
+        x_bounds = (
+            finger_gate_char[plunger_gates[0]]["cutoff_voltage"],
+            finger_gate_char[plunger_gates[0]]["saturation_voltage"],
+        )
+        y_bounds = (
+            finger_gate_char[plunger_gates[1]]["cutoff_voltage"],
+            finger_gate_char[plunger_gates[1]]["saturation_voltage"],
         )
 
+        grid_corners, _, _ = generate_grid_corners(x_bounds, y_bounds, square_size)
+
+        for corner in grid_corners:
+            assert x_bounds[0] <= corner[0] <= x_bounds[1]
+            assert y_bounds[0] <= corner[1] <= y_bounds[1]
+            assert x_bounds[0] <= corner[0] + square_size <= x_bounds[1]
+            assert y_bounds[0] <= corner[1] + square_size <= y_bounds[1]
+
+        corner = grid_corners[0]
+        diagonal_sweep = generate_diagonal_sweep(corner, square_size, 32)
+
+        assert np.allclose(diagonal_sweep[0], corner)
+        assert np.allclose(diagonal_sweep[-1], corner + square_size)
+        assert len(diagonal_sweep) == 32
+
+    def test_csd_sweeps_cover_square_area(self, characterization_context):
+        peak_spacing = characterization_context.results.get("compute_peak_spacing")[
+            "peak_spacing"
+        ]
+        square_size = peak_spacing * GRID_SQUARE_MULTIPLIER
+
+        device = characterization_context.resources.device
+        plunger_gates = device.get_gates_by_type(GateType.PLUNGER)
+
+        results = characterization_context.results
+        finger_gate_char = results.get("finger_gate_characterization")[
+            "finger_gate_characterization"
+        ]
+        x_bounds = (
+            finger_gate_char[plunger_gates[0]]["cutoff_voltage"],
+            finger_gate_char[plunger_gates[0]]["saturation_voltage"],
+        )
+        y_bounds = (
+            finger_gate_char[plunger_gates[1]]["cutoff_voltage"],
+            finger_gate_char[plunger_gates[1]]["saturation_voltage"],
+        )
+
+        grid_corners, _, _ = generate_grid_corners(x_bounds, y_bounds, square_size)
+        corner = grid_corners[0]
+
+        low_res_points = 8
+        low_res_sweep = generate_2d_sweep(corner, square_size, low_res_points)
+        assert low_res_sweep.shape == (low_res_points, low_res_points, 2)
+        assert np.allclose(low_res_sweep[0, 0], corner)
+        assert np.allclose(low_res_sweep[-1, -1], corner + square_size)
+        assert np.allclose(low_res_sweep[0, -1], corner + [square_size, 0])
+        assert np.allclose(low_res_sweep[-1, 0], corner + [0, square_size])
+
+        high_res_points = 16
+        high_res_sweep = generate_2d_sweep(corner, square_size, high_res_points)
+        assert high_res_sweep.shape == (high_res_points, high_res_points, 2)
+        assert np.allclose(high_res_sweep[0, 0], corner)
+        assert np.allclose(high_res_sweep[-1, -1], corner + square_size)
+        assert np.allclose(high_res_sweep[0, -1], corner + [square_size, 0])
+        assert np.allclose(high_res_sweep[-1, 0], corner + [0, square_size])
+
+
+class TestGridSearchWeightedSelection:
+    def test_select_next_square_random_fallback(self):
         visited = [
             SearchSquare(
                 grid_idx=0,
@@ -476,3 +561,46 @@ class TestGridSearchWeightedSelection:
         ]
         result = select_next_square(visited, [], 3, 3, False)
         assert result is not None and 0 < result < 9
+
+    def test_sampling_priority_order(self):
+        dqd_square = SearchSquare(
+            grid_idx=5,
+            current_trace_currents=np.array([1.0]),
+            current_trace_voltages=np.array([[0.0, 0.0]]),
+            current_trace_score=1.0,
+            current_trace_classification=True,
+            low_res_csd_currents=np.array([[1.0]]),
+            low_res_csd_voltages=np.array([[[0.0, 0.0]]]),
+            low_res_csd_score=1.0,
+            low_res_csd_classification=True,
+            high_res_csd_currents=np.array([[1.0]]),
+            high_res_csd_voltages=np.array([[[0.0, 0.0]]]),
+            high_res_csd_score=1.0,
+            high_res_csd_classification=True,
+        )
+
+        high_score_square = SearchSquare(
+            grid_idx=14,
+            current_trace_currents=np.array([1.0]),
+            current_trace_voltages=np.array([[0.0, 0.0]]),
+            current_trace_score=1.6,
+            current_trace_classification=True,
+            low_res_csd_currents=None,
+            low_res_csd_voltages=None,
+            low_res_csd_score=0.0,
+            low_res_csd_classification=False,
+            high_res_csd_currents=None,
+            high_res_csd_voltages=None,
+            high_res_csd_score=0.0,
+            high_res_csd_classification=False,
+        )
+
+        visited = [dqd_square, high_score_square]
+        dqd_squares = [dqd_square]
+
+        results = [
+            select_next_square(visited, dqd_squares, 4, 4, False) for _ in range(20)
+        ]
+
+        dqd_neighbors = {1, 4, 6, 9}
+        assert all(r in dqd_neighbors for r in results)

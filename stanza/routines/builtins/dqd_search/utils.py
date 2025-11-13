@@ -155,22 +155,6 @@ def build_full_voltages(
     return voltages
 
 
-def check_voltages_in_bounds(
-    voltages: NDArray[np.float64], safe_bounds: tuple[float, float]
-) -> bool:
-    """Check if all voltages are within safe bounds.
-
-    Args:
-        voltages: Array of voltages of any shape (..., num_gates).
-        safe_bounds: (min, max) safe voltage bounds.
-
-    Returns:
-        True if all voltages are within bounds, False otherwise.
-    """
-    min_voltage, max_voltage = safe_bounds
-    return bool(np.all((voltages >= min_voltage) & (voltages <= max_voltage)))
-
-
 def compute_peak_spacings(
     peak_indices: NDArray[np.int64],
     sweep_voltages: NDArray[np.float64],

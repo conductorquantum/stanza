@@ -16,7 +16,6 @@ from stanza.routines.builtins.dqd_search.grid_search import (
 from stanza.routines.builtins.dqd_search.utils import (
     build_full_voltages,
     build_gate_indices,
-    check_voltages_in_bounds,
     compute_peak_spacings,
     generate_linear_sweep,
     generate_random_sweep,
@@ -38,8 +37,8 @@ def compute_peak_spacing(
     ctx: RoutineContext,
     gates: list[str],
     measure_electrode: str,
-    min_peak_scale: float,
-    max_peak_scale: float,
+    min_search_scale: float,
+    max_search_scale: float,
     current_trace_points: int,
     max_number_of_samples: int = 30,
     number_of_samples_for_scale_computation: int = 10,
@@ -54,8 +53,8 @@ def compute_peak_spacing(
         ctx: Routine context with device and models client
         gates: Gate electrode names
         measure_electrode: Current measurement electrode
-        min_peak_scale: Minimum voltage scale to test (V)
-        max_peak_scale: Maximum voltage scale to test (V)
+        min_search_scale: Minimum voltage scale to test (V)
+        max_search_scale: Maximum voltage scale to test (V)
         current_trace_points: Points per sweep trace
         max_number_of_samples: Maximum sweep attempts per scale
         number_of_samples_for_scale_computation: Target successful samples per scale
@@ -83,7 +82,7 @@ def compute_peak_spacing(
     plunger_gates = [gates[i] for i in gate_idx.plunger]
     plunger_gate_bounds = get_plunger_gate_bounds(plunger_gates, results)
 
-    scales = np.linspace(min_peak_scale, max_peak_scale, 10)
+    scales = np.linspace(min_search_scale, max_search_scale, 10)
 
     peak_spacings: list[float] = []
     metadata = {"gate_electrodes": gates, "measure_electrode": measure_electrode}
@@ -347,36 +346,6 @@ def run_dqd_search_fixed_barriers(
 
         corner = grid_corners[grid_idx]
 
-        # Pre-validate: check if square violates bounds
-        test_sweep = generate_diagonal_sweep(corner, square_size, 8)
-        test_voltages = build_full_voltages(
-            test_sweep,
-            gates,
-            gate_idx,
-            transition_voltages=transition_voltages,
-            saturation_voltages=saturation_voltages,
-            barrier_voltages=barrier_voltages,
-        )
-        if not check_voltages_in_bounds(test_voltages, safe_bounds):
-            visited.append(
-                SearchSquare(
-                    grid_idx=grid_idx,
-                    current_trace_currents=np.array([]),
-                    current_trace_voltages=test_voltages,
-                    current_trace_score=0.0,
-                    current_trace_classification=False,
-                    low_res_csd_currents=None,
-                    low_res_csd_voltages=None,
-                    low_res_csd_score=0.0,
-                    low_res_csd_classification=False,
-                    high_res_csd_currents=None,
-                    high_res_csd_voltages=None,
-                    high_res_csd_score=0.0,
-                    high_res_csd_classification=False,
-                )
-            )
-            continue
-
         # Stage 1: Current trace
         trace_sweep = generate_diagonal_sweep(corner, square_size, current_trace_points)
         trace_voltages = build_full_voltages(
@@ -577,8 +546,8 @@ def run_dqd_search(
     ctx: RoutineContext,
     gates: list[str],
     measure_electrode: str,
-    min_peak_scale: float,
-    max_peak_scale: float,
+    min_search_scale: float,
+    max_search_scale: float,
     current_trace_points: int,
     outer_barrier_points: int = 5,
     inner_barrier_points: int = 5,
@@ -598,8 +567,8 @@ def run_dqd_search(
         measure_electrode: Current measurement electrode
         outer_barrier_points: Number of sweep points for outer barriers
         inner_barrier_points: Number of sweep points for inner barrier
-        min_peak_scale: Minimum peak scale for compute_peak_spacing
-        max_peak_scale: Maximum peak scale for compute_peak_spacing
+        min_search_scale: Minimum search scale for compute_peak_spacing
+        max_search_scale: Maximum search scale for compute_peak_spacing
         num_dqds_for_exit: Number of DQDs for exit
         current_trace_points: Points per current trace
         session: Logger session
@@ -652,8 +621,8 @@ def run_dqd_search(
                 ctx,
                 gates,
                 measure_electrode,
-                min_peak_scale,
-                max_peak_scale,
+                min_search_scale,
+                max_search_scale,
                 current_trace_points,
                 barrier_voltages=barrier_v,
                 session=session,
