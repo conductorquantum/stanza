@@ -370,26 +370,36 @@ class RoutineRunner:
 
         data_logger.set_base_directory(self._resolve_base_dir())
 
-    def run_all(self, parent_routine: str | None = None) -> dict[str, Any]:
+    def run_all(self, parent_routine: str | list[str] | None = None) -> dict[str, Any]:
         """Execute all routines from config in order.
 
         Args:
-            parent_routine: If specified, run only nested routines under this parent.
-                          If None, run all top-level routines.
+            parent_routine: Optional parent routine name(s). If provided, only run
+                          nested routines under these parents. If None, run all top-level routines.
 
         Returns:
             Dictionary mapping routine names to their results
         """
+        parent_routines = (
+            [parent_routine] if isinstance(parent_routine, str) else parent_routine
+        )
+
         results: dict[str, Any] = {}
 
         for device_config in self._device_configs:
-            for routine_config in device_config.routines:
-                if parent_routine is None:
+            if parent_routines is None:
+                for routine_config in device_config.routines:
                     self._run_routine_tree(routine_config, results)
-                elif routine_config.name == parent_routine and routine_config.routines:
-                    parent_params = routine_config.parameters or {}
-                    for nested_routine in routine_config.routines:
-                        self._run_routine_tree(nested_routine, results, parent_params)
+            else:
+                for parent_name in parent_routines:
+                    for routine_config in device_config.routines:
+                        if (
+                            routine_config.name == parent_name
+                            and routine_config.routines
+                        ):
+                            parent_params = routine_config.parameters or {}
+                            for nested in routine_config.routines:
+                                self._run_routine_tree(nested, results, parent_params)
 
         return results
 
