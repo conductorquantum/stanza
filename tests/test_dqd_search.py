@@ -21,14 +21,23 @@ from stanza.routines.builtins.dqd_search.grid_search import (
     generate_grid_corners,
     select_next_square,
 )
+from stanza.routines.builtins.dqd_search.utils import (
+    get_gate_safe_bounds,
+    get_global_turn_on_voltage,
+    get_voltages,
+)
 
 
 class MockResult:
+    """Mock result object for model execution."""
+
     def __init__(self, output):
         self.output = output
 
 
 class MockModels:
+    """Mock models client for executing model requests."""
+
     def __init__(self, responses):
         self.responses = responses
 
@@ -39,6 +48,8 @@ class MockModels:
 
 
 class MockModelsClient:
+    """Mock client for model execution with configurable responses."""
+
     def __init__(self):
         self.name = "models_client"
         self.responses = {}
@@ -49,6 +60,8 @@ class MockModelsClient:
 
 
 class MockDevice:
+    """Mock device with plunger, reservoir, and barrier gates."""
+
     def __init__(self):
         self.name = "device"
         self.control_gates = ["P1", "P2", "R1", "R2", "B0", "B1", "B2"]
@@ -88,6 +101,8 @@ class MockDevice:
 
 
 class MockLoggerSession:
+    """Mock logger session for capturing measurements and analyses."""
+
     def __init__(self):
         self.measurements = []
         self.analyses = []
@@ -172,7 +187,10 @@ GATES = ["P1", "P2", "R1", "R2", "B0", "B1", "B2"]
 
 
 class TestComputePeakSpacing:
+    """Tests for compute_peak_spacing routine."""
+
     def test_returns_peak_spacing(self, characterization_context):
+        """Test that compute_peak_spacing returns a valid peak spacing value."""
         result = compute_peak_spacing(
             characterization_context,
             gates=GATES,
@@ -205,6 +223,7 @@ class TestComputePeakSpacing:
     def test_raises_on_insufficient_peaks(
         self, characterization_context, mock_models_client
     ):
+        """Test that compute_peak_spacing raises error when insufficient peaks are detected."""
         mock_models_client.set_response(
             "coulomb-blockade-peak-detector-v2", {"peak_indices": [1, 2]}
         )
@@ -224,6 +243,7 @@ class TestComputePeakSpacing:
     def test_raises_on_no_coulomb_blockade(
         self, characterization_context, mock_models_client
     ):
+        """Test that compute_peak_spacing raises error when no Coulomb blockade is detected."""
         mock_models_client.set_response(
             "coulomb-blockade-classifier-v3", {"classification": False, "score": 0.0}
         )
@@ -242,7 +262,10 @@ class TestComputePeakSpacing:
 
 
 class TestRunDQDSearchFixedBarriers:
+    """Tests for run_dqd_search_fixed_barriers routine."""
+
     def test_returns_dqd_squares(self, characterization_context):
+        """Test that run_dqd_search_fixed_barriers returns a list of DQD squares."""
         result = run_dqd_search_fixed_barriers(
             characterization_context,
             gates=GATES,
@@ -257,6 +280,7 @@ class TestRunDQDSearchFixedBarriers:
         assert "dqd_squares" in result and isinstance(result["dqd_squares"], list)
 
     def test_logs_to_session(self, characterization_context):
+        """Test that run_dqd_search_fixed_barriers logs measurements and analyses to session."""
         session = MockLoggerSession()
         run_dqd_search_fixed_barriers(
             characterization_context,
@@ -273,6 +297,7 @@ class TestRunDQDSearchFixedBarriers:
         assert len(session.measurements) > 0 and len(session.analyses) > 0
 
     def test_handles_no_dqds(self, characterization_context, mock_models_client):
+        """Test that run_dqd_search_fixed_barriers handles case when no DQDs are found."""
         mock_models_client.set_response(
             "charge-stability-diagram-binary-classifier-v1-48x48",
             {"classification": False, "score": 0.0},
@@ -291,6 +316,7 @@ class TestRunDQDSearchFixedBarriers:
         assert len(result["dqd_squares"]) == 0
 
     def test_supports_diagonals(self, characterization_context):
+        """Test that run_dqd_search_fixed_barriers supports diagonal sweeps."""
         result = run_dqd_search_fixed_barriers(
             characterization_context,
             gates=GATES,
@@ -306,6 +332,7 @@ class TestRunDQDSearchFixedBarriers:
         assert "dqd_squares" in result
 
     def test_supports_hole_carriers(self, characterization_context):
+        """Test that run_dqd_search_fixed_barriers supports hole charge carriers."""
         result = run_dqd_search_fixed_barriers(
             characterization_context,
             gates=GATES,
@@ -322,7 +349,10 @@ class TestRunDQDSearchFixedBarriers:
 
 
 class TestRunDQDSearchFixedBarriersEdgeCases:
+    """Tests for edge cases in run_dqd_search_fixed_barriers routine."""
+
     def test_handles_all_squares_visited(self, characterization_context):
+        """Test that routine handles case when all grid squares are visited."""
         result = run_dqd_search_fixed_barriers(
             characterization_context,
             gates=GATES,
@@ -337,6 +367,7 @@ class TestRunDQDSearchFixedBarriersEdgeCases:
         assert "dqd_squares" in result
 
     def test_skips_out_of_bounds_squares(self, characterization_context):
+        """Test that routine skips squares that are out of safe voltage bounds."""
         result = run_dqd_search_fixed_barriers(
             characterization_context,
             gates=GATES,
@@ -353,7 +384,10 @@ class TestRunDQDSearchFixedBarriersEdgeCases:
 
 
 class TestRunDQDSearch:
+    """Tests for run_dqd_search routine."""
+
     def test_returns_barrier_sweep_results(self, characterization_context):
+        """Test that run_dqd_search returns barrier sweep results."""
         result = run_dqd_search(
             characterization_context,
             gates=GATES,
@@ -370,6 +404,7 @@ class TestRunDQDSearch:
         assert len(result["run_dqd_search"]) > 0
 
     def test_logs_to_session(self, characterization_context):
+        """Test that run_dqd_search logs measurements and analyses to session."""
         session = MockLoggerSession()
         run_dqd_search(
             characterization_context,
@@ -386,6 +421,7 @@ class TestRunDQDSearch:
         assert len(session.measurements) > 0 and len(session.analyses) > 0
 
     def test_exits_early_on_dqd(self, characterization_context):
+        """Test that run_dqd_search exits early when target number of DQDs is found."""
         result = run_dqd_search(
             characterization_context,
             gates=GATES,
@@ -400,6 +436,7 @@ class TestRunDQDSearch:
         assert len(result["run_dqd_search"]) >= 1
 
     def test_result_structure(self, characterization_context, mock_models_client):
+        """Test that run_dqd_search returns results with expected structure."""
         mock_models_client.set_response(
             "charge-stability-diagram-binary-classifier-v1-48x48",
             {"classification": False, "score": 0.0},
@@ -431,19 +468,17 @@ class TestRunDQDSearch:
 
 
 class TestUtilsErrorPaths:
-    def test_get_global_turn_on_voltage_missing(self):
-        from stanza.routines.builtins.dqd_search.utils import (
-            get_global_turn_on_voltage,
-        )
+    """Tests for error handling in DQD search utility functions."""
 
+    def test_get_global_turn_on_voltage_missing(self):
+        """Test that get_global_turn_on_voltage raises error when value is missing."""
         results = ResultsRegistry()
         results.store("global_accumulation", None)
         with pytest.raises(ValueError, match="Global turn on voltage not found"):
             get_global_turn_on_voltage(results)
 
     def test_get_voltages_missing_characterization(self):
-        from stanza.routines.builtins.dqd_search.utils import get_voltages
-
+        """Test that get_voltages raises error when characterization results are missing."""
         results = ResultsRegistry()
         results.store("reservoir_characterization", {})
         results.store("finger_gate_characterization", {})
@@ -451,17 +486,19 @@ class TestUtilsErrorPaths:
             get_voltages(GATES, "saturation_voltage", results)
 
     def test_get_gate_safe_bounds_missing(self):
-        from stanza.routines.builtins.dqd_search.utils import get_gate_safe_bounds
-
+        """Test that get_gate_safe_bounds raises error when leakage test results are missing."""
         results = ResultsRegistry()
         with pytest.raises(ValueError, match="Leakage test results not found"):
             get_gate_safe_bounds(results)
 
 
 class TestGridGeometry:
+    """Tests for grid generation and geometry functions."""
+
     def test_grid_fits_within_bounds_and_diagonal_trace_correct(
         self, characterization_context
     ):
+        """Test that generated grid corners fit within bounds and diagonal trace is correct."""
         peak_spacing = characterization_context.results.get("compute_peak_spacing")[
             "peak_spacing"
         ]
@@ -499,6 +536,7 @@ class TestGridGeometry:
         assert len(diagonal_sweep) == 32
 
     def test_csd_sweeps_cover_square_area(self, characterization_context):
+        """Test that charge stability diagram sweeps correctly cover square area."""
         peak_spacing = characterization_context.results.get("compute_peak_spacing")[
             "peak_spacing"
         ]
@@ -541,7 +579,10 @@ class TestGridGeometry:
 
 
 class TestGridSearchWeightedSelection:
+    """Tests for weighted selection algorithm in grid search."""
+
     def test_select_next_square_random_fallback(self):
+        """Test that select_next_square falls back to random selection when needed."""
         visited = [
             SearchSquare(
                 grid_idx=0,
@@ -563,6 +604,7 @@ class TestGridSearchWeightedSelection:
         assert result is not None and 0 < result < 9
 
     def test_sampling_priority_order(self):
+        """Test that select_next_square prioritizes neighbors of DQD squares."""
         dqd_square = SearchSquare(
             grid_idx=5,
             current_trace_currents=np.array([1.0]),
