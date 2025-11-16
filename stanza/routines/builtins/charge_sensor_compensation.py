@@ -1352,6 +1352,10 @@ def find_sensor_peak(  # pylint: disable=too-many-locals
                 "other_gates_voltage": float(mean_reservoir_saturation_voltage),
                 "best_peak_center_voltage": float(best_peak_voltage),
                 "best_peak_max_gradient_voltage": float(best_peak_max_gradient_voltage),
+                "narrowed_sensor_plunger_range": narrowed_sensor_plunger_range,
+                "prev_peak_voltage": float(prev_peak_voltage_fallback),
+                "next_peak_voltage": float(next_peak_voltage_fallback),
+                "step_size": float(new_step_size),
             },
         )
 
@@ -1517,7 +1521,7 @@ def run_compensation(  # pylint: disable=too-many-locals,too-many-statements
         # Set control side gates to baseline state
         device.jump(baseline_control_state, wait_for_settling=True)
         time.sleep(DEFAULT_SETTLING_TIME_S)
-        # Perform baseline sweep NUM_OF_SAMPLES_FOR_AVERAGING times and average for better estimate
+        # Perform baseline sweep NUM_OF_SAMPLES_FOR_AVERAGING times and take median for robust estimate
         try:
             baseline_sensitivity_voltages = []
             baseline_peak_center_voltages = []
@@ -1563,13 +1567,14 @@ def run_compensation(  # pylint: disable=too-many-locals,too-many-statements
                         },
                     )
 
-            # Reference for parking (max gradient)
+            # Reference for parking (max gradient) - use median for robustness to outliers
+            # (consistent with RANSAC approach for gradient fitting)
             reference_max_gradient_voltage = float(
-                np.mean(baseline_sensitivity_voltages)
+                np.median(baseline_sensitivity_voltages)
             )
-            # Reference for gradient calculation (peak center)
+            # Reference for gradient calculation (peak center) - use median for robustness
             reference_peak_center_voltage = float(
-                np.mean(baseline_peak_center_voltages)
+                np.median(baseline_peak_center_voltages)
             )
         except Exception as e:
             raise RoutineError(f"Error in baseline measurement: {str(e)}") from e
