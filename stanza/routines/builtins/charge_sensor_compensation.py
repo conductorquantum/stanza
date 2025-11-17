@@ -97,6 +97,9 @@ COULOMB_CLASSIFIER_MODEL = "coulomb-blockade-classifier-v3"
 PEAK_DETECTOR_MODEL = "coulomb-blockade-peak-detector-v2"
 
 
+MULTIPLER_OF_PEAK_SPACING = 0.2
+
+
 @dataclass
 class RANSACFitResult:
     """
@@ -1458,7 +1461,7 @@ def run_compensation(  # pylint: disable=too-many-locals,too-many-statements
     sensor_gate_key = sensor_gates_list[sensor_plunger_index]
     new_step_size = find_sensor_peak_results["step_size"]
 
-    voltage_range = 0.8 * peak_spacing
+    voltage_range = MULTIPLER_OF_PEAK_SPACING * peak_spacing
     # Create symmetric voltage points around zero, excluding zero itself
     # to avoid division by zero
     half_n = PERTURBATION_DIVISOR // 2
