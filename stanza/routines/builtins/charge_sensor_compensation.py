@@ -121,6 +121,48 @@ class RANSACFitResult:
     all_peak_shifts: np.ndarray  # All peak shifts (y values)
 
 
+@dataclass
+class StabilityMeasurement:
+    """
+    Result from a 2-minute stability measurement at a peak's max-gradient point.
+
+    Contains time-series current data, noise metrics, and the computed voltage noise
+    score that quantifies peak position stability.
+    """
+
+    peak_index: int  # Index of the peak in the original peak list
+    peak_voltage: float  # Center voltage of the peak (V)
+    max_gradient_voltage: (
+        float  # Voltage at maximum gradient where measurement was taken (V)
+    )
+    time_array: np.ndarray  # Time points during the 2-minute hold (seconds)
+    current_array: np.ndarray  # Measured current values over time (A)
+    current_mean: float  # Mean current during hold (A)
+    current_std: float  # Standard deviation of current (A) - σᵢ
+    local_slope: float  # Local dI/dV from linear fit around max-gradient point (A/V)
+    voltage_noise: float  # Effective voltage jitter: σᵥ = σᵢ / |dI/dV| (V)
+    stability_score: float | None = (
+        None  # Normalized stability score (higher is better)
+    )
+
+
+@dataclass
+class StablePeakCandidate:
+    """
+    A peak candidate with both original quality score and stability measurements.
+
+    Combines the initial peak quality metrics with stability measurements to
+    enable selection of the most stable peak for charge sensing.
+    """
+
+    fitted_peak: FittedPeak  # Original fitted peak from multi-model fitting
+    original_score: float  # Original quality score from peak fitting
+    stability_measurement: StabilityMeasurement  # Stability data from 2-min hold
+    combined_score: float | None = (
+        None  # Final weighted score (30% original + 70% stability)
+    )
+
+
 def fit_compensation_gradient_ransac(
     measurement_samples: list[dict[str, float]],
     reference_peak_center_voltage: float,
@@ -681,6 +723,366 @@ def _calculate_quality_scores(fitted_peaks: list[FittedPeak]) -> None:
             skew=best_fit.skew_resid,
             sensitivity_score=peak.sensitivity_score,
         )
+
+
+def _calculate_local_slope(
+    voltages: np.ndarray,
+    currents: np.ndarray,
+    target_voltage: float,
+    window_points: int = 5,
+) -> float:
+    """
+    Calculate local dI/dV slope around a target voltage using linear regression.
+
+    Performs a local linear fit to the I-V data around the specified voltage
+    to estimate the gradient (dI/dV) at that point.
+
+    Args:
+        voltages: Voltage array from sweep (V)
+        currents: Current array from sweep (A)
+        target_voltage: Voltage at which to calculate slope (V)
+        window_points: Number of points on each side of target for linear fit (default: 5)
+
+    Returns:
+        Local slope dI/dV at target voltage (A/V)
+
+    Raises:
+        RoutineError: If target voltage is not in the voltage array or fit fails
+    """
+    # Find index closest to target voltage
+    idx = int(np.argmin(np.abs(voltages - target_voltage)))
+
+    # Define window boundaries
+    start_idx = max(0, idx - window_points)
+    end_idx = min(len(voltages), idx + window_points + 1)
+
+    # Extract window data
+    v_window = voltages[start_idx:end_idx]
+    i_window = currents[start_idx:end_idx]
+
+    # Validate window size
+    if len(v_window) < 3:
+        raise RoutineError(
+            f"Insufficient points for local slope calculation at voltage {target_voltage}V. "
+            f"Only {len(v_window)} points available."
+        )
+
+    # Perform linear regression: I = slope * V + intercept
+    try:
+        # Use numpy polyfit for simple linear regression (degree 1)
+        slope, _ = np.polyfit(v_window, i_window, deg=1)
+        return float(slope)
+    except Exception as e:
+        raise RoutineError(
+            f"Failed to calculate local slope at voltage {target_voltage}V: {e}"
+        ) from e
+
+
+def _calculate_voltage_noise(current_std: float, local_slope: float) -> float:
+    """
+    Calculate effective voltage noise from current noise and local slope.
+
+    Converts current noise (σᵢ) into equivalent voltage noise (σᵥ) using
+    the local slope (dI/dV) of the peak:
+        σᵥ = σᵢ / |dI/dV|
+
+    Args:
+        current_std: Standard deviation of current during hold (A)
+        local_slope: Local dI/dV gradient (A/V)
+
+    Returns:
+        Voltage noise σᵥ (V)
+
+    Raises:
+        RoutineError: If local_slope is too close to zero (would cause division by zero)
+    """
+    abs_slope = abs(local_slope)
+
+    if abs_slope < 1e-12:  # Avoid division by near-zero slopes
+        raise RoutineError(
+            f"Local slope magnitude too small ({abs_slope:.2e} A/V) for voltage noise calculation. "
+            "Cannot convert current noise to voltage noise with near-zero gradient."
+        )
+
+    voltage_noise = current_std / abs_slope
+    return float(voltage_noise)
+
+
+def _calculate_combined_scores(
+    candidates: list[StablePeakCandidate],
+    original_weight: float = 0.3,
+    stability_weight: float = 0.7,
+) -> None:
+    """
+    Calculate combined scores for all peak candidates using weighted scoring.
+
+    Combines original peak quality scores with stability scores. Both scores
+    are min-max normalized to [0, 1] before weighting. Higher stability scores
+    correspond to lower voltage noise (more stable peaks).
+
+    Modifies candidates in-place by setting:
+    - stability_measurement.stability_score (normalized)
+    - combined_score (weighted combination)
+
+    Args:
+        candidates: List of StablePeakCandidate objects
+        original_weight: Weight for original quality score (default: 0.3)
+        stability_weight: Weight for stability score (default: 0.7)
+
+    Raises:
+        RoutineError: If weights don't sum to 1.0 or no candidates provided
+    """
+    if not candidates:
+        raise RoutineError("Cannot calculate combined scores: no candidates provided")
+
+    if not np.isclose(original_weight + stability_weight, 1.0):
+        raise RoutineError(
+            f"Weights must sum to 1.0, got {original_weight} + {stability_weight} = "
+            f"{original_weight + stability_weight}"
+        )
+
+    # Extract scores for normalization
+    original_scores = [c.original_score for c in candidates]
+    voltage_noises = [c.stability_measurement.voltage_noise for c in candidates]
+
+    # Validate voltage noises are all positive and non-zero
+    for i, vn in enumerate(voltage_noises):
+        if vn <= 0 or not np.isfinite(vn):
+            raise RoutineError(
+                f"Invalid voltage noise for candidate {i}: {vn}. "
+                "Voltage noise must be positive and finite."
+            )
+
+    # Min-max normalize original scores to [0, 1]
+    min_orig = min(original_scores)
+    max_orig = max(original_scores)
+    orig_range = max_orig - min_orig
+
+    if orig_range > 0:
+        normalized_original = [
+            (score - min_orig) / orig_range for score in original_scores
+        ]
+    else:
+        # All original scores identical
+        normalized_original = [1.0] * len(candidates)
+
+    # Convert voltage noise to stability score (invert: lower noise = higher score)
+    # stability_score = 1 / voltage_noise, then normalize
+    # Note: voltage_noises are already validated to be positive and finite
+    stability_scores_raw = [1.0 / vn for vn in voltage_noises]
+
+    min_stab = min(stability_scores_raw)
+    max_stab = max(stability_scores_raw)
+    stab_range = max_stab - min_stab
+
+    if stab_range > 0:
+        normalized_stability = [
+            (score - min_stab) / stab_range for score in stability_scores_raw
+        ]
+    else:
+        # All stability scores identical
+        normalized_stability = [1.0] * len(candidates)
+
+    # Calculate combined scores and update candidates
+    for i, candidate in enumerate(candidates):
+        candidate.stability_measurement.stability_score = normalized_stability[i]
+        candidate.combined_score = (
+            original_weight * normalized_original[i]
+            + stability_weight * normalized_stability[i]
+        )
+
+
+def _measure_peak_stability(
+    device: Device,
+    peak: FittedPeak,
+    peak_index: int,
+    sensor_gates_list: list[str],
+    sensor_plunger_gate: str,
+    mean_reservoir_saturation_voltage: float,
+    measure_electrode: str,
+    bias_gate: str,
+    bias_voltage: float,
+    aggregated_voltages: np.ndarray,
+    aggregated_currents: np.ndarray,
+    hold_time_seconds: float = 120.0,
+    session: LoggerSession | None = None,
+) -> StabilityMeasurement:
+    """
+    Measure peak stability by holding at max-gradient voltage for 2 minutes.
+
+    Moves the device to the peak's maximum gradient point (optimal sensing point),
+    holds for the specified duration while continuously measuring current vs. time,
+    and computes noise metrics to quantify peak position stability.
+
+    Args:
+        device: Device control interface
+        peak: FittedPeak object containing peak parameters
+        peak_index: Index of this peak in the candidate list (for logging)
+        sensor_gates_list: List of all sensor gate names
+        sensor_plunger_gate: Name of the sensor plunger gate
+        mean_reservoir_saturation_voltage: Voltage for non-plunger sensor gates (V)
+        measure_electrode: Electrode to measure current from
+        bias_gate: Name of the bias gate (contact) to apply bias voltage
+        bias_voltage: Voltage to apply to bias gate during measurements (V)
+        aggregated_voltages: Voltage array from original sweep (for local slope calc)
+        aggregated_currents: Current array from original sweep (for local slope calc)
+        hold_time_seconds: Duration to hold and measure (default: 120.0 seconds)
+        session: Logger session for saving measurements
+
+    Returns:
+        StabilityMeasurement containing time-series data and noise metrics
+
+    Raises:
+        RoutineError: If measurement fails or noise calculation fails
+    """
+    logger.info(
+        "Starting stability measurement for peak %d at max-gradient voltage %.6fV",
+        peak_index + 1,
+        peak.sensitivity_voltage,
+    )
+
+    # Apply bias voltage to bias gate
+    device.jump({bias_gate: bias_voltage}, wait_for_settling=True)
+    time.sleep(DEFAULT_SETTLING_TIME_S)
+
+    # Construct voltage state at max-gradient point
+    device_state = dict.fromkeys(sensor_gates_list, mean_reservoir_saturation_voltage)
+    device_state[sensor_plunger_gate] = peak.sensitivity_voltage
+
+    # Move to max-gradient point
+    device.jump(device_state, wait_for_settling=True)
+    time.sleep(DEFAULT_SETTLING_TIME_S)
+
+    # Record current vs. time during hold
+    logger.info(
+        "Holding at max-gradient point for %.1f seconds, recording current...",
+        hold_time_seconds,
+    )
+
+    time_array = []
+    current_array = []
+    start_time = time.time()
+
+    try:
+        # Continuously measure current until hold time expires
+        # Use device default sampling - measure as fast as possible
+        while True:
+            elapsed = time.time() - start_time
+            if elapsed >= hold_time_seconds:
+                break
+
+            # Measure current at max-gradient point
+            current = device.measure(measure_electrode)
+            time_array.append(elapsed)
+            current_array.append(current)
+
+            # Small sleep to avoid overwhelming the device (adjust based on device capabilities)
+            # If device has built-in rate limiting, this can be removed
+            time.sleep(0.01)  # 10ms -> ~100 Hz sampling rate
+
+    except Exception as e:
+        raise RoutineError(
+            f"Failed to measure stability for peak {peak_index + 1}: {e}"
+        ) from e
+
+    # Convert to numpy arrays
+    time_array_np = np.array(time_array, dtype=np.float64)
+    current_array_np = np.array(current_array, dtype=np.float64)
+
+    # Validate that we collected data
+    if len(time_array_np) == 0 or len(current_array_np) == 0:
+        raise RoutineError(
+            f"Failed to collect any measurements for peak {peak_index + 1} during "
+            f"{hold_time_seconds}s hold. Check device connectivity and measurement configuration."
+        )
+
+    logger.info(
+        "Stability measurement complete: collected %d samples over %.1f seconds "
+        "(avg rate: %.1f Hz)",
+        len(time_array_np),
+        time_array_np[-1] if len(time_array_np) > 0 else 0.0,
+        len(time_array_np) / hold_time_seconds if hold_time_seconds > 0 else 0.0,
+    )
+
+    # Calculate statistics
+    current_mean = float(np.mean(current_array_np))
+    current_std = float(np.std(current_array_np))
+
+    logger.info(
+        "Current statistics: mean = %.3e A, std = %.3e A (%.2f%% of mean)",
+        current_mean,
+        current_std,
+        100.0 * current_std / abs(current_mean) if abs(current_mean) > 0 else 0.0,
+    )
+
+    # Calculate local slope at max-gradient voltage from original sweep data
+    try:
+        local_slope = _calculate_local_slope(
+            voltages=aggregated_voltages,
+            currents=aggregated_currents,
+            target_voltage=peak.sensitivity_voltage,
+            window_points=5,
+        )
+        logger.info("Local slope dI/dV at max-gradient point: %.3e A/V", local_slope)
+    except Exception as e:
+        raise RoutineError(
+            f"Failed to calculate local slope for peak {peak_index + 1}: {e}"
+        ) from e
+
+    # Calculate voltage noise: σᵥ = σᵢ / |dI/dV|
+    try:
+        voltage_noise = _calculate_voltage_noise(current_std, local_slope)
+        logger.info(
+            "Voltage noise σᵥ = σᵢ / |dI/dV| = %.3e V / %.3e A/V = %.3e V",
+            current_std,
+            abs(local_slope),
+            voltage_noise,
+        )
+    except Exception as e:
+        raise RoutineError(
+            f"Failed to calculate voltage noise for peak {peak_index + 1}: {e}"
+        ) from e
+
+    # Create StabilityMeasurement object
+    stability_measurement = StabilityMeasurement(
+        peak_index=peak_index,
+        peak_voltage=float(peak.peak_voltage),
+        max_gradient_voltage=float(peak.sensitivity_voltage),
+        time_array=time_array_np,
+        current_array=current_array_np,
+        current_mean=current_mean,
+        current_std=current_std,
+        local_slope=local_slope,
+        voltage_noise=voltage_noise,
+    )
+
+    # Log stability measurement data
+    if session:
+        session.log_analysis(
+            name=f"stability_measurement_peak_{peak_index + 1}",
+            data={
+                "peak_index": peak_index + 1,
+                "peak_voltage": float(peak.peak_voltage),
+                "max_gradient_voltage": float(peak.sensitivity_voltage),
+                "hold_time_seconds": float(hold_time_seconds),
+                "num_samples": int(len(time_array_np)),
+                "sampling_rate_hz": float(
+                    len(time_array_np) / hold_time_seconds
+                    if hold_time_seconds > 0
+                    else 0.0
+                ),
+                "time_array": time_array_np.tolist(),
+                "current_array": current_array_np.tolist(),
+                "current_mean": current_mean,
+                "current_std": current_std,
+                "current_min": float(np.min(current_array_np)),
+                "current_max": float(np.max(current_array_np)),
+                "local_slope": local_slope,
+                "voltage_noise": voltage_noise,
+            },
+        )
+
+    return stability_measurement
 
 
 def analyze_find_first_peak_voltages(
@@ -1372,6 +1774,416 @@ def find_sensor_peak(  # pylint: disable=too-many-locals
         "sensor_gates_list": sensor_gates_list,
         "sensor_plunger_index": sensor_plunger_index,
         "step_size": float(new_step_size),
+        "sensor_park_point": sensor_dot_state,
+    }
+
+    return result
+
+
+@routine
+def find_stable_sensor_peak(  # pylint: disable=too-many-locals,too-many-statements
+    ctx: RoutineContext,
+    peak_spacing: float,
+    sensor_group_name: str,
+    sensor_plunger_gate: str,
+    measure_electrode: str,
+    bias_gate: str,
+    bias_voltage: float,
+    zero_control_side: bool = False,
+    gate_voltage_overrides: dict[str, float] | None = None,
+    top_n_peaks: int = 3,
+    hold_time_seconds: float = 120.0,
+    session: LoggerSession | None = None,
+    **kwargs: Any,  # pylint: disable=unused-argument
+) -> dict[str, Any]:
+    """
+    Find the most stable charge sensor operating point with 2-minute stability testing.
+
+    This routine extends find_sensor_peak by measuring peak stability. After identifying
+    Coulomb blockade peaks, it tests the top N peaks by holding at each peak's
+    max-gradient point for 2 minutes while recording current vs. time. Peak position
+    stability is quantified as voltage noise (σᵥ = σᵢ / |dI/dV|), and the final peak
+    is selected by combining original quality score (30%) with stability score (70%).
+
+    Args:
+        ctx: Routine context containing device resources and previous results. Requires:
+             - ctx.results["global_accumulation"]["global_turn_on_voltage"]
+             - ctx.results["finger_gate_characterization"][sensor_plunger_gate]
+        peak_spacing: Expected peak spacing in volts (e.g., 0.020 for 20mV)
+        sensor_group_name: Name of sensor side group (e.g., "side_B")
+        sensor_plunger_gate: Name of the sensor plunger gate on sensor side
+        measure_electrode: Electrode to measure current from (e.g., "OUT_B")
+        bias_gate: Name of the bias gate (contact) to apply bias voltage (e.g., "IN_A_B")
+        bias_voltage: Voltage to apply to bias gate during measurements (V)
+        zero_control_side: If True, set control group gates to 0V before sweep.
+            If False, maintain current control voltages. (default: False)
+        gate_voltage_overrides: Optional dict of {gate_name: voltage} to override
+                                specific sensor group gates (default: None)
+        top_n_peaks: Number of top-scoring peaks to test for stability (default: 3)
+        hold_time_seconds: Duration to hold at each peak for stability measurement (default: 120.0)
+        session: Logger session for measurements and analysis
+
+    Returns:
+        dict: Same format as find_sensor_peak, containing:
+            - best_peak_voltage: Voltage at center of most stable peak (V)
+            - best_peak_max_gradient_voltage: Voltage at maximum gradient (V)
+            - narrowed_sensor_plunger_range: (min, max) voltage range (V)
+            - prev_peak_voltage: Previous peak voltage or fallback (V)
+            - next_peak_voltage: Next peak voltage or fallback (V)
+            - mean_reservoir_saturation_voltage: Saturation voltage (V)
+            - sensor_gates_list: List of sensor gate names
+            - sensor_plunger_index: Index of plunger in sensor_gates_list
+            - step_size: Refined step size for narrowed sweeps (V)
+            - sensor_park_point: Gate voltages at optimal point {gate: voltage}
+
+    Raises:
+        RoutineError: If required previous results are missing or peak finding fails
+
+    Notes:
+        - Uses same peak detection as find_sensor_peak (ML-based with multi-model fitting)
+        - Tests top N peaks (by original quality score) for stability
+        - Selects best peak using combined score: 30% original + 70% stability
+        - Total runtime: ~(top_n_peaks * hold_time_seconds) longer than find_sensor_peak
+        - For top_n_peaks=3 and hold_time_seconds=120: adds ~6 minutes to routine
+    """
+    if peak_spacing <= 0:
+        raise RoutineError("peak_spacing must be greater than 0")
+
+    if top_n_peaks < 1:
+        raise RoutineError("top_n_peaks must be at least 1")
+
+    if hold_time_seconds <= 0:
+        raise RoutineError("hold_time_seconds must be greater than 0")
+
+    # Hardcode per requirements
+    current_trace_number_of_points = ML_MODEL_INPUT_SIZE
+
+    # Get device
+    device = ctx.resources.device
+
+    # Get groups from device config
+    sensor_group = device.device_config.groups[sensor_group_name]
+    sensor_gates = list(sensor_group.gates)
+    sensor_gates = filter_gates_by_group(ctx, sensor_gates)
+
+    # Get global turn-on voltage from global_accumulation results
+    global_accumulation_results = ctx.results.get(
+        f"global_accumulation_{sensor_group_name}",
+        ctx.results.get("global_accumulation", {}),
+    )
+    global_turn_on_voltage = global_accumulation_results.get("global_turn_on_voltage")
+
+    if global_turn_on_voltage is None:
+        raise RoutineError(
+            f"global_turn_on_voltage not found in ctx.results for group '{sensor_group_name}'. "
+            "Please run global_accumulation routine first for this group."
+        )
+
+    # Use global turn-on voltage as the saturation voltage for all gates
+    mean_reservoir_saturation_voltage = float(global_turn_on_voltage)
+
+    # Get sensor plunger gate parameters from health check results
+    finger_gate_char = ctx.results.get(
+        f"finger_gate_characterization_{sensor_group_name}",
+        ctx.results.get("finger_gate_characterization", {}),
+    )
+    if not finger_gate_char:
+        raise RoutineError(
+            f"finger_gate_characterization not found in ctx.results for group '{sensor_group_name}'. "
+            "Please run finger_gate_characterization routine first for this group."
+        )
+    # Extract nested "finger_gate_characterization" dict if present
+    if "finger_gate_characterization" in finger_gate_char:
+        finger_gate_char = finger_gate_char["finger_gate_characterization"]
+    if sensor_plunger_gate not in finger_gate_char:
+        raise RoutineError(
+            f"Sensor plunger gate '{sensor_plunger_gate}' not found in "
+            "finger_gate_characterization results."
+        )
+
+    sensor_plunger_cutoff_voltage = finger_gate_char[sensor_plunger_gate][
+        "cutoff_voltage"
+    ]
+    sensor_plunger_saturation_voltage = finger_gate_char[sensor_plunger_gate][
+        "saturation_voltage"
+    ]
+
+    sensor_plunger_range = (
+        sensor_plunger_saturation_voltage,
+        sensor_plunger_cutoff_voltage,
+    )
+
+    # Get the index of the sensor plunger in the sensor gates list
+    sensor_gates_list = list(sensor_gates)
+    sensor_plunger_index = sensor_gates_list.index(sensor_plunger_gate)
+
+    # Handle control side gates before sensor sweep
+    all_control_gates = device.control_gates
+    sensor_gates_set = set(sensor_gates_list)
+    control_gates = [g for g in all_control_gates if g not in sensor_gates_set]
+
+    # Set control side state (if there are any control gates)
+    if control_gates:
+        if zero_control_side:
+            logger.info("Setting control gates to 0V: %s", control_gates)
+            control_state = dict.fromkeys(control_gates, 0.0)
+        else:
+            current_control_voltages = device.check(control_gates)
+            control_state = dict(
+                zip(control_gates, current_control_voltages, strict=False)
+            )
+            logger.info(
+                "Maintaining control gates at current voltages: %s",
+                control_state,
+            )
+
+        # Apply control state
+        device.jump(control_state, wait_for_settling=True)
+
+    # Use 2x peak spacing for initial multi-window sweep
+    window_size = peak_spacing * INITIAL_WINDOW_MULTIPLIER
+
+    # Run initial peak detection sweep (same as find_sensor_peak)
+    logger.info("Running initial peak detection sweep...")
+    sensor_plunger_sweep_output = many_window_barrier_sweep(
+        ctx=ctx,
+        sensor_gates_list=sensor_gates_list,
+        sensor_plunger_range=sensor_plunger_range,
+        window_size=window_size,
+        current_trace_number_of_points=current_trace_number_of_points,
+        mean_reservoir_saturation_voltage=mean_reservoir_saturation_voltage,
+        sensor_plunger_index=sensor_plunger_index,
+        measure_electrode=measure_electrode,
+        bias_gate=bias_gate,
+        bias_voltage=bias_voltage,
+        session=session,
+        gate_voltage_overrides=gate_voltage_overrides,
+    )
+
+    # Extract aggregated trace data for stability measurements
+    aggregated_voltages = sensor_plunger_sweep_output.aggregated_voltages
+    aggregated_currents = sensor_plunger_sweep_output.aggregated_currents
+
+    # Get all fitted peaks from the sweep (they're already scored and sorted)
+    # We need to re-run the peak detection to get all peaks, not just the best one
+    # The many_window_barrier_sweep returns the best peak, but we need all peaks
+
+    # Re-analyze to get all fitted peaks
+    logger.info("Re-analyzing sweep to extract all fitted peaks...")
+    try:
+        peak_indices = sensor_plunger_sweep_output.peak_indices
+        if not peak_indices:
+            raise RoutineError("No peaks detected during initial sweep")
+
+        fitted_peaks = analyze_find_first_peak_voltages(
+            aggregated_currents=aggregated_currents,
+            aggregated_voltages=aggregated_voltages,
+            peak_indices_aggregated=peak_indices,
+            analysis_session=session,
+        )
+
+        if not fitted_peaks:
+            raise RoutineError("No peaks were successfully fitted")
+
+        logger.info("Found %d fitted peaks", len(fitted_peaks))
+
+    except Exception as e:
+        raise RoutineError(f"Failed to analyze peaks: {e}") from e
+
+    # Sort peaks by quality score (descending) and select top N
+    sorted_peaks = sorted(
+        fitted_peaks, key=lambda p: p.quality_score or 0.0, reverse=True
+    )
+    num_peaks_to_test = min(top_n_peaks, len(sorted_peaks))
+    peaks_to_test = sorted_peaks[:num_peaks_to_test]
+
+    logger.info(
+        "Testing stability of top %d peak(s) (out of %d total)",
+        num_peaks_to_test,
+        len(sorted_peaks),
+    )
+
+    # Measure stability for each of the top N peaks
+    candidates = []
+    for i, peak in enumerate(peaks_to_test):
+        logger.info(
+            "Testing peak %d/%d: center=%.6fV, max_grad=%.6fV, quality=%.4f",
+            i + 1,
+            num_peaks_to_test,
+            peak.peak_voltage,
+            peak.sensitivity_voltage,
+            peak.quality_score or 0.0,
+        )
+
+        # Measure stability
+        stability_measurement = _measure_peak_stability(
+            device=device,
+            peak=peak,
+            peak_index=i,
+            sensor_gates_list=sensor_gates_list,
+            sensor_plunger_gate=sensor_plunger_gate,
+            mean_reservoir_saturation_voltage=mean_reservoir_saturation_voltage,
+            measure_electrode=measure_electrode,
+            bias_gate=bias_gate,
+            bias_voltage=bias_voltage,
+            aggregated_voltages=aggregated_voltages,
+            aggregated_currents=aggregated_currents,
+            hold_time_seconds=hold_time_seconds,
+            session=session,
+        )
+
+        # Create candidate
+        candidate = StablePeakCandidate(
+            fitted_peak=peak,
+            original_score=peak.quality_score or 0.0,
+            stability_measurement=stability_measurement,
+        )
+        candidates.append(candidate)
+
+    # Calculate combined scores (30% original + 70% stability)
+    _calculate_combined_scores(candidates, original_weight=0.3, stability_weight=0.7)
+
+    # Log combined scoring analysis
+    if session:
+        session.log_analysis(
+            name="combined_scoring_summary",
+            data={
+                "num_candidates": len(candidates),
+                "candidates": [
+                    {
+                        "peak_index": i + 1,
+                        "peak_voltage": c.fitted_peak.peak_voltage,
+                        "max_gradient_voltage": c.fitted_peak.sensitivity_voltage,
+                        "original_score": c.original_score,
+                        "voltage_noise": c.stability_measurement.voltage_noise,
+                        "stability_score": c.stability_measurement.stability_score,
+                        "combined_score": c.combined_score,
+                    }
+                    for i, c in enumerate(candidates)
+                ],
+            },
+        )
+
+    # Select best candidate by combined score
+    best_candidate = max(candidates, key=lambda c: c.combined_score or 0.0)
+    best_peak = best_candidate.fitted_peak
+
+    logger.info(
+        "Selected best stable peak: center=%.6fV, max_grad=%.6fV, "
+        "original_score=%.4f, stability_score=%.4f, combined_score=%.4f",
+        best_peak.peak_voltage,
+        best_peak.sensitivity_voltage,
+        best_candidate.original_score,
+        best_candidate.stability_measurement.stability_score or 0.0,
+        best_candidate.combined_score or 0.0,
+    )
+
+    # Extract peak voltages for range calculation
+    best_peak_voltage = float(best_peak.peak_voltage)
+    best_peak_max_gradient_voltage = float(best_peak.sensitivity_voltage)
+
+    # Find spatially neighboring peaks for range calculation
+    prev_peak = None
+    next_peak = None
+    for peak in fitted_peaks:
+        if peak.peak_idx < best_peak.peak_idx:
+            if prev_peak is None or peak.peak_idx > prev_peak.peak_idx:
+                prev_peak = peak
+        elif peak.peak_idx > best_peak.peak_idx:
+            if next_peak is None or peak.peak_idx < next_peak.peak_idx:
+                next_peak = peak
+
+    # Set fallback values for missing neighboring peaks
+    if prev_peak is None:
+        prev_peak_voltage_fallback = best_peak_voltage - peak_spacing
+        logger.warning(
+            "No previous peak found. Using fallback: best_peak - peak_spacing = %.6fV",
+            prev_peak_voltage_fallback,
+        )
+    else:
+        prev_peak_voltage_fallback = float(prev_peak.peak_voltage)
+
+    if next_peak is None:
+        next_peak_voltage_fallback = best_peak_voltage + peak_spacing
+        logger.warning(
+            "No next peak found. Using fallback: best_peak + peak_spacing = %.6fV",
+            next_peak_voltage_fallback,
+        )
+    else:
+        next_peak_voltage_fallback = float(next_peak.peak_voltage)
+
+    # Reconstruct voltage configuration at max gradient point
+    sensor_dot_state = dict.fromkeys(
+        sensor_gates_list, mean_reservoir_saturation_voltage
+    )
+    sensor_dot_state[sensor_plunger_gate] = best_peak_max_gradient_voltage
+
+    # Jump to optimal sensing point
+    device.jump(sensor_dot_state, wait_for_settling=True)
+
+    # Calculate narrowed range and step size (same logic as find_sensor_peak)
+    step_size_used = window_size / current_trace_number_of_points
+    new_step_size = REFINED_STEP_MULTIPLIER * step_size_used
+
+    number_of_points_between_previous_and_best_peak = (
+        WINDOW_FRACTION
+        * (best_peak_voltage - prev_peak_voltage_fallback)
+        / new_step_size
+    )
+    number_of_points_between_best_and_next_peak = (
+        WINDOW_FRACTION
+        * (next_peak_voltage_fallback - best_peak_voltage)
+        / new_step_size
+    )
+
+    start_of_range = (
+        prev_peak_voltage_fallback
+        if number_of_points_between_previous_and_best_peak < DEFAULT_WINDOW_HALF_WIDTH
+        else best_peak_voltage - DEFAULT_WINDOW_HALF_WIDTH * new_step_size
+    )
+    end_of_range = (
+        next_peak_voltage_fallback
+        if number_of_points_between_best_and_next_peak < DEFAULT_WINDOW_HALF_WIDTH
+        else best_peak_voltage + DEFAULT_WINDOW_HALF_WIDTH * new_step_size
+    )
+
+    narrowed_sensor_plunger_range = (start_of_range, end_of_range)
+    logger.info(
+        "Narrowed sweep range: %sV to %sV",
+        narrowed_sensor_plunger_range[0],
+        narrowed_sensor_plunger_range[1],
+    )
+
+    # Log final selection
+    if session:
+        session.log_analysis(
+            name="stable_sensor_peak_selection",
+            data={
+                "best_peak_voltage": best_peak_voltage,
+                "best_peak_max_gradient_voltage": best_peak_max_gradient_voltage,
+                "narrowed_sensor_plunger_range": narrowed_sensor_plunger_range,
+                "prev_peak_voltage": prev_peak_voltage_fallback,
+                "next_peak_voltage": next_peak_voltage_fallback,
+                "step_size": new_step_size,
+                "original_score": best_candidate.original_score,
+                "voltage_noise": best_candidate.stability_measurement.voltage_noise,
+                "stability_score": best_candidate.stability_measurement.stability_score,
+                "combined_score": best_candidate.combined_score,
+                "sensor_park_point": sensor_dot_state,
+            },
+        )
+
+    # Return same format as find_sensor_peak
+    result = {
+        "best_peak_voltage": best_peak_voltage,
+        "best_peak_max_gradient_voltage": best_peak_max_gradient_voltage,
+        "narrowed_sensor_plunger_range": narrowed_sensor_plunger_range,
+        "prev_peak_voltage": prev_peak_voltage_fallback,
+        "next_peak_voltage": next_peak_voltage_fallback,
+        "mean_reservoir_saturation_voltage": mean_reservoir_saturation_voltage,
+        "sensor_gates_list": sensor_gates_list,
+        "sensor_plunger_index": sensor_plunger_index,
+        "step_size": new_step_size,
         "sensor_park_point": sensor_dot_state,
     }
 
