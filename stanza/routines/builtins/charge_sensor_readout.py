@@ -15,9 +15,12 @@ This routine sweeps control gates while dynamically compensating the sensor plun
 voltage to maintain optimal charge sensing fidelity throughout the measurement.
 
 Compensation formula:
-    V_sensor_compensated = V_sensor_initial + sum(gradient_i * delta_V_control_i)
+    V_sensor_compensated = V_sensor_initial + sum(gradient_i * delta_V_control_i) - beta * I_error
 
-where gradient_i = dV_sensor/dV_control_i from the run_compensation routine.
+where:
+    - gradient_i = dV_sensor/dV_control_i from the run_compensation routine
+    - beta = proportional feedback gain (V/A)
+    - I_error = I_measured - I_park_point (current error from baseline)
 """
 
 # Standard library imports
@@ -129,6 +132,8 @@ def charge_sensor_csd_readout(  # pylint: disable=too-many-locals,too-many-state
     compensation_gradients: dict[str, float] | None = None,
     sweep_resolution: int = 48,
     num_sweep_repetitions: int = 10,
+    beta: float | None = None,
+    max_feedback_correction: float = 0.1,
     session: LoggerSession | None = None,
     **kwargs: Any,  # pylint: disable=unused-argument
 ) -> dict[str, Any]:
@@ -164,6 +169,12 @@ def charge_sensor_csd_readout(  # pylint: disable=too-many-locals,too-many-state
             plunger held constant). (default: None)
         sweep_resolution: Number of points per dimension for 2D sweep (default: 48)
         num_sweep_repetitions: Number of times to repeat sweep for averaging (default: 10)
+        beta: Optional proportional feedback gain (V/A) for current-based sensor voltage
+            correction. If None, no feedback is applied. When provided, sensor plunger
+            voltage is adjusted at each measurement point to maintain current near park
+            point: delta_V = beta * (I_measured - I_park_point). (default: None)
+        max_feedback_correction: Safety limit on per-point feedback correction magnitude
+            (V). Prevents runaway adjustments. Only used when beta is not None. (default: 0.1)
         session: Logger session for measurements and analysis
         **kwargs: Additional keyword arguments (for config compatibility)
 
@@ -183,6 +194,10 @@ def charge_sensor_csd_readout(  # pylint: disable=too-many-locals,too-many-state
             - compensation_enabled: Boolean indicating if compensation was applied
             - park_point_current: Baseline current before sweep (A)
             - num_repetitions: Number of sweep repetitions performed
+            - beta: Proportional feedback gain used (V/A) or None
+            - feedback_enabled: Boolean indicating if current feedback was applied
+            - feedback_corrections: List of feedback corrections applied at each point (V)
+            - max_feedback_correction: Maximum allowed feedback correction (V)
 
     Raises:
         RoutineError: If validation fails or sweep encounters errors
@@ -191,7 +206,9 @@ def charge_sensor_csd_readout(  # pylint: disable=too-many-locals,too-many-state
         - Control plungers swept from start to end of specified ranges
         - If compensation_gradients provided: sensor plunger compensated at each sweep point
         - If compensation_gradients is None: sensor plunger held constant
-        - Compensation formula: V_compensated = V_initial + sum(gradient_i * delta_V_i)
+        - If beta provided: additional per-point feedback applied based on current error
+        - Compensation formula: V_compensated = V_initial + sum(gradient_i * delta_V_i) - beta * I_error
+        - Feedback is applied after each measurement, then current is re-measured
         - For shared gates (e.g., reservoirs): initial_control_voltages takes precedence
         - Returns differential current (measured - baseline) for better signal quality
 
@@ -237,9 +254,16 @@ def charge_sensor_csd_readout(  # pylint: disable=too-many-locals,too-many-state
             f"Sensor plunger gate '{charge_sensor_plunger_gate}' not found "
             "in sensor_park_point_voltages"
         )
+    if max_feedback_correction <= 0:
+        raise RoutineError(
+            f"max_feedback_correction must be positive, got {max_feedback_correction}"
+        )
 
     # Determine if compensation is enabled
     compensation_enabled = compensation_gradients is not None
+
+    # Determine if current feedback is enabled
+    feedback_enabled = beta is not None and beta != 0.0
 
     # Validate compensation gradients if enabled
     control_plunger_gates = list(control_plunger_ranges.keys())
@@ -285,6 +309,10 @@ def charge_sensor_csd_readout(  # pylint: disable=too-many-locals,too-many-state
     logger.info("  Compensation enabled: %s", compensation_enabled)
     if compensation_enabled:
         logger.info("  Compensation gradients: %s", compensation_gradients)
+    logger.info("  Current feedback enabled: %s", feedback_enabled)
+    if feedback_enabled:
+        logger.info("  Beta (feedback gain): %.6e V/A", beta)
+        logger.info("  Max feedback correction: %.6f V", max_feedback_correction)
 
     # Capture initial device state for cleanup
     initial_voltages = device.check(device.control_gates)
@@ -391,6 +419,7 @@ def charge_sensor_csd_readout(  # pylint: disable=too-many-locals,too-many-state
 
         # Perform multiple sweeps and average
         currents_list = []
+        feedback_corrections_list = []
         for i in range(num_sweep_repetitions):
             logger.info("Starting sweep %d of %d...", i + 1, num_sweep_repetitions)
 
@@ -404,15 +433,51 @@ def charge_sensor_csd_readout(  # pylint: disable=too-many-locals,too-many-state
             device.jump(reset_dict, wait_for_settling=True)
             time.sleep(DEFAULT_SETTLING_TIME_S)
 
-            # Perform sweep
-            voltage_measurements, current_measurements = device.sweep_nd(
-                gate_electrodes=gate_electrodes,
-                voltages=voltages_with_compensation,
-                measure_electrode=measure_electrode,
-                session=None,  # Don't log individual sweeps
-            )
+            # Perform sweep with per-point feedback if enabled
+            voltage_measurements_rep = []
+            current_measurements_rep = []
+            feedback_corrections_rep = []
 
+            for voltage_point in voltages_with_compensation:
+                # Apply voltages
+                voltage_dict = dict(zip(gate_electrodes, voltage_point, strict=False))
+                device.jump(voltage_dict, wait_for_settling=True)
+
+                # Measure current
+                current = device.measure(measure_electrode)
+
+                # Apply proportional feedback if enabled
+                feedback_correction = 0.0
+                if feedback_enabled:
+                    current_error = current - park_point_current
+                    feedback_correction = beta * current_error  # type: ignore
+
+                    # Apply safety clamp
+                    feedback_correction = float(
+                        np.clip(
+                            feedback_correction,
+                            -max_feedback_correction,
+                            max_feedback_correction,
+                        )
+                    )
+
+                    # Adjust sensor voltage and re-apply
+                    voltage_dict[charge_sensor_plunger_gate] += feedback_correction
+                    device.jump(voltage_dict, wait_for_settling=True)
+
+                    # Re-measure current after feedback adjustment
+                    current = device.measure(measure_electrode)
+
+                # Record actual voltages (control gates only) and current
+                actual_voltages = [voltage_dict[g] for g in control_plunger_gates]
+                voltage_measurements_rep.append(actual_voltages)
+                current_measurements_rep.append(current)
+                feedback_corrections_rep.append(feedback_correction)
+
+            voltage_measurements = voltage_measurements_rep
+            current_measurements = current_measurements_rep
             currents_list.append(current_measurements)
+            feedback_corrections_list.append(feedback_corrections_rep)
             plt.imshow(
                 np.array(current_measurements).reshape(
                     sweep_resolution, sweep_resolution
@@ -431,13 +496,19 @@ def charge_sensor_csd_readout(  # pylint: disable=too-many-locals,too-many-state
                 name="charge_sensor_csd_readout",
                 x_data=voltage_measurements,
                 y_data=current_measurements,
-                x_label=gate_electrodes,
+                x_label=control_plunger_gates,
                 y_label="current",
                 metadata={"repetition": i + 1},
             )
 
         # Average currents across all sweeps
         average_currents = np.mean(currents_list, axis=0)
+
+        # Average feedback corrections across all sweeps
+        if feedback_enabled:
+            average_feedback_corrections = np.mean(feedback_corrections_list, axis=0)
+        else:
+            average_feedback_corrections = np.zeros(len(average_currents))
 
         # Subtract baseline to get differential current signal
         differential_currents = average_currents - park_point_current
@@ -450,6 +521,17 @@ def charge_sensor_csd_readout(  # pylint: disable=too-many-locals,too-many-state
             np.min(differential_currents),
             np.max(differential_currents),
         )
+        if feedback_enabled:
+            logger.info(
+                "Feedback correction range: %.6f to %.6f V",
+                np.min(average_feedback_corrections),
+                np.max(average_feedback_corrections),
+            )
+            logger.info(
+                "Feedback correction mean: %.6f V (std: %.6f V)",
+                np.mean(average_feedback_corrections),
+                np.std(average_feedback_corrections),
+            )
 
         # Extract 2D control gate voltages for logging (exclude sensor compensation dimension)
         voltage_measurements_2d = [[v[0], v[1]] for v in voltage_measurements]
@@ -464,6 +546,9 @@ def charge_sensor_csd_readout(  # pylint: disable=too-many-locals,too-many-state
                 y_label="differential_current",
                 metadata={
                     "compensation_enabled": compensation_enabled,
+                    "feedback_enabled": feedback_enabled,
+                    "beta": float(beta) if beta is not None else None,
+                    "max_feedback_correction": float(max_feedback_correction),
                     "sensor_plunger": charge_sensor_plunger_gate,
                     "measure_electrode": measure_electrode,
                     "gate_electrodes": gate_electrodes,
@@ -484,6 +569,8 @@ def charge_sensor_csd_readout(  # pylint: disable=too-many-locals,too-many-state
                     "current_mean": float(np.mean(differential_currents)),
                     "current_std": float(np.std(differential_currents)),
                     "compensation_enabled": compensation_enabled,
+                    "feedback_enabled": feedback_enabled,
+                    "beta": float(beta) if beta is not None else None,
                     "measure_electrode": measure_electrode,
                     "num_repetitions": num_sweep_repetitions,
                     "park_point_current": float(park_point_current),
@@ -498,6 +585,19 @@ def charge_sensor_csd_readout(  # pylint: disable=too-many-locals,too-many-state
                         "compensation_max": float(np.max(compensation_applied)),
                         "compensation_mean": float(np.mean(compensation_applied)),
                         "compensation_std": float(np.std(compensation_applied)),
+                    },
+                )
+
+            if feedback_enabled:
+                session.log_analysis(
+                    name="charge_sensor_csd_feedback_summary",
+                    data={
+                        "feedback_min": float(np.min(average_feedback_corrections)),
+                        "feedback_max": float(np.max(average_feedback_corrections)),
+                        "feedback_mean": float(np.mean(average_feedback_corrections)),
+                        "feedback_std": float(np.std(average_feedback_corrections)),
+                        "beta": float(beta),  # type: ignore
+                        "max_feedback_correction": float(max_feedback_correction),
                     },
                 )
 
@@ -521,6 +621,10 @@ def charge_sensor_csd_readout(  # pylint: disable=too-many-locals,too-many-state
             "compensation_enabled": compensation_enabled,
             "park_point_current": float(park_point_current),
             "num_repetitions": num_sweep_repetitions,
+            "beta": beta,
+            "feedback_enabled": feedback_enabled,
+            "feedback_corrections": average_feedback_corrections.tolist(),
+            "max_feedback_correction": max_feedback_correction,
         }
 
         return result

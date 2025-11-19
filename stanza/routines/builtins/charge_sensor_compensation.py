@@ -62,7 +62,7 @@ logger = logging.getLogger(__name__)
 # Configuration constants
 
 # Default settling time before sweeps to avoid current spikes
-DEFAULT_SETTLING_TIME_S = 2.0
+DEFAULT_SETTLING_TIME_S = 3.0
 
 # ML model input constraint: the coulomb blockade classifier model requires
 # exactly 128 points per input window for inference
@@ -90,7 +90,7 @@ REFINED_STEP_MULTIPLIER = 0.5
 
 
 # Number of samples to average for each gate compensation measurement
-NUM_OF_SAMPLES_FOR_AVERAGING = 10
+NUM_OF_SAMPLES_FOR_AVERAGING = 3
 
 # ML model constants
 COULOMB_CLASSIFIER_MODEL = "coulomb-blockade-classifier-v3"
