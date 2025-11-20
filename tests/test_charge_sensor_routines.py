@@ -8,9 +8,17 @@ import pytest
 from stanza.exceptions import RoutineError
 from stanza.models import DeviceGroup
 from stanza.routines import RoutineContext
-from stanza.routines.builtins.charge_sensor_compensation import (
-    ML_MODEL_INPUT_SIZE,
+from stanza.routines.builtins.charge_sensor.charge_sensor_find_sensor_peak import (
+    SensorDotPlungerSweepOutput,
+    StabilityMeasurement,
+    StablePeakCandidate,
+    _calculate_combined_scores,
+    _calculate_voltage_noise,
+    build_sensor_sweep_voltage_list,
     find_sensor_peak,
+)
+from stanza.routines.builtins.charge_sensor.constants import (
+    ML_MODEL_INPUT_SIZE,
 )
 from stanza.routines.builtins.utils.peak_fitting import FittedPeak, ModelFitResult
 
@@ -106,10 +114,12 @@ def test_find_sensor_peak_requires_prerequisites():
     mock_device = create_mock_device_for_sensor_routines()
     mock_resources = Mock()
     mock_resources.device = mock_device
+    # Set up group mock to be a dict-like object (or None)
+    mock_resources.group = None
     mock_ctx.resources = mock_resources
 
     with patch(
-        "stanza.routines.builtins.charge_sensor_compensation.filter_gates_by_group",
+        "stanza.routines.builtins.charge_sensor.charge_sensor_find_sensor_peak.filter_gates_by_group",
         side_effect=lambda ctx, gates: gates,
     ):
         with pytest.raises(RoutineError, match="global_turn_on_voltage not found"):
@@ -180,11 +190,8 @@ def test_find_sensor_peak_zero_control_side_sets_control_gates():
 
 
 def test_find_sensor_peak_gate_voltage_overrides_apply():
-    """Provide gate_voltage_overrides and ensure _build_sensor_sweep_voltage_list
+    """Provide gate_voltage_overrides and ensure build_sensor_sweep_voltage_list
     honors them for reservoirs/shared gates during many_window_barrier_sweep."""
-    from stanza.routines.builtins.charge_sensor_compensation import (
-        _build_sensor_sweep_voltage_list,
-    )
 
     # Test the helper function directly
     sensor_gates_list = ["G1", "G2", "G3"]
@@ -193,7 +200,7 @@ def test_find_sensor_peak_gate_voltage_overrides_apply():
     plunger_voltages = np.linspace(-1.0, -0.5, 5)
     gate_overrides = {"G1": 0.8, "G2": 0.9}
 
-    voltage_list = _build_sensor_sweep_voltage_list(
+    voltage_list = build_sensor_sweep_voltage_list(
         sensor_gates_list=sensor_gates_list,
         sensor_plunger_index=sensor_plunger_index,
         base_voltage=base_voltage,
@@ -233,9 +240,6 @@ def test_many_window_barrier_sweep_enforces_ml_window_size():
 def test_sensor_dot_output_captures_aggregated_traces_and_metadata():
     """Ensure SensorDotPlungerSweepOutput stores the aggregated voltages/currents
     plus the last classification flag and peak indices."""
-    from stanza.routines.builtins.charge_sensor_compensation import (
-        SensorDotPlungerSweepOutput,
-    )
 
     # Create mock data
     aggregated_voltages = np.linspace(-1.0, -0.5, 256)
@@ -324,11 +328,6 @@ def test_peak_finder_receives_full_aggregated_trace():
 def test_find_stable_sensor_peak_prefers_stable_peaks():
     """Provide peak candidates with varying noise to verify the routine picks
     the highest combined score even if the raw quality is lower."""
-    from stanza.routines.builtins.charge_sensor_compensation import (
-        StabilityMeasurement,
-        StablePeakCandidate,
-        _calculate_combined_scores,
-    )
 
     # Create mock fitted peaks with different quality scores
     mock_fit = ModelFitResult(
@@ -529,9 +528,6 @@ def test_stability_measurement_holds_at_max_gradient():
     """For each candidate peak, confirm the device is positioned at
     sensitivity_voltage (max gradient point) during the 2-minute hold."""
     # This test verifies the conceptual behavior - positioning at max gradient
-    from stanza.routines.builtins.charge_sensor_compensation import (
-        StabilityMeasurement,
-    )
 
     # Create a mock stability measurement
     peak_voltage = -0.7
@@ -559,9 +555,6 @@ def test_stability_measurement_holds_at_max_gradient():
 def test_stability_measures_current_vs_time():
     """Verify stability measurement records continuous current samples over
     the configured hold time (default 120s) with timestamps."""
-    from stanza.routines.builtins.charge_sensor_compensation import (
-        StabilityMeasurement,
-    )
 
     # Simulate 120-second measurement with 100 samples
     hold_time = 120.0
@@ -596,9 +589,6 @@ def test_stability_measures_current_vs_time():
 def test_voltage_noise_calculated_from_gradient():
     """Confirm voltage noise computation uses formula σᵥ = σᵢ / |dI/dV|
     where σᵢ is current std and dI/dV is local slope at max gradient."""
-    from stanza.routines.builtins.charge_sensor_compensation import (
-        _calculate_voltage_noise,
-    )
 
     current_std = 1e-11  # 10 pA std
     local_slope = 2e-6  # 2 µA/V
@@ -614,12 +604,6 @@ def test_stability_score_inverts_voltage_noise():
     """Verify stability score is computed as 1/voltage_noise, then normalized
     by dividing by the maximum across all candidates."""
     # Create mock candidates with different voltage noise values
-    from stanza.routines.builtins.charge_sensor_compensation import (
-        StabilityMeasurement,
-        StablePeakCandidate,
-        _calculate_combined_scores,
-    )
-    from stanza.routines.builtins.utils.peak_fitting import ModelFitResult
 
     mock_fit = ModelFitResult(
         model_name="Lorentzian",
@@ -686,12 +670,6 @@ def test_stability_score_inverts_voltage_noise():
 def test_stable_peak_returns_highest_combined_score():
     """Among 3 tested candidates, confirm the routine selects the peak with
     maximum combined score, even if it had lower original quality."""
-    from stanza.routines.builtins.charge_sensor_compensation import (
-        StabilityMeasurement,
-        StablePeakCandidate,
-        _calculate_combined_scores,
-    )
-    from stanza.routines.builtins.utils.peak_fitting import ModelFitResult
 
     mock_fit = ModelFitResult(
         model_name="Lorentzian",
@@ -764,7 +742,7 @@ def test_stable_peak_returns_highest_combined_score():
 def test_stability_score_higher_for_lower_noise():
     """Verify that peak with lower voltage noise receives higher stability
     score (inverse relationship)."""
-    from stanza.routines.builtins.charge_sensor_compensation import (
+    from stanza.routines.builtins.charge_sensor.charge_sensor_find_sensor_peak import (
         StabilityMeasurement,
         StablePeakCandidate,
         _calculate_combined_scores,

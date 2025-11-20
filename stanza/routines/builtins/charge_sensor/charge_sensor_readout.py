@@ -26,10 +26,7 @@ where:
 # Standard library imports
 import logging
 import time
-from collections.abc import Sequence
 from typing import Any
-
-import matplotlib.pyplot as plt
 
 # Third-party imports
 import numpy as np
@@ -137,23 +134,6 @@ def _calculate_compensated_voltages(
 
     gate_electrodes = [g1_name, g2_name, charge_sensor_plunger_gate]
     return voltages_with_compensation, compensation_applied, gate_electrodes
-
-
-def _reshape_serpentine_grid(
-    values: Sequence[float], sweep_resolution: int
-) -> np.ndarray:
-    """
-    Convert a 1D list of serpentine-sweep values into a 2D grid where each row
-    runs left-to-right in the same voltage order.
-
-    Args:
-        values: Flat measurement array collected in serpentine order
-        sweep_resolution: Number of points per sweep dimension
-    """
-    grid = np.array(values, dtype=float).reshape(sweep_resolution, sweep_resolution)
-    # Odd rows were acquired right-to-left; flip them to align increasing axis order.
-    grid[1::2] = grid[1::2, ::-1]
-    return grid
 
 
 @routine
@@ -881,25 +861,8 @@ def charge_sensor_csd_readout(  # pylint: disable=too-many-locals,too-many-state
             current_measurements = current_measurements_rep
             currents_list.append(current_measurements)
             feedback_corrections_list.append(feedback_corrections_rep)
-            current_grid = _reshape_serpentine_grid(
-                current_measurements, sweep_resolution
-            )
+
             g1_name, g2_name = control_plunger_gates
-            g1_start, g1_end = control_plunger_ranges[g1_name]
-            g2_start, g2_end = control_plunger_ranges[g2_name]
-            plt.imshow(
-                current_grid,
-                cmap="viridis",
-                origin="lower",
-                extent=[g2_start, g2_end, g1_start, g1_end],
-                aspect="auto",
-            )
-            plt.colorbar(label="Current (A)")
-            plt.xlabel(f"{g2_name} Voltage (V)")
-            plt.ylabel(f"{g1_name} Voltage (V)")
-            plt.title("Compensated Charge Sensor Readout")
-            plt.savefig(f"current_measurements_{i}.png")
-            plt.close()
 
             session.log_sweep(
                 name="charge_sensor_csd_readout",

@@ -1,25 +1,46 @@
 """Tests for charge sensor compensation routines and utilities."""
 
+from collections import Counter
+from unittest.mock import Mock, patch
+
 import numpy as np
 import pytest
 
 from stanza.exceptions import RoutineError
-from stanza.routines.builtins.charge_sensor_compensation import (
+from stanza.logger.session import LoggerSession
+from stanza.models import DeviceGroup
+from stanza.routines import RoutineContext
+from stanza.routines.builtins.charge_sensor.charge_sensor_compensation import (
     RANSACFitResult,
+    _single_window_sensor_plunger_sweep,
+    fit_compensation_gradient_ransac,
+    run_compensation,
+)
+from stanza.routines.builtins.charge_sensor.charge_sensor_find_sensor_peak import (
+    PeakWindowSweepOutput,
     StabilityMeasurement,
     StablePeakCandidate,
-    _build_sensor_sweep_voltage_list,
     _calculate_combined_scores,
     _calculate_local_slope,
-    _calculate_peak_window_bounds,
-    _calculate_quality_scores,
     _calculate_voltage_noise,
     _normalize_sensitivity_scores,
-    fit_compensation_gradient_ransac,
+    build_sensor_sweep_voltage_list,
+    calculate_peak_window_bounds,
+    calculate_quality_scores,
+)
+from stanza.routines.builtins.charge_sensor.constants import (
+    DEFAULT_WINDOW_HALF_WIDTH,
+    ML_MODEL_INPUT_SIZE,
+    MULTIPLER_OF_PEAK_SPACING,
+    NUM_OF_SAMPLES_FOR_AVERAGING,
+    WINDOW_FRACTION,
 )
 from stanza.routines.builtins.utils.peak_fitting import (
     FittedPeak,
     ModelFitResult,
+    calculate_quality_score,
+    fit_peak_multi_model,
+    lorentzian,
 )
 
 # =============================================================================
@@ -27,8 +48,8 @@ from stanza.routines.builtins.utils.peak_fitting import (
 # =============================================================================
 
 
-def test_build_sensor_sweep_voltage_list_respects_overrides():
-    """Ensure _build_sensor_sweep_voltage_list keeps non-plunger gates at base voltage
+def testbuild_sensor_sweep_voltage_list_respects_overrides():
+    """Ensure build_sensor_sweep_voltage_list keeps non-plunger gates at base voltage
     while honoring per-gate overrides and varying only the targeted plunger."""
     sensor_gates_list = ["gate1", "gate2", "gate3", "gate4"]
     sensor_plunger_index = 1  # gate2 is the plunger
@@ -36,7 +57,7 @@ def test_build_sensor_sweep_voltage_list_respects_overrides():
     plunger_voltages = np.array([0.1, 0.2, 0.3])
     gate_voltage_overrides = {"gate3": 0.8, "gate4": 0.9}
 
-    voltage_list = _build_sensor_sweep_voltage_list(
+    voltage_list = build_sensor_sweep_voltage_list(
         sensor_gates_list=sensor_gates_list,
         sensor_plunger_index=sensor_plunger_index,
         base_voltage=base_voltage,
@@ -58,14 +79,14 @@ def test_build_sensor_sweep_voltage_list_respects_overrides():
         assert voltages[3] == 0.9
 
 
-def test_calculate_peak_window_bounds_handles_edge_peaks():
-    """Feed synthetic peak indices into _calculate_peak_window_bounds and verify
+def testcalculate_peak_window_bounds_handles_edge_peaks():
+    """Feed synthetic peak indices into calculate_peak_window_bounds and verify
     first/middle/last peaks clamp to trace limits with WINDOW_FRACTION rules."""
     trace_length = 1000
 
     # Test first peak
     peak_indices = [100, 400, 700]
-    start, end = _calculate_peak_window_bounds(
+    start, end = calculate_peak_window_bounds(
         peak_idx=100, peak_index=0, peak_indices=peak_indices, trace_length=trace_length
     )
     assert start >= 0
@@ -73,7 +94,7 @@ def test_calculate_peak_window_bounds_handles_edge_peaks():
     assert start < 100 < end
 
     # Test middle peak
-    start, end = _calculate_peak_window_bounds(
+    start, end = calculate_peak_window_bounds(
         peak_idx=400, peak_index=1, peak_indices=peak_indices, trace_length=trace_length
     )
     assert start >= 0
@@ -81,7 +102,7 @@ def test_calculate_peak_window_bounds_handles_edge_peaks():
     assert start < 400 < end
 
     # Test last peak
-    start, end = _calculate_peak_window_bounds(
+    start, end = calculate_peak_window_bounds(
         peak_idx=700, peak_index=2, peak_indices=peak_indices, trace_length=trace_length
     )
     assert start >= 0
@@ -89,7 +110,7 @@ def test_calculate_peak_window_bounds_handles_edge_peaks():
     assert start < 700 < end
 
     # Test single peak (should use entire trace)
-    start, end = _calculate_peak_window_bounds(
+    start, end = calculate_peak_window_bounds(
         peak_idx=500, peak_index=0, peak_indices=[500], trace_length=trace_length
     )
     assert start == 0
@@ -158,8 +179,8 @@ def test_normalize_sensitivity_scores_constant_inputs():
         assert peak.sensitivity_score == 1.0
 
 
-def test_calculate_quality_scores_requires_normalized_sensitivity():
-    """Call _calculate_quality_scores without pre-normalized scores and assert it raises RoutineError."""
+def testcalculate_quality_scores_requires_normalized_sensitivity():
+    """Call calculate_quality_scores without pre-normalized scores and assert it raises RoutineError."""
     peak = FittedPeak(
         best_model="Lorentzian",
         lorentzian_fit=ModelFitResult(
@@ -212,7 +233,7 @@ def test_calculate_quality_scores_requires_normalized_sensitivity():
     )
 
     with pytest.raises(RoutineError, match="Sensitivity score not set"):
-        _calculate_quality_scores([peak])
+        calculate_quality_scores([peak])
 
 
 def test_calculate_local_slope_window_validation():
@@ -333,9 +354,6 @@ def test_run_compensation_randomizes_measurement_sequence():
     # This test verifies the conceptual behavior, but requires access to internal implementation
     # For now, we'll test that the measurement samples contain the expected number of entries
     # This is a placeholder test that would need to be expanded with actual mocking
-    from stanza.routines.builtins.charge_sensor_compensation import (
-        NUM_OF_SAMPLES_FOR_AVERAGING,
-    )
 
     # Create synthetic measurement samples
     num_voltage_points = 10
@@ -457,7 +475,7 @@ def test_calculate_combined_scores():
 
 def test_peak_region_partitioning_prevents_overlap_large_spacing():
     """With widely spaced peaks (> DEFAULT_WINDOW_HALF_WIDTH), ensure
-    _calculate_peak_window_bounds windows do not overlap other peaks."""
+    calculate_peak_window_bounds windows do not overlap other peaks."""
     # Create peaks with large spacing (100 points apart)
     peak_indices = [50, 150, 250]
     trace_length = 300
@@ -465,7 +483,7 @@ def test_peak_region_partitioning_prevents_overlap_large_spacing():
     # Calculate bounds for each peak
     bounds = []
     for i, peak_idx in enumerate(peak_indices):
-        result = _calculate_peak_window_bounds(peak_idx, i, peak_indices, trace_length)
+        result = calculate_peak_window_bounds(peak_idx, i, peak_indices, trace_length)
         if result is not None:
             bounds.append(result)
 
@@ -492,7 +510,7 @@ def test_peak_region_partitioning_prevents_overlap_small_spacing():
     # Calculate bounds for each peak
     bounds = []
     for i, peak_idx in enumerate(peak_indices):
-        result = _calculate_peak_window_bounds(peak_idx, i, peak_indices, trace_length)
+        result = calculate_peak_window_bounds(peak_idx, i, peak_indices, trace_length)
         if result is not None:
             bounds.append(result)
 
@@ -514,11 +532,6 @@ def test_peak_region_partitioning_prevents_overlap_small_spacing():
 def test_run_compensation_validates_gates_to_compensate():
     """Pass invalid gate names to run_compensation and assert it raises
     the documented error."""
-    from unittest.mock import Mock, patch
-
-    from stanza.models import DeviceGroup
-    from stanza.routines import RoutineContext
-    from stanza.routines.builtins.charge_sensor_compensation import run_compensation
 
     # Create mock context with required results
     mock_ctx = Mock(spec=RoutineContext)
@@ -546,7 +559,7 @@ def test_run_compensation_validates_gates_to_compensate():
 
     # Patch filter_gates_by_group to return gates as-is
     with patch(
-        "stanza.routines.builtins.charge_sensor_compensation.filter_gates_by_group",
+        "stanza.routines.builtins.charge_sensor.charge_sensor_compensation.filter_gates_by_group",
         side_effect=lambda ctx, gates: gates,
     ):
         # Try to compensate invalid gates
@@ -567,11 +580,6 @@ def test_run_compensation_validates_gates_to_compensate():
 def test_run_compensation_restores_device_state_on_error():
     """Force an exception mid-measurement and confirm both control and sensor
     voltages are reset in the finally block."""
-    from unittest.mock import Mock, patch
-
-    from stanza.models import DeviceGroup
-    from stanza.routines import RoutineContext
-    from stanza.routines.builtins.charge_sensor_compensation import run_compensation
 
     # Create mock context
     mock_ctx = Mock(spec=RoutineContext)
@@ -617,29 +625,18 @@ def test_run_compensation_restores_device_state_on_error():
 
     # Patch necessary functions
     with patch(
-        "stanza.routines.builtins.charge_sensor_compensation.filter_gates_by_group",
+        "stanza.routines.builtins.charge_sensor.charge_sensor_compensation.filter_gates_by_group",
         side_effect=lambda ctx, gates: gates,
     ):
-        with patch(
-            "stanza.routines.builtins.charge_sensor_compensation.ConductorQuantum"
-        ) as mock_cq:
-            mock_cq_instance = Mock()
-            mock_cq_instance.Classifier.predict.return_value = {
-                "classification": True,
-                "score": 0.95,
-            }
-            mock_cq_instance.DotDetector.predict.return_value = {"peaks": [64]}
-            mock_cq.return_value = mock_cq_instance
-
-            with pytest.raises(RoutineError, match="Simulated device error"):
-                run_compensation(
-                    ctx=mock_ctx,
-                    peak_spacing=0.02,
-                    control_group_name="control_group",
-                    measure_electrode="OUT",
-                    bias_gate="BIAS",
-                    bias_voltage=1e-4,
-                )
+        with pytest.raises(RoutineError, match="Simulated device error"):
+            run_compensation(
+                ctx=mock_ctx,
+                peak_spacing=0.02,
+                control_group_name="control_group",
+                measure_electrode="OUT",
+                bias_gate="BIAS",
+                bias_voltage=1e-4,
+            )
 
     # Verify device.jump was called in finally block to restore state
     assert mock_device.jump.call_count >= 2
@@ -648,12 +645,6 @@ def test_run_compensation_restores_device_state_on_error():
 def test_run_compensation_logs_per_sample_measurements():
     """Mock LoggerSession to assert per-sample log_analysis entries are
     emitted with the expected fields."""
-    from unittest.mock import Mock, patch
-
-    from stanza.logger.session import LoggerSession
-    from stanza.models import DeviceGroup
-    from stanza.routines import RoutineContext
-    from stanza.routines.builtins.charge_sensor_compensation import run_compensation
 
     # Create mock context
     mock_ctx = Mock(spec=RoutineContext)
@@ -689,20 +680,13 @@ def test_run_compensation_logs_per_sample_measurements():
 
     # Patch necessary functions
     with patch(
-        "stanza.routines.builtins.charge_sensor_compensation.filter_gates_by_group",
+        "stanza.routines.builtins.charge_sensor.charge_sensor_compensation.filter_gates_by_group",
         side_effect=lambda ctx, gates: gates,
     ):
         with patch(
-            "stanza.routines.builtins.charge_sensor_compensation._single_window_sensor_plunger_sweep"
+            "stanza.routines.builtins.charge_sensor.charge_sensor_compensation._single_window_sensor_plunger_sweep"
         ) as mock_sweep:
             # Mock the sweep to return a PeakWindowSweepOutput
-            from stanza.routines.builtins.charge_sensor_compensation import (
-                PeakWindowSweepOutput,
-            )
-            from stanza.routines.builtins.utils.peak_fitting import (
-                FittedPeak,
-                ModelFitResult,
-            )
 
             mock_peak = FittedPeak(
                 peak_idx=50,
@@ -757,12 +741,6 @@ def test_run_compensation_logs_per_sample_measurements():
 def test_single_window_sweep_repeats_measurements_around_park_point():
     """Ensure _single_window_sensor_plunger_sweep performs sweep measurements
     and returns a fitted peak."""
-    from unittest.mock import Mock, patch
-
-    from stanza.routines import RoutineContext
-    from stanza.routines.builtins.charge_sensor_compensation import (
-        _single_window_sensor_plunger_sweep,
-    )
 
     # Create mock context
     mock_ctx = Mock(spec=RoutineContext)
@@ -777,31 +755,17 @@ def test_single_window_sweep_repeats_measurements_around_park_point():
     mock_resources.device = mock_device
     mock_ctx.resources = mock_resources
 
-    # Mock ConductorQuantum
-    with patch(
-        "stanza.routines.builtins.charge_sensor_compensation.ConductorQuantum"
-    ) as mock_cq:
-        mock_cq_instance = Mock()
-        mock_cq_instance.Classifier.predict.return_value = {
-            "classification": True,
-            "score": 0.95,
-        }
-        mock_cq_instance.DotDetector.predict.return_value = {
-            "peaks": [64]  # Middle of 128-point window
-        }
-        mock_cq.return_value = mock_cq_instance
-
-        result = _single_window_sensor_plunger_sweep(
-            ctx=mock_ctx,
-            sensor_gates_list=["G1", "G2", "G3"],
-            sensor_plunger_range=(-1.0, -0.5),
-            mean_reservoir_saturation_voltage=0.5,
-            sensor_plunger_index=2,
-            step_size=0.001,
-            measure_electrode="OUT",
-            bias_gate="BIAS",
-            bias_voltage=1e-4,
-        )
+    result = _single_window_sensor_plunger_sweep(
+        ctx=mock_ctx,
+        sensor_gates_list=["G1", "G2", "G3"],
+        sensor_plunger_range=(-1.0, -0.5),
+        mean_reservoir_saturation_voltage=0.5,
+        sensor_plunger_index=2,
+        step_size=0.001,
+        measure_electrode="OUT",
+        bias_gate="BIAS",
+        bias_voltage=1e-4,
+    )
 
     # Verify a PeakWindowSweepOutput was returned
     assert result is not None
@@ -817,9 +781,8 @@ def test_single_window_sweep_repeats_measurements_around_park_point():
 
 
 def test_peak_windowing_uses_distance_percentage():
-    """With multiple detected peaks, verify _calculate_peak_window_bounds uses
+    """With multiple detected peaks, verify calculate_peak_window_bounds uses
     WINDOW_FRACTION (0.8) of inter-peak distance to set window boundaries."""
-    from stanza.routines.builtins.charge_sensor_compensation import WINDOW_FRACTION
 
     # Three peaks with spacing of 100 points
     peak_indices = [50, 150, 250]
@@ -827,7 +790,7 @@ def test_peak_windowing_uses_distance_percentage():
     peak_idx = 150  # Middle peak
     peak_index = 1
 
-    start_idx, end_idx = _calculate_peak_window_bounds(
+    start_idx, end_idx = calculate_peak_window_bounds(
         peak_idx=peak_idx,
         peak_index=peak_index,
         peak_indices=peak_indices,
@@ -849,9 +812,6 @@ def test_peak_windowing_uses_distance_percentage():
 def test_peak_windowing_clips_to_max_size():
     """When peaks are widely spaced (>256 points apart), confirm windows are
     clipped to DEFAULT_WINDOW_HALF_WIDTH (128 points on each side)."""
-    from stanza.routines.builtins.charge_sensor_compensation import (
-        DEFAULT_WINDOW_HALF_WIDTH,
-    )
 
     # Widely spaced peaks
     peak_indices = [200, 600, 1000]  # 400 points apart
@@ -859,7 +819,7 @@ def test_peak_windowing_clips_to_max_size():
     peak_idx = 600
     peak_index = 1
 
-    start_idx, end_idx = _calculate_peak_window_bounds(
+    start_idx, end_idx = calculate_peak_window_bounds(
         peak_idx=peak_idx,
         peak_index=peak_index,
         peak_indices=peak_indices,
@@ -884,7 +844,7 @@ def test_peak_windowing_handles_trace_boundaries():
     peak_idx = 10
     peak_index = 0
 
-    start_idx, end_idx = _calculate_peak_window_bounds(
+    start_idx, end_idx = calculate_peak_window_bounds(
         peak_idx=peak_idx,
         peak_index=peak_index,
         peak_indices=peak_indices,
@@ -901,7 +861,7 @@ def test_peak_windowing_handles_trace_boundaries():
     peak_index = 2
     peak_indices = [100, 300, 490]
 
-    start_idx, end_idx = _calculate_peak_window_bounds(
+    start_idx, end_idx = calculate_peak_window_bounds(
         peak_idx=peak_idx,
         peak_index=peak_index,
         peak_indices=peak_indices,
@@ -930,7 +890,7 @@ def test_peak_window_contains_peak_center():
     ]
 
     for peak_indices, peak_index, peak_idx in test_cases:
-        result = _calculate_peak_window_bounds(
+        result = calculate_peak_window_bounds(
             peak_idx=peak_idx,
             peak_index=peak_index,
             peak_indices=peak_indices,
@@ -960,8 +920,6 @@ def test_peak_quality_score_weights_components():
     skew = 0.15
     sensitivity_score = 0.85
 
-    from stanza.routines.builtins.utils.peak_fitting import calculate_quality_score
-
     quality = calculate_quality_score(r_squared, rmse, y_max, skew, sensitivity_score)
 
     # Expected: 0.7*0.90 - 0.05*0.02 - 0.05*0.15 + 0.2*0.85
@@ -973,7 +931,6 @@ def test_sensitivity_score_normalized_across_peaks():
     """With N detected peaks, confirm sensitivity scores are min-max normalized
     to [0, 1] range before quality calculation."""
     # Create peaks with different sensitivities
-    from stanza.routines.builtins.utils.peak_fitting import ModelFitResult
 
     mock_fit = ModelFitResult(
         model_name="Lorentzian",
@@ -1026,7 +983,6 @@ def test_find_sensor_peak_returns_highest_quality():
     """Feed synthetic sweep with multiple peaks of known quality and verify
     the routine calculates quality scores for all peaks."""
     # Create synthetic trace with multiple Lorentzian peaks at different quality levels
-    from stanza.routines.builtins.utils.peak_fitting import lorentzian
 
     voltages = np.linspace(-1.0, -0.5, 500)
 
@@ -1061,12 +1017,11 @@ def test_find_sensor_peak_returns_highest_quality():
     # Fit all peaks
     fitted_peaks = []
     for peak_number, peak_idx in enumerate(peak_indices):
-        bounds = _calculate_peak_window_bounds(
+        bounds = calculate_peak_window_bounds(
             peak_idx, peak_number, peak_indices, len(currents)
         )
         if bounds:
             start_idx, end_idx = bounds
-            from stanza.routines.builtins.utils.peak_fitting import fit_peak_multi_model
 
             peak = fit_peak_multi_model(
                 window_currents=currents[start_idx:end_idx],
@@ -1081,7 +1036,7 @@ def test_find_sensor_peak_returns_highest_quality():
 
     # Normalize and calculate quality scores
     _normalize_sensitivity_scores(fitted_peaks)
-    _calculate_quality_scores(fitted_peaks)
+    calculate_quality_scores(fitted_peaks)
 
     # Verify all peaks have quality scores calculated
     assert len(fitted_peaks) == 3
@@ -1119,9 +1074,6 @@ def test_compensation_positions_at_park_point():
 def test_baseline_repeats_configured_samples():
     """Confirm baseline measurement performs exactly NUM_OF_SAMPLES_FOR_AVERAGING (5)
     repeat sweeps at the park point."""
-    from stanza.routines.builtins.charge_sensor_compensation import (
-        NUM_OF_SAMPLES_FOR_AVERAGING,
-    )
 
     # Verify the constant is correctly defined
     assert NUM_OF_SAMPLES_FOR_AVERAGING == 5
@@ -1150,9 +1102,6 @@ def test_baseline_uses_median_for_robustness():
 def test_perturbation_creates_symmetric_voltage_range():
     """Verify voltage differences span ±(MULTIPLER_OF_PEAK_SPACING × peak_spacing)
     symmetrically around baseline, excluding zero."""
-    from stanza.routines.builtins.charge_sensor_compensation import (
-        MULTIPLER_OF_PEAK_SPACING,
-    )
 
     peak_spacing = 0.02  # 20 mV
     max_delta = MULTIPLER_OF_PEAK_SPACING * peak_spacing
@@ -1188,7 +1137,6 @@ def test_perturbation_applies_relative_to_baseline():
 def test_perturbation_measures_peak_shift_via_1d_sweep():
     """For each perturbed voltage, verify a full 1D sensor plunger sweep is
     performed through the narrowed range."""
-    from stanza.routines.builtins.charge_sensor_compensation import ML_MODEL_INPUT_SIZE
 
     # This is conceptual - in actual implementation, each perturbation triggers
     # a 1D sweep with _single_window_sensor_plunger_sweep
@@ -1211,7 +1159,6 @@ def test_perturbation_measures_peak_shift_via_1d_sweep():
 def test_peak_position_uses_fitted_center():
     """Verify peak movement is measured using the interpolated/fitted peak center
     voltage (from multi-model fit) rather than raw peak detector index."""
-    from stanza.routines.builtins.utils.peak_fitting import ModelFitResult
 
     # Create a fitted peak
     mock_fit = ModelFitResult(
@@ -1258,10 +1205,6 @@ def test_peak_shift_relative_to_baseline_median():
 def test_fitted_peak_more_accurate_than_discrete():
     """Generate synthetic peaks and verify fitted peak centers have sub-step-size
     resolution compared to discrete voltage points."""
-    from stanza.routines.builtins.utils.peak_fitting import (
-        fit_peak_multi_model,
-        lorentzian,
-    )
 
     # Create synthetic peak with known center at non-integer index
     voltages = np.linspace(0.0, 0.1, 100)
@@ -1320,11 +1263,6 @@ def test_voltage_differences_randomized_in_time():
 def test_each_voltage_measured_n_times():
     """Despite random ordering, confirm each of the 10 voltage differences is
     measured exactly NUM_OF_SAMPLES_FOR_AVERAGING times."""
-    from collections import Counter
-
-    from stanza.routines.builtins.charge_sensor_compensation import (
-        NUM_OF_SAMPLES_FOR_AVERAGING,
-    )
 
     num_voltages = 10
     voltage_deltas = np.linspace(-0.01, 0.01, num_voltages)
@@ -1415,10 +1353,6 @@ def test_ransac_gradient_as_compensation_ratio():
 def test_per_sample_deltas_logged_immediately():
     """Verify each individual measurement (100 total for 10 voltages × 10 samples)
     is logged with control_delta, peak_position, and peak_shift fields."""
-    from stanza.routines.builtins.charge_sensor_compensation import (
-        NUM_OF_SAMPLES_FOR_AVERAGING,
-    )
-
     # This conceptual test verifies logging structure
     num_voltages = 10
     samples_per_voltage = NUM_OF_SAMPLES_FOR_AVERAGING

@@ -8,9 +8,8 @@ import pytest
 from stanza.exceptions import RoutineError
 from stanza.models import DeviceGroup, Gate, GateType
 from stanza.registry import ResultsRegistry
-from stanza.routines.builtins.charge_sensor_readout import (
+from stanza.routines.builtins.charge_sensor.charge_sensor_readout import (
     _calculate_compensated_voltages,
-    _reshape_serpentine_grid,
     charge_sensor_csd_readout,
 )
 from stanza.routines.core import RoutineContext
@@ -110,46 +109,6 @@ def create_mock_session():
     mock_session.log_analysis = Mock()
     mock_session.log_measurement = Mock()
     return mock_session
-
-
-# =============================================================================
-# Helper Utilities Tests
-# =============================================================================
-
-
-def test_reshape_serpentine_grid_flips_odd_rows():
-    """Verify _reshape_serpentine_grid correctly flips odd-indexed rows to convert
-    serpentine scan order into raster grid format."""
-    sweep_resolution = 4
-    # Create test data: row 0 = [0,1,2,3], row 1 = [7,6,5,4] (reversed), row 2 = [8,9,10,11], row 3 = [15,14,13,12] (reversed)
-    serpentine_data = [0, 1, 2, 3, 7, 6, 5, 4, 8, 9, 10, 11, 15, 14, 13, 12]
-
-    grid = _reshape_serpentine_grid(serpentine_data, sweep_resolution)
-
-    # Row 0 (even) should remain: [0,1,2,3]
-    np.testing.assert_array_equal(grid[0], [0, 1, 2, 3])
-    # Row 1 (odd) should be flipped: [7,6,5,4] -> [4,5,6,7]
-    np.testing.assert_array_equal(grid[1], [4, 5, 6, 7])
-    # Row 2 (even) should remain: [8,9,10,11]
-    np.testing.assert_array_equal(grid[2], [8, 9, 10, 11])
-    # Row 3 (odd) should be flipped: [15,14,13,12] -> [12,13,14,15]
-    np.testing.assert_array_equal(grid[3], [12, 13, 14, 15])
-
-
-def test_reshape_serpentine_grid_preserves_even_rows():
-    """Confirm even-indexed rows remain unchanged during serpentine-to-raster conversion."""
-    sweep_resolution = 3
-    # Even rows should NOT be flipped
-    serpentine_data = [1, 2, 3, 6, 5, 4, 7, 8, 9]
-
-    grid = _reshape_serpentine_grid(serpentine_data, sweep_resolution)
-
-    # Row 0 (even) preserved
-    np.testing.assert_array_equal(grid[0], [1, 2, 3])
-    # Row 1 (odd) flipped: [6,5,4] -> [4,5,6]
-    np.testing.assert_array_equal(grid[1], [4, 5, 6])
-    # Row 2 (even) preserved
-    np.testing.assert_array_equal(grid[2], [7, 8, 9])
 
 
 # =============================================================================
@@ -298,18 +257,6 @@ def test_serpentine_pattern_eliminates_voltage_jumps():
             assert sensor_jump < 0.05, (
                 f"Large sensor jump at row boundary {idx}: {sensor_jump}"
             )
-
-
-def test_reshape_serpentine_grid_matches_sweep_resolution():
-    """Ensure _reshape_serpentine_grid output shape is (sweep_resolution, sweep_resolution)
-    and data type is float."""
-    sweep_resolution = 5
-    serpentine_data = list(range(sweep_resolution**2))
-
-    grid = _reshape_serpentine_grid(serpentine_data, sweep_resolution)
-
-    assert grid.shape == (sweep_resolution, sweep_resolution)
-    assert grid.dtype == np.float64
 
 
 # =============================================================================
@@ -1191,7 +1138,9 @@ def test_clipping_events_logged_in_summary():
     mock_session = create_mock_session()
 
     # Run with parameters that may cause clipping
-    with patch("stanza.routines.builtins.charge_sensor_readout.logger") as mock_logger:
+    with patch(
+        "stanza.routines.builtins.charge_sensor.charge_sensor_readout.logger"
+    ) as mock_logger:
         charge_sensor_csd_readout(
             ctx=ctx,
             charge_sensor_group_name="sensor_group",
@@ -1757,50 +1706,6 @@ def test_serpentine_produces_continuous_path():
         assert distance <= step_size * 1.5, f"Large jump at index {i}: {distance}"
 
 
-def test_reshape_serpentine_restores_raster_grid():
-    """After measurement, verify _reshape_serpentine_grid correctly unflips
-    odd rows to produce regular 2D grid."""
-    sweep_resolution = 4
-
-    # Simulate serpentine measurement order
-    # Row 0: [0, 1, 2, 3] -> stays as is
-    # Row 1: [7, 6, 5, 4] -> flipped from [4, 5, 6, 7]
-    # Row 2: [8, 9, 10, 11] -> stays as is
-    # Row 3: [15, 14, 13, 12] -> flipped from [12, 13, 14, 15]
-    serpentine_data = [
-        0,
-        1,
-        2,
-        3,
-        7,
-        6,
-        5,
-        4,
-        8,
-        9,
-        10,
-        11,
-        15,
-        14,
-        13,
-        12,
-    ]
-
-    grid = _reshape_serpentine_grid(serpentine_data, sweep_resolution)
-
-    # After reshaping, should have regular raster grid
-    expected_grid = np.array(
-        [
-            [0, 1, 2, 3],
-            [4, 5, 6, 7],
-            [8, 9, 10, 11],
-            [12, 13, 14, 15],
-        ]
-    )
-
-    np.testing.assert_array_equal(grid, expected_grid)
-
-
 # =============================================================================
 # Voltage Clipping Safety Tests
 # =============================================================================
@@ -1873,7 +1778,9 @@ def test_sensor_clipping_logged_as_warning():
     mock_session = create_mock_session()
 
     # Use parameters that will cause clipping
-    with patch("stanza.routines.builtins.charge_sensor_readout.logger") as mock_logger:
+    with patch(
+        "stanza.routines.builtins.charge_sensor.charge_sensor_readout.logger"
+    ) as mock_logger:
         charge_sensor_csd_readout(
             ctx=ctx,
             charge_sensor_group_name="sensor_group",

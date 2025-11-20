@@ -1,7 +1,10 @@
 """Built-in routines for common health check and measurement tasks."""
 
-from stanza.routines.builtins.charge_sensor_readout import (
+from stanza.routines.builtins.charge_sensor import (
     charge_sensor_csd_readout,
+    find_sensor_peak,
+    find_stable_sensor_peak,
+    run_compensation,
 )
 from stanza.routines.builtins.health_check import (
     finger_gate_characterization,
@@ -17,5 +20,8 @@ __all__ = [
     "global_accumulation",
     "reservoir_characterization",
     "finger_gate_characterization",
+    "run_compensation",
+    "find_sensor_peak",
+    "find_stable_sensor_peak",
     "charge_sensor_csd_readout",
 ]

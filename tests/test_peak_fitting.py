@@ -92,7 +92,7 @@ def test_calculate_aicc_returns_inf_for_invalid_inputs():
 
 def test_measure_peak_stability_combines_quality_and_noise():
     """Verify _calculate_combined_scores weights stability 70% and original quality 30%."""
-    from stanza.routines.builtins.charge_sensor_compensation import (
+    from stanza.routines.builtins.charge_sensor.charge_sensor_find_sensor_peak import (
         StabilityMeasurement,
         StablePeakCandidate,
         _calculate_combined_scores,
