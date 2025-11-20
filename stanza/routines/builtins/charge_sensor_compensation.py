@@ -72,7 +72,7 @@ ML_MODEL_INPUT_SIZE = 128
 # full peak width plus sufficient context for accurate ML classification
 INITIAL_WINDOW_MULTIPLIER = 2
 
-PERTURBATION_DIVISOR = 10
+PERTURBATION_DIVISOR = 20
 
 # Use 80% of inter-peak distance for peak fitting windows to avoid
 # overlapping windows while maximizing window size for better fit quality
@@ -90,14 +90,14 @@ REFINED_STEP_MULTIPLIER = 0.5
 
 
 # Number of samples to average for each gate compensation measurement
-NUM_OF_SAMPLES_FOR_AVERAGING = 3
+NUM_OF_SAMPLES_FOR_AVERAGING = 5
 
 # ML model constants
 COULOMB_CLASSIFIER_MODEL = "coulomb-blockade-classifier-v3"
 PEAK_DETECTOR_MODEL = "coulomb-blockade-peak-detector-v2"
 
 
-MULTIPLER_OF_PEAK_SPACING = 0.2
+MULTIPLER_OF_PEAK_SPACING = 0.3
 
 
 @dataclass
@@ -810,15 +810,16 @@ def _calculate_voltage_noise(current_std: float, local_slope: float) -> float:
 
 def _calculate_combined_scores(
     candidates: list[StablePeakCandidate],
-    original_weight: float = 0.3,
-    stability_weight: float = 0.7,
+    original_weight: float = 0.5,
+    stability_weight: float = 0.5,
 ) -> None:
     """
     Calculate combined scores for all peak candidates using weighted scoring.
 
-    Combines original peak quality scores with stability scores. Both scores
-    are min-max normalized to [0, 1] before weighting. Higher stability scores
-    correspond to lower voltage noise (more stable peaks).
+    Combines original peak quality scores with stability scores. Original scores
+    are min-max normalized to [0, 1]. Stability scores are computed as 1/voltage_noise
+    and normalized by dividing by max. Higher stability scores correspond to lower
+    voltage noise (more stable peaks).
 
     Modifies candidates in-place by setting:
     - stability_measurement.stability_score (normalized)
@@ -826,8 +827,8 @@ def _calculate_combined_scores(
 
     Args:
         candidates: List of StablePeakCandidate objects
-        original_weight: Weight for original quality score (default: 0.3)
-        stability_weight: Weight for stability score (default: 0.7)
+        original_weight: Weight for original quality score (default: 0.5)
+        stability_weight: Weight for stability score (default: 0.5)
 
     Raises:
         RoutineError: If weights don't sum to 1.0 or no candidates provided
@@ -867,21 +868,15 @@ def _calculate_combined_scores(
         normalized_original = [1.0] * len(candidates)
 
     # Convert voltage noise to stability score (invert: lower noise = higher score)
-    # stability_score = 1 / voltage_noise, then normalize
+    # stability_score = 1 / voltage_noise, then normalize by dividing by max
+    # This preserves relative ratios: best peak = 1.0, others = their_score / max_score
     # Note: voltage_noises are already validated to be positive and finite
     stability_scores_raw = [1.0 / vn for vn in voltage_noises]
 
-    min_stab = min(stability_scores_raw)
     max_stab = max(stability_scores_raw)
-    stab_range = max_stab - min_stab
 
-    if stab_range > 0:
-        normalized_stability = [
-            (score - min_stab) / stab_range for score in stability_scores_raw
-        ]
-    else:
-        # All stability scores identical
-        normalized_stability = [1.0] * len(candidates)
+    # Normalize by dividing by max (preserves relative ratios)
+    normalized_stability = [score / max_stab for score in stability_scores_raw]
 
     # Calculate combined scores and update candidates
     for i, candidate in enumerate(candidates):
@@ -2040,8 +2035,8 @@ def find_stable_sensor_peak(  # pylint: disable=too-many-locals,too-many-stateme
         )
         candidates.append(candidate)
 
-    # Calculate combined scores (30% original + 70% stability)
-    _calculate_combined_scores(candidates, original_weight=0.3, stability_weight=0.7)
+    # Calculate combined scores (50% original + 50% stability)
+    _calculate_combined_scores(candidates, original_weight=0.5, stability_weight=0.5)
 
     # Log combined scoring analysis
     if session:
@@ -2253,12 +2248,18 @@ def run_compensation(  # pylint: disable=too-many-locals,too-many-statements
     control_gates = list(control_group.gates)
     control_gates = filter_gates_by_group(ctx, control_gates)
 
-    # Get results from find_sensor_peak routine
-    find_sensor_peak_results = ctx.results.get("find_sensor_peak", {})
+    # Get results from peak-finding routine
+    # Check for find_stable_sensor_peak first as it provides more robust peaks
+    # by measuring current stability at multiple candidate peaks over time.
+    # Fall back to find_sensor_peak for backward compatibility.
+    find_sensor_peak_results = ctx.results.get("find_stable_sensor_peak")
+    if find_sensor_peak_results is None:
+        find_sensor_peak_results = ctx.results.get("find_sensor_peak", {})
+
     if not find_sensor_peak_results:
         raise RoutineError(
-            "find_sensor_peak results not found in ctx.results. "
-            "Please run find_sensor_peak routine first."
+            "Peak-finding results not found in ctx.results. "
+            "Please run either find_stable_sensor_peak or find_sensor_peak routine first."
         )
 
     # Extract values from find_sensor_peak results
