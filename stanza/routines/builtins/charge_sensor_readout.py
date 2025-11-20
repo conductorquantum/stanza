@@ -213,9 +213,9 @@ def charge_sensor_csd_readout(  # pylint: disable=too-many-locals,too-many-state
         beta: Optional proportional feedback gain (V/A) for current-based sensor voltage
             correction. If None, no feedback is applied. When provided, sensor plunger
             voltage is adjusted at each measurement point to maintain current near park
-            point: delta_V = -beta * (I_measured - I_park_point). (default: None)
-        max_feedback_correction: Safety limit on per-point feedback correction magnitude
-            (V). Prevents runaway adjustments. Only used when beta is not None. (default: 0.1)
+            point: delta_V = -beta * (I_measured - I_park_point). Feedback corrections
+            are automatically limited to available voltage headroom at each point to
+            guarantee the sensor voltage stays within device limits. (default: None)
         gamma_factors: Optional per-gate adaptation gains {gate: gamma} for dynamic gradient
             updates (default: None). When provided, compensation gradients are updated at each
             measurement point using: A_C[x+1] = A_C[x] + (gamma/ΔV) * i_S[x], where i_S is the
@@ -250,7 +250,10 @@ def charge_sensor_csd_readout(  # pylint: disable=too-many-locals,too-many-state
             - beta: Proportional feedback gain used (V/A) or None
             - feedback_enabled: Boolean indicating if current feedback was applied
             - feedback_corrections: List of feedback corrections applied at each point (V)
-            - max_feedback_correction: Maximum allowed feedback correction (V)
+            - sensor_clipping_events_pre_feedback: Count of sensor voltage clipping events
+                before feedback correction (indicates compensation driving voltage out of bounds)
+            - gradient_clipping_events: Count of adaptive gradient clipping events
+                (indicates gamma too large or gradients growing unbounded)
             - gamma_factors: Dict of gamma adaptation gains used (or None)
             - gradient_adaptation_enabled: Boolean indicating if gradient adaptation was used
             - initial_gradients: Dict of initial gradient values before adaptation (or None)
@@ -275,6 +278,12 @@ def charge_sensor_csd_readout(  # pylint: disable=too-many-locals,too-many-state
         - Sensor voltage update: V_PS[x+1] = V_PS[x] + ΔV_1·A_C1[x] + ΔV_2·A_C2[x] - β·i_S[x]
         - Gradient adaptation: A_C[x+1] = A_C[x] + (γ/ΔV)·i_S_pre[x]
         where i_S_pre = I_measured - I_park_point (pre-feedback current error)
+
+        Feedback safety:
+        - Feedback corrections are dynamically limited at each point based on available
+          voltage headroom: correction is clipped to [-V_current + V_min, V_max - V_current]
+        - This guarantees sensor voltage never exceeds device voltage_range limits
+        - No post-feedback clipping is needed with this approach
 
         - Gradient updates use PRE-feedback error to learn compensation independently
         - Beta feedback is applied after gradient update, then current is re-measured
@@ -594,6 +603,11 @@ def charge_sensor_csd_readout(  # pylint: disable=too-many-locals,too-many-state
         # Perform multiple sweeps and average
         currents_list = []
         feedback_corrections_list = []
+
+        # Initialize clipping event counters
+        sensor_clipping_events_pre_feedback = 0
+        gradient_clipping_events = 0
+
         for i in range(num_sweep_repetitions):
             logger.info("Starting sweep %d of %d...", i + 1, num_sweep_repetitions)
 
@@ -678,16 +692,12 @@ def charge_sensor_csd_readout(  # pylint: disable=too-many-locals,too-many-state
 
                     # Handle None values in voltage_range (use conservative hardware limits)
                     if min_voltage is None:
-                        min_voltage = -10.0
-                        logger.warning(
-                            "No minimum voltage limit configured for %s, using -10V",
-                            charge_sensor_plunger_gate,
+                        raise RoutineError(
+                            f"No minimum voltage limit configured for {charge_sensor_plunger_gate}"
                         )
                     if max_voltage is None:
-                        max_voltage = 10.0
-                        logger.warning(
-                            "No maximum voltage limit configured for %s, using +10V",
-                            charge_sensor_plunger_gate,
+                        raise RoutineError(
+                            f"No maximum voltage limit configured for {charge_sensor_plunger_gate}"
                         )
 
                     # Check and clip if out of bounds
@@ -697,6 +707,7 @@ def charge_sensor_csd_readout(  # pylint: disable=too-many-locals,too-many-state
                             np.clip(sensor_voltage, min_voltage, max_voltage)
                         )
                         voltage_dict[charge_sensor_plunger_gate] = sensor_voltage
+                        sensor_clipping_events_pre_feedback += 1
                         logger.warning(
                             "Sensor voltage for %s out of bounds: %.6fV clipped to %.6fV (valid range: %.1f to %.1fV). "
                             "Point %d, Rep %d. Consider reducing gamma or max_adaptive_gradient.",
@@ -719,67 +730,46 @@ def charge_sensor_csd_readout(  # pylint: disable=too-many-locals,too-many-state
                 # Apply proportional feedback if enabled
                 feedback_correction = 0.0
                 if feedback_enabled:
-                    feedback_correction = -beta * current_error_pre  # type: ignore
+                    # Compute raw feedback correction
+                    feedback_correction_raw = -beta * current_error_pre  # type: ignore
 
-                    # Apply safety clamp
-                    feedback_correction = float(
-                        np.clip(
-                            feedback_correction,
-                            -max_feedback_correction,
-                            max_feedback_correction,
-                        )
-                    )
-
-                    # Adjust sensor voltage and re-apply
-                    voltage_dict[charge_sensor_plunger_gate] += feedback_correction
-                    if gradient_adaptation_enabled:
-                        current_sensor_voltage += (
-                            feedback_correction  # Track updated state
-                        )
-
-                    # Validate and clip sensor voltage after feedback correction
-                    sensor_voltage_fb = voltage_dict[charge_sensor_plunger_gate]
-
-                    # Get actual voltage range from device gate configuration
-                    min_voltage, max_voltage = device.channel_configs[
+                    # Get current sensor voltage and device limits
+                    current_sensor_v = voltage_dict[charge_sensor_plunger_gate]
+                    min_v, max_v = device.channel_configs[
                         charge_sensor_plunger_gate
                     ].voltage_range
 
-                    # Handle None values in voltage_range (use conservative hardware limits)
-                    if min_voltage is None:
-                        min_voltage = -10.0
-                    if max_voltage is None:
-                        max_voltage = 10.0
-
-                    if (
-                        sensor_voltage_fb < min_voltage
-                        or sensor_voltage_fb > max_voltage
-                    ):
-                        original_voltage_fb = sensor_voltage_fb
-                        sensor_voltage_fb = float(
-                            np.clip(sensor_voltage_fb, min_voltage, max_voltage)
+                    # Raise error if limits not configured (consistent with pre-feedback check)
+                    if min_v is None:
+                        raise RoutineError(
+                            f"No minimum voltage limit configured for {charge_sensor_plunger_gate}"
                         )
-                        voltage_dict[charge_sensor_plunger_gate] = sensor_voltage_fb
-                        # Also update tracked state if in adaptive mode
-                        if gradient_adaptation_enabled:
-                            current_sensor_voltage = sensor_voltage_fb
-                        logger.warning(
-                            "Sensor voltage for %s after feedback out of bounds: %.6fV clipped to %.6fV (valid range: %.1f to %.1fV). "
-                            "Point %d, Rep %d. Consider reducing beta or max_feedback_correction.",
-                            charge_sensor_plunger_gate,
-                            original_voltage_fb,
-                            sensor_voltage_fb,
-                            min_voltage,
-                            max_voltage,
-                            point_idx,
-                            i,
+                    if max_v is None:
+                        raise RoutineError(
+                            f"No maximum voltage limit configured for {charge_sensor_plunger_gate}"
                         )
 
+                    # Compute maximum allowed correction to stay within bounds
+                    max_correction_up = max_v - current_sensor_v
+                    max_correction_down = current_sensor_v - min_v
+
+                    # Clip feedback to available headroom (guarantees no out-of-bounds)
+                    feedback_correction = float(
+                        np.clip(
+                            feedback_correction_raw,
+                            -max_correction_down,
+                            max_correction_up,
+                        )
+                    )
+
+                    # Apply correction (now guaranteed to stay in bounds)
+                    voltage_dict[charge_sensor_plunger_gate] += feedback_correction
+                    if gradient_adaptation_enabled:
+                        current_sensor_voltage += feedback_correction
+
+                    # Re-apply voltage and measure
                     device.jump(voltage_dict, wait_for_settling=True)
-
-                    # Re-measure current after feedback adjustment
                     current = device.measure(measure_electrode)
-                    # Post-feedback error (for logging/diagnostics only)
 
                 # Update adaptive gradients based on PRE-feedback current error
                 if gradient_adaptation_enabled:
@@ -804,6 +794,7 @@ def charge_sensor_csd_readout(  # pylint: disable=too-many-locals,too-many-state
 
                         # Log if clipping occurred
                         if abs(old_gradient + gradient_update) > max_adaptive_gradient:
+                            gradient_clipping_events += 1
                             logger.warning(
                                 "Adaptive gradient for %s clipped: %.6f -> %.6f (limit: ±%.6f V/V)",
                                 g1_name,
@@ -846,6 +837,7 @@ def charge_sensor_csd_readout(  # pylint: disable=too-many-locals,too-many-state
 
                         # Log if clipping occurred
                         if abs(old_gradient + gradient_update) > max_adaptive_gradient:
+                            gradient_clipping_events += 1
                             logger.warning(
                                 "Adaptive gradient for %s clipped: %.6f -> %.6f (limit: ±%.6f V/V)",
                                 g2_name,
@@ -938,6 +930,16 @@ def charge_sensor_csd_readout(  # pylint: disable=too-many-locals,too-many-state
             np.min(differential_currents),
             np.max(differential_currents),
         )
+
+        # Log clipping event summary
+        logger.info("Clipping events summary:")
+        logger.info(
+            "  Sensor voltage clipping (pre-feedback): %d events",
+            sensor_clipping_events_pre_feedback,
+        )
+        if gradient_adaptation_enabled:
+            logger.info("  Gradient clipping: %d events", gradient_clipping_events)
+
         if feedback_enabled:
             logger.info(
                 "Feedback correction range: %.6f to %.6f V",
@@ -987,7 +989,6 @@ def charge_sensor_csd_readout(  # pylint: disable=too-many-locals,too-many-state
                     "compensation_enabled": compensation_enabled,
                     "feedback_enabled": feedback_enabled,
                     "beta": float(beta) if beta is not None else None,
-                    "max_feedback_correction": float(max_feedback_correction),
                     "sensor_plunger": charge_sensor_plunger_gate,
                     "measure_electrode": measure_electrode,
                     "gate_electrodes": gate_electrodes,
@@ -1013,6 +1014,8 @@ def charge_sensor_csd_readout(  # pylint: disable=too-many-locals,too-many-state
                     "measure_electrode": measure_electrode,
                     "num_repetitions": num_sweep_repetitions,
                     "park_point_current": float(park_point_current),
+                    "sensor_clipping_events_pre_feedback": sensor_clipping_events_pre_feedback,
+                    "gradient_clipping_events": gradient_clipping_events,
                 },
             )
 
@@ -1036,7 +1039,6 @@ def charge_sensor_csd_readout(  # pylint: disable=too-many-locals,too-many-state
                         "feedback_mean": float(np.mean(average_feedback_corrections)),
                         "feedback_std": float(np.std(average_feedback_corrections)),
                         "beta": float(beta),  # type: ignore
-                        "max_feedback_correction": float(max_feedback_correction),
                     },
                 )
 
@@ -1095,7 +1097,9 @@ def charge_sensor_csd_readout(  # pylint: disable=too-many-locals,too-many-state
             "beta": beta,
             "feedback_enabled": feedback_enabled,
             "feedback_corrections": average_feedback_corrections.tolist(),
-            "max_feedback_correction": max_feedback_correction,
+            # Clipping event tracking
+            "sensor_clipping_events_pre_feedback": sensor_clipping_events_pre_feedback,
+            "gradient_clipping_events": gradient_clipping_events,
             # Gradient adaptation fields
             "gamma_factors": gamma_factors,
             "gradient_adaptation_enabled": gradient_adaptation_enabled,
