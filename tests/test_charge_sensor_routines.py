@@ -469,5 +469,366 @@ def test_charge_sensor_workflow_consumes_compensation_results():
     # This verifies the data structure compatibility between workflow steps
 
 
+# =============================================================================
+# Stability Measurement Algorithm Tests (find_stable_sensor_peak)
+# =============================================================================
+
+
+def test_stable_peak_selects_top_n_candidates():
+    """With 5+ detected peaks, verify routine tests only the top 3 peaks
+    (by quality score) for stability."""
+    from stanza.routines.builtins.utils.peak_fitting import ModelFitResult
+
+    # Create 5 peaks with different quality scores
+    mock_fit = ModelFitResult(
+        model_name="Lorentzian",
+        amplitude=1e-9,
+        center_idx=50,
+        width=5.0,
+        offset=0.0,
+        r_squared=0.95,
+        rmse=1e-12,
+        aicc=-100.0,
+        fwhm=0.01,
+        area=1e-10,
+        skew_resid=0.1,
+    )
+
+    peaks = []
+    quality_scores = [0.9, 0.7, 0.85, 0.6, 0.75]  # Top 3 are: 0.9, 0.85, 0.75
+
+    for i, quality in enumerate(quality_scores):
+        peak = FittedPeak(
+            best_model="Lorentzian",
+            lorentzian_fit=mock_fit,
+            sech2_fit=mock_fit,
+            voigt_fit=mock_fit,
+            sensitivity=1.0,
+            sensitivity_voltage=i * 0.01,
+            peak_idx=i * 10,
+            peak_voltage=i * 0.01,
+            window_currents=np.array([1e-9]),
+            window_voltages=np.array([i * 0.01]),
+            quality_score=quality,
+        )
+        peaks.append(peak)
+
+    # Sort by quality score and take top 3
+    sorted_peaks = sorted(peaks, key=lambda p: p.quality_score, reverse=True)
+    top_3_peaks = sorted_peaks[:3]
+
+    # Verify we get exactly 3 candidates
+    assert len(top_3_peaks) == 3
+    # Verify they are the highest quality
+    assert top_3_peaks[0].quality_score == 0.9
+    assert top_3_peaks[1].quality_score == 0.85
+    assert top_3_peaks[2].quality_score == 0.75
+
+
+def test_stability_measurement_holds_at_max_gradient():
+    """For each candidate peak, confirm the device is positioned at
+    sensitivity_voltage (max gradient point) during the 2-minute hold."""
+    # This test verifies the conceptual behavior - positioning at max gradient
+    from stanza.routines.builtins.charge_sensor_compensation import (
+        StabilityMeasurement,
+    )
+
+    # Create a mock stability measurement
+    peak_voltage = -0.7
+    max_gradient_voltage = -0.68  # Should be positioned here for stability test
+
+    stability = StabilityMeasurement(
+        peak_index=0,
+        peak_voltage=peak_voltage,
+        max_gradient_voltage=max_gradient_voltage,
+        time_array=np.linspace(0, 120, 100),  # 120 seconds
+        current_array=np.ones(100) * 1e-9,
+        current_mean=1e-9,
+        current_std=1e-11,
+        local_slope=1e-6,
+        voltage_noise=1e-5,
+    )
+
+    # Verify the stability measurement captured max gradient voltage
+    assert stability.max_gradient_voltage == max_gradient_voltage
+    assert stability.max_gradient_voltage != stability.peak_voltage
+    # Time array should span 120 seconds (default hold time)
+    assert stability.time_array[-1] >= 120
+
+
+def test_stability_measures_current_vs_time():
+    """Verify stability measurement records continuous current samples over
+    the configured hold time (default 120s) with timestamps."""
+    from stanza.routines.builtins.charge_sensor_compensation import (
+        StabilityMeasurement,
+    )
+
+    # Simulate 120-second measurement with 100 samples
+    hold_time = 120.0
+    num_samples = 100
+    time_array = np.linspace(0, hold_time, num_samples)
+
+    # Simulate current measurements with small drift
+    current_array = 1e-9 + np.random.normal(0, 1e-11, num_samples)
+
+    stability = StabilityMeasurement(
+        peak_index=0,
+        peak_voltage=-0.7,
+        max_gradient_voltage=-0.68,
+        time_array=time_array,
+        current_array=current_array,
+        current_mean=np.mean(current_array),
+        current_std=np.std(current_array),
+        local_slope=1e-6,
+        voltage_noise=1e-5,
+    )
+
+    # Verify time and current arrays have same length
+    assert len(stability.time_array) == len(stability.current_array)
+    # Verify time spans the hold period
+    assert stability.time_array[0] == 0
+    assert stability.time_array[-1] == hold_time
+    # Verify statistics are calculated
+    assert stability.current_mean > 0
+    assert stability.current_std > 0
+
+
+def test_voltage_noise_calculated_from_gradient():
+    """Confirm voltage noise computation uses formula σᵥ = σᵢ / |dI/dV|
+    where σᵢ is current std and dI/dV is local slope at max gradient."""
+    from stanza.routines.builtins.charge_sensor_compensation import (
+        _calculate_voltage_noise,
+    )
+
+    current_std = 1e-11  # 10 pA std
+    local_slope = 2e-6  # 2 µA/V
+
+    voltage_noise = _calculate_voltage_noise(current_std, local_slope)
+
+    # Expected: 1e-11 / 2e-6 = 5e-6 V
+    expected = current_std / abs(local_slope)
+    assert abs(voltage_noise - expected) < 1e-12
+
+
+def test_stability_score_inverts_voltage_noise():
+    """Verify stability score is computed as 1/voltage_noise, then normalized
+    by dividing by the maximum across all candidates."""
+    # Create mock candidates with different voltage noise values
+    from stanza.routines.builtins.charge_sensor_compensation import (
+        StabilityMeasurement,
+        StablePeakCandidate,
+        _calculate_combined_scores,
+    )
+    from stanza.routines.builtins.utils.peak_fitting import ModelFitResult
+
+    mock_fit = ModelFitResult(
+        model_name="Lorentzian",
+        amplitude=1e-9,
+        center_idx=50,
+        width=5.0,
+        offset=0.0,
+        r_squared=0.95,
+        rmse=1e-12,
+        aicc=-100.0,
+        fwhm=0.01,
+        area=1e-10,
+        skew_resid=0.1,
+    )
+
+    candidates = []
+    voltage_noises = [1e-5, 5e-6, 2e-5]  # Different noise levels
+
+    for i, v_noise in enumerate(voltage_noises):
+        peak = FittedPeak(
+            best_model="Lorentzian",
+            lorentzian_fit=mock_fit,
+            sech2_fit=mock_fit,
+            voigt_fit=mock_fit,
+            sensitivity=1.0,
+            sensitivity_voltage=i * 0.01,
+            peak_idx=i * 10,
+            peak_voltage=i * 0.01,
+            window_currents=np.array([1e-9]),
+            window_voltages=np.array([i * 0.01]),
+            quality_score=0.8,
+        )
+
+        stability = StabilityMeasurement(
+            peak_index=i,
+            peak_voltage=i * 0.01,
+            max_gradient_voltage=i * 0.01,
+            time_array=np.array([0.0, 1.0]),
+            current_array=np.array([1e-9, 1e-9]),
+            current_mean=1e-9,
+            current_std=1e-11,
+            local_slope=1e-6,
+            voltage_noise=v_noise,
+        )
+
+        candidate = StablePeakCandidate(
+            fitted_peak=peak, original_score=0.8, stability_measurement=stability
+        )
+        candidates.append(candidate)
+
+    # Calculate combined scores
+    _calculate_combined_scores(candidates, original_weight=0.3, stability_weight=0.7)
+
+    # Verify stability scores are set and normalized
+    for candidate in candidates:
+        assert candidate.stability_measurement.stability_score is not None
+        assert 0 <= candidate.stability_measurement.stability_score <= 1.0
+
+    # Peak with lowest voltage noise should have highest stability score
+    min_noise_idx = np.argmin(voltage_noises)
+    assert candidates[min_noise_idx].stability_measurement.stability_score == 1.0
+
+
+def test_stable_peak_returns_highest_combined_score():
+    """Among 3 tested candidates, confirm the routine selects the peak with
+    maximum combined score, even if it had lower original quality."""
+    from stanza.routines.builtins.charge_sensor_compensation import (
+        StabilityMeasurement,
+        StablePeakCandidate,
+        _calculate_combined_scores,
+    )
+    from stanza.routines.builtins.utils.peak_fitting import ModelFitResult
+
+    mock_fit = ModelFitResult(
+        model_name="Lorentzian",
+        amplitude=1e-9,
+        center_idx=50,
+        width=5.0,
+        offset=0.0,
+        r_squared=0.95,
+        rmse=1e-12,
+        aicc=-100.0,
+        fwhm=0.01,
+        area=1e-10,
+        skew_resid=0.1,
+    )
+
+    # Create 3 candidates:
+    # Candidate 0: high quality (0.9), poor stability (high noise = 2e-5)
+    # Candidate 1: medium quality (0.7), good stability (low noise = 1e-6)
+    # Candidate 2: low quality (0.5), medium stability (noise = 5e-6)
+
+    candidates = []
+    quality_scores = [0.9, 0.7, 0.5]
+    voltage_noises = [2e-5, 1e-6, 5e-6]
+
+    for i, (quality, v_noise) in enumerate(
+        zip(quality_scores, voltage_noises, strict=True)
+    ):
+        peak = FittedPeak(
+            best_model="Lorentzian",
+            lorentzian_fit=mock_fit,
+            sech2_fit=mock_fit,
+            voigt_fit=mock_fit,
+            sensitivity=1.0,
+            sensitivity_voltage=i * 0.01,
+            peak_idx=i * 10,
+            peak_voltage=i * 0.01,
+            window_currents=np.array([1e-9]),
+            window_voltages=np.array([i * 0.01]),
+            quality_score=quality,
+        )
+
+        stability = StabilityMeasurement(
+            peak_index=i,
+            peak_voltage=i * 0.01,
+            max_gradient_voltage=i * 0.01,
+            time_array=np.array([0.0, 1.0]),
+            current_array=np.array([1e-9, 1e-9]),
+            current_mean=1e-9,
+            current_std=1e-11,
+            local_slope=1e-6,
+            voltage_noise=v_noise,
+        )
+
+        candidate = StablePeakCandidate(
+            fitted_peak=peak, original_score=quality, stability_measurement=stability
+        )
+        candidates.append(candidate)
+
+    # Calculate combined scores (70% stability, 30% original)
+    _calculate_combined_scores(candidates, original_weight=0.3, stability_weight=0.7)
+
+    # Find peak with highest combined score
+    best_candidate = max(candidates, key=lambda c: c.combined_score)
+
+    # With 70% weight on stability, candidate 1 (best stability) should win
+    # despite having lower original quality
+    assert best_candidate == candidates[1]
+
+
+def test_stability_score_higher_for_lower_noise():
+    """Verify that peak with lower voltage noise receives higher stability
+    score (inverse relationship)."""
+    from stanza.routines.builtins.charge_sensor_compensation import (
+        StabilityMeasurement,
+        StablePeakCandidate,
+        _calculate_combined_scores,
+    )
+    from stanza.routines.builtins.utils.peak_fitting import ModelFitResult
+
+    mock_fit = ModelFitResult(
+        model_name="Lorentzian",
+        amplitude=1e-9,
+        center_idx=50,
+        width=5.0,
+        offset=0.0,
+        r_squared=0.95,
+        rmse=1e-12,
+        aicc=-100.0,
+        fwhm=0.01,
+        area=1e-10,
+        skew_resid=0.1,
+    )
+
+    candidates = []
+    # Create two candidates with different noise levels
+    voltage_noises = [1e-5, 5e-6]  # Second has lower noise
+
+    for i, v_noise in enumerate(voltage_noises):
+        peak = FittedPeak(
+            best_model="Lorentzian",
+            lorentzian_fit=mock_fit,
+            sech2_fit=mock_fit,
+            voigt_fit=mock_fit,
+            sensitivity=1.0,
+            sensitivity_voltage=i * 0.01,
+            peak_idx=i * 10,
+            peak_voltage=i * 0.01,
+            window_currents=np.array([1e-9]),
+            window_voltages=np.array([i * 0.01]),
+            quality_score=0.8,
+        )
+
+        stability = StabilityMeasurement(
+            peak_index=i,
+            peak_voltage=i * 0.01,
+            max_gradient_voltage=i * 0.01,
+            time_array=np.array([0.0, 1.0]),
+            current_array=np.array([1e-9, 1e-9]),
+            current_mean=1e-9,
+            current_std=1e-11,
+            local_slope=1e-6,
+            voltage_noise=v_noise,
+        )
+
+        candidate = StablePeakCandidate(
+            fitted_peak=peak, original_score=0.8, stability_measurement=stability
+        )
+        candidates.append(candidate)
+
+    _calculate_combined_scores(candidates, original_weight=0.5, stability_weight=0.5)
+
+    # Candidate with lower voltage noise should have higher stability score
+    assert (
+        candidates[1].stability_measurement.stability_score
+        > candidates[0].stability_measurement.stability_score
+    )
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

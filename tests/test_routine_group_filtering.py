@@ -408,11 +408,19 @@ def test_routine_runner_stores_results_with_group_suffix():
     """Run a routine twice with different groups and assert ResultsRegistry
     stores routine_side_X keys instead of overwriting the base key."""
     from stanza.device import Device
-    from stanza.models import DeviceConfig, DeviceGroup
-    from stanza.routines import RoutineContext, routine
+    from stanza.models import (
+        ControlInstrumentConfig,
+        DeviceConfig,
+        DeviceGroup,
+        GateType,
+        MeasurementInstrumentConfig,
+    )
+    from stanza.routines import RoutineContext, RoutineRunner, routine
+    from stanza.utils import generate_channel_configs
+    from tests.conftest import MockControlInstrument, MockMeasurementInstrument
 
     # Create a simple test routine
-    @routine
+    @routine(name="test_group_suffix_routine")
     def test_routine(ctx: RoutineContext) -> dict:
         return {"value": "test_data"}
 
@@ -423,26 +431,58 @@ def test_routine_runner_stores_results_with_group_suffix():
             "group_A": DeviceGroup(name="group_A", gates=["G1", "G2"]),
             "group_B": DeviceGroup(name="group_B", gates=["G3", "G4"]),
         },
-        gates=[],
-        contacts=[],
-        gpios=[],
+        gates={
+            "G1": make_gate(GateType.PLUNGER, control_channel=1),
+            "G2": make_gate(GateType.PLUNGER, control_channel=2),
+            "G3": make_gate(GateType.PLUNGER, control_channel=3),
+            "G4": make_gate(GateType.PLUNGER, control_channel=4),
+        },
+        contacts={},
+        gpios={},
+        instruments=[
+            ControlInstrumentConfig(
+                name="ctrl",
+                ip_addr="127.0.0.1",
+                slew_rate=1.0,
+                driver=None,
+            ),
+            MeasurementInstrumentConfig(
+                name="meas",
+                ip_addr="127.0.0.1",
+                measurement_duration=1.0,
+                sample_time=0.01,
+                driver=None,
+            ),
+        ],
     )
 
-    device = Device(device_config=config)
+    # Create Device properly with channel configs and mock instruments
+    channel_configs = generate_channel_configs(config)
+    device = Device(
+        name=config.name,
+        device_config=config,
+        channel_configs=channel_configs,
+        control_instrument=MockControlInstrument(),
+        measurement_instrument=MockMeasurementInstrument(),
+    )
+
+    # Create RoutineRunner with the device
+    runner = RoutineRunner(resources=[device])
 
     # Run routine with group_A
-    result_a = test_routine(device=device, group="group_A")
+    result_a = runner.run("test_group_suffix_routine", group="group_A")
 
     # Run routine with group_B
-    result_b = test_routine(device=device, group="group_B")
+    result_b = runner.run("test_group_suffix_routine", group="group_B")
 
-    # Check that results are stored with group suffixes
-    assert (
-        "test_routine_group_A" in device.routine_context.results
-        or "test_routine" in device.routine_context.results
-    )
+    # Check that results are stored with group suffixes in the runner's results registry
+    results_keys = runner.results.list_results()
 
-    # Verify both results exist and weren't overwritten
+    # Verify both group-specific results exist (not overwritten)
+    assert "test_group_suffix_routine_group_A" in results_keys
+    assert "test_group_suffix_routine_group_B" in results_keys
+
+    # Verify both results contain the expected data
     assert result_a is not None
     assert result_b is not None
     assert result_a["value"] == "test_data"
