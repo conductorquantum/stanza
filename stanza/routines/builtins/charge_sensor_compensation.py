@@ -159,7 +159,7 @@ class StablePeakCandidate:
     original_score: float  # Original quality score from peak fitting
     stability_measurement: StabilityMeasurement  # Stability data from 2-min hold
     combined_score: float | None = (
-        None  # Final weighted score (30% original + 70% stability)
+        None  # Final weighted score (50% original + 50% stability)
     )
 
 
@@ -1798,7 +1798,7 @@ def find_stable_sensor_peak(  # pylint: disable=too-many-locals,too-many-stateme
     Coulomb blockade peaks, it tests the top N peaks by holding at each peak's
     max-gradient point for 2 minutes while recording current vs. time. Peak position
     stability is quantified as voltage noise (σᵥ = σᵢ / |dI/dV|), and the final peak
-    is selected by combining original quality score (30%) with stability score (70%).
+    is selected by combining original quality score (50%) with stability score (50%).
 
     Args:
         ctx: Routine context containing device resources and previous results. Requires:
@@ -1837,7 +1837,7 @@ def find_stable_sensor_peak(  # pylint: disable=too-many-locals,too-many-stateme
     Notes:
         - Uses same peak detection as find_sensor_peak (ML-based with multi-model fitting)
         - Tests top N peaks (by original quality score) for stability
-        - Selects best peak using combined score: 30% original + 70% stability
+        - Selects best peak using combined score: 50% original + 50% stability
         - Total runtime: ~(top_n_peaks * hold_time_seconds) longer than find_sensor_peak
         - For top_n_peaks=3 and hold_time_seconds=120: adds ~6 minutes to routine
     """

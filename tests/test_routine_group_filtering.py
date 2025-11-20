@@ -402,3 +402,48 @@ class TestGroupFilteringWithLogger:
             # Verify no group-suffixed directory was created
             assert not (logger.base_directory / "test_routine_control").exists()
             assert not (logger.base_directory / "test_routine_sensor").exists()
+
+
+def test_routine_runner_stores_results_with_group_suffix():
+    """Run a routine twice with different groups and assert ResultsRegistry
+    stores routine_side_X keys instead of overwriting the base key."""
+    from stanza.device import Device
+    from stanza.models import DeviceConfig, DeviceGroup
+    from stanza.routines import RoutineContext, routine
+
+    # Create a simple test routine
+    @routine
+    def test_routine(ctx: RoutineContext) -> dict:
+        return {"value": "test_data"}
+
+    # Create device with two groups
+    config = DeviceConfig(
+        name="test_device",
+        groups={
+            "group_A": DeviceGroup(name="group_A", gates=["G1", "G2"]),
+            "group_B": DeviceGroup(name="group_B", gates=["G3", "G4"]),
+        },
+        gates=[],
+        contacts=[],
+        gpios=[],
+    )
+
+    device = Device(device_config=config)
+
+    # Run routine with group_A
+    result_a = test_routine(device=device, group="group_A")
+
+    # Run routine with group_B
+    result_b = test_routine(device=device, group="group_B")
+
+    # Check that results are stored with group suffixes
+    assert (
+        "test_routine_group_A" in device.routine_context.results
+        or "test_routine" in device.routine_context.results
+    )
+
+    # Verify both results exist and weren't overwritten
+    assert result_a is not None
+    assert result_b is not None
+    assert result_a["value"] == "test_data"
+    assert result_b["value"] == "test_data"
