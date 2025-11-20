@@ -26,6 +26,7 @@ where:
 # Standard library imports
 import logging
 import time
+from collections.abc import Sequence
 from typing import Any
 
 import matplotlib.pyplot as plt
@@ -89,32 +90,70 @@ def _calculate_compensated_voltages(
     voltages_with_compensation = []
     compensation_applied = []
 
-    for v_g1 in g1_voltages:
-        for v_g2 in g2_voltages:
-            # Calculate voltage changes from initial position
-            voltage_changes = {
-                g1_name: float(v_g1) - initial_control_voltages[g1_name],
-                g2_name: float(v_g2) - initial_control_voltages[g2_name],
-            }
+    # Initialize walking state
+    current_sensor_voltage = initial_sensor_voltage
+    previous_control_voltages = {
+        g1_name: initial_control_voltages[g1_name],
+        g2_name: initial_control_voltages[g2_name],
+    }
 
-            # Calculate total compensation
-            total_compensation = 0.0
-            for gate_name, delta_v in voltage_changes.items():
-                if gate_name in compensation_gradients:
-                    gradient = compensation_gradients[gate_name]
-                    total_compensation += gradient * delta_v
+    # Use serpentine (boustrophedon) pattern to eliminate voltage jumps at row boundaries
+    for row_idx, v_g1 in enumerate(g1_voltages):
+        # Alternate sweep direction each row
+        if row_idx % 2 == 0:
+            # Even rows: sweep left-to-right
+            row_voltages = g2_voltages
+        else:
+            # Odd rows: sweep right-to-left (reverse)
+            row_voltages = g2_voltages[::-1]
 
-            # Calculate compensated sensor voltage
-            compensated_sensor_voltage = initial_sensor_voltage + total_compensation
+        for v_g2 in row_voltages:
+            # Calculate voltage changes from previous point (walking state)
+            delta_v1 = float(v_g1) - previous_control_voltages[g1_name]
+            delta_v2 = float(v_g2) - previous_control_voltages[g2_name]
+
+            # Calculate compensation update
+            compensation_update = 0.0
+            if g1_name in compensation_gradients:
+                compensation_update += compensation_gradients[g1_name] * delta_v1
+            if g2_name in compensation_gradients:
+                compensation_update += compensation_gradients[g2_name] * delta_v2
+
+            # Update sensor voltage (walking state)
+            current_sensor_voltage += compensation_update
 
             # Store [G1, G2, sensor_plunger] for sweep_nd
             voltages_with_compensation.append(
-                [float(v_g1), float(v_g2), float(compensated_sensor_voltage)]
+                [float(v_g1), float(v_g2), float(current_sensor_voltage)]
             )
-            compensation_applied.append(float(total_compensation))
+
+            # Track cumulative compensation from initial point (for logging)
+            cumulative_compensation = current_sensor_voltage - initial_sensor_voltage
+            compensation_applied.append(float(cumulative_compensation))
+
+            # Update previous voltages
+            previous_control_voltages[g1_name] = float(v_g1)
+            previous_control_voltages[g2_name] = float(v_g2)
 
     gate_electrodes = [g1_name, g2_name, charge_sensor_plunger_gate]
     return voltages_with_compensation, compensation_applied, gate_electrodes
+
+
+def _reshape_serpentine_grid(
+    values: Sequence[float], sweep_resolution: int
+) -> np.ndarray:
+    """
+    Convert a 1D list of serpentine-sweep values into a 2D grid where each row
+    runs left-to-right in the same voltage order.
+
+    Args:
+        values: Flat measurement array collected in serpentine order
+        sweep_resolution: Number of points per sweep dimension
+    """
+    grid = np.array(values, dtype=float).reshape(sweep_resolution, sweep_resolution)
+    # Odd rows were acquired right-to-left; flip them to align increasing axis order.
+    grid[1::2] = grid[1::2, ::-1]
+    return grid
 
 
 @routine
@@ -133,8 +172,9 @@ def charge_sensor_csd_readout(  # pylint: disable=too-many-locals,too-many-state
     sweep_resolution: int = 48,
     num_sweep_repetitions: int = 10,
     beta: float | None = None,
-    max_feedback_correction: float = 0.1,
+    max_feedback_correction: float = 1.0,
     gamma_factors: dict[str, float] | None = None,
+    max_adaptive_gradient: float = 2.0,
     session: LoggerSession | None = None,
     **kwargs: Any,  # pylint: disable=unused-argument
 ) -> dict[str, Any]:
@@ -184,6 +224,10 @@ def charge_sensor_csd_readout(  # pylint: disable=too-many-locals,too-many-state
             to be provided (cannot adapt from zero). Default 0.0 disables adaptation. Must include
             all control plunger gates. Gradients only updated when |ΔV| > 1e-9 V to avoid division
             by zero.
+        max_adaptive_gradient: Maximum allowed magnitude for adaptive gradients (V/V). Adaptive
+            gradients are clipped to [-max, +max] after each update to prevent unbounded growth
+            that could drive sensor voltage out of hardware limits. Only applies when gamma_factors
+            is enabled. (default: 2.0)
         session: Logger session for measurements and analysis
         **kwargs: Additional keyword arguments (for config compatibility)
 
@@ -308,6 +352,10 @@ def charge_sensor_csd_readout(  # pylint: disable=too-many-locals,too-many-state
         raise RoutineError(
             f"max_feedback_correction must be positive, got {max_feedback_correction}"
         )
+    if max_adaptive_gradient <= 0:
+        raise RoutineError(
+            f"max_adaptive_gradient must be positive, got {max_adaptive_gradient}"
+        )
 
     # Validate gamma_factors if provided
     gradient_adaptation_enabled = gamma_factors is not None
@@ -385,6 +433,7 @@ def charge_sensor_csd_readout(  # pylint: disable=too-many-locals,too-many-state
     logger.info("  Gradient adaptation enabled: %s", gradient_adaptation_enabled)
     if gradient_adaptation_enabled:
         logger.info("  Gamma factors: %s", gamma_factors)
+        logger.info("  Max adaptive gradient: %.6f V/V", max_adaptive_gradient)
     logger.info("  Current feedback enabled: %s", feedback_enabled)
     if feedback_enabled:
         logger.info("  Beta (feedback gain): %.6e V/A", beta)
@@ -477,13 +526,15 @@ def charge_sensor_csd_readout(  # pylint: disable=too-many-locals,too-many-state
                 sweep_resolution=sweep_resolution,
             )
             logger.info(
-                "Compensation range: %.6f to %.6f V",
+                "Compensation range: %.6f to %.6f V (serpentine scan pattern)",
                 min(compensation_applied),
                 max(compensation_applied),
             )
         elif not compensation_enabled:
             # No compensation: sweep only control gates, sensor held constant
-            logger.info("Compensation disabled - sensor plunger held constant")
+            logger.info(
+                "Compensation disabled - sensor plunger held constant (serpentine scan pattern)"
+            )
             g1_name, g2_name = control_plunger_gates[0], control_plunger_gates[1]
             g1_voltages = np.linspace(
                 *control_plunger_ranges[g1_name], sweep_resolution
@@ -492,9 +543,12 @@ def charge_sensor_csd_readout(  # pylint: disable=too-many-locals,too-many-state
                 *control_plunger_ranges[g2_name], sweep_resolution
             )
 
+            # Use serpentine pattern
             voltages_list = []
-            for v_g1 in g1_voltages:
-                for v_g2 in g2_voltages:
+            for row_idx, v_g1 in enumerate(g1_voltages):
+                # Alternate sweep direction each row
+                row_voltages = g2_voltages if row_idx % 2 == 0 else g2_voltages[::-1]
+                for v_g2 in row_voltages:
                     voltages_list.append([float(v_g1), float(v_g2)])
 
             voltages_with_compensation = voltages_list
@@ -503,7 +557,9 @@ def charge_sensor_csd_readout(  # pylint: disable=too-many-locals,too-many-state
         else:
             # Adaptive gradient mode: prepare control voltage grid only
             # Compensation will be computed dynamically during sweep
-            logger.info("Adaptive gradient mode - compensation computed dynamically")
+            logger.info(
+                "Adaptive gradient mode - compensation computed dynamically (serpentine scan pattern)"
+            )
             g1_name, g2_name = control_plunger_gates[0], control_plunger_gates[1]
             g1_voltages = np.linspace(
                 *control_plunger_ranges[g1_name], sweep_resolution
@@ -512,10 +568,12 @@ def charge_sensor_csd_readout(  # pylint: disable=too-many-locals,too-many-state
                 *control_plunger_ranges[g2_name], sweep_resolution
             )
 
-            # Create control voltage grid (no pre-computed compensation)
+            # Create control voltage grid with serpentine pattern (no pre-computed compensation)
             control_voltages_grid = []
-            for v_g1 in g1_voltages:
-                for v_g2 in g2_voltages:
+            for row_idx, v_g1 in enumerate(g1_voltages):
+                # Alternate sweep direction each row
+                row_voltages = g2_voltages if row_idx % 2 == 0 else g2_voltages[::-1]
+                for v_g2 in row_voltages:
                     control_voltages_grid.append([float(v_g1), float(v_g2)])
 
             voltages_with_compensation = control_voltages_grid
@@ -609,6 +667,48 @@ def charge_sensor_csd_readout(  # pylint: disable=too-many-locals,too-many-state
                         zip(gate_electrodes, voltage_point, strict=False)
                     )
 
+                # Validate and clip sensor voltage if needed
+                if charge_sensor_plunger_gate in voltage_dict:
+                    sensor_voltage = voltage_dict[charge_sensor_plunger_gate]
+
+                    # Get actual voltage range from device gate configuration
+                    min_voltage, max_voltage = device.channel_configs[
+                        charge_sensor_plunger_gate
+                    ].voltage_range
+
+                    # Handle None values in voltage_range (use conservative hardware limits)
+                    if min_voltage is None:
+                        min_voltage = -10.0
+                        logger.warning(
+                            "No minimum voltage limit configured for %s, using -10V",
+                            charge_sensor_plunger_gate,
+                        )
+                    if max_voltage is None:
+                        max_voltage = 10.0
+                        logger.warning(
+                            "No maximum voltage limit configured for %s, using +10V",
+                            charge_sensor_plunger_gate,
+                        )
+
+                    # Check and clip if out of bounds
+                    if sensor_voltage < min_voltage or sensor_voltage > max_voltage:
+                        original_voltage = sensor_voltage
+                        sensor_voltage = float(
+                            np.clip(sensor_voltage, min_voltage, max_voltage)
+                        )
+                        voltage_dict[charge_sensor_plunger_gate] = sensor_voltage
+                        logger.warning(
+                            "Sensor voltage for %s out of bounds: %.6fV clipped to %.6fV (valid range: %.1f to %.1fV). "
+                            "Point %d, Rep %d. Consider reducing gamma or max_adaptive_gradient.",
+                            charge_sensor_plunger_gate,
+                            original_voltage,
+                            sensor_voltage,
+                            min_voltage,
+                            max_voltage,
+                            point_idx,
+                            i,
+                        )
+
                 # Apply voltages
                 device.jump(voltage_dict, wait_for_settling=True)
 
@@ -636,6 +736,45 @@ def charge_sensor_csd_readout(  # pylint: disable=too-many-locals,too-many-state
                         current_sensor_voltage += (
                             feedback_correction  # Track updated state
                         )
+
+                    # Validate and clip sensor voltage after feedback correction
+                    sensor_voltage_fb = voltage_dict[charge_sensor_plunger_gate]
+
+                    # Get actual voltage range from device gate configuration
+                    min_voltage, max_voltage = device.channel_configs[
+                        charge_sensor_plunger_gate
+                    ].voltage_range
+
+                    # Handle None values in voltage_range (use conservative hardware limits)
+                    if min_voltage is None:
+                        min_voltage = -10.0
+                    if max_voltage is None:
+                        max_voltage = 10.0
+
+                    if (
+                        sensor_voltage_fb < min_voltage
+                        or sensor_voltage_fb > max_voltage
+                    ):
+                        original_voltage_fb = sensor_voltage_fb
+                        sensor_voltage_fb = float(
+                            np.clip(sensor_voltage_fb, min_voltage, max_voltage)
+                        )
+                        voltage_dict[charge_sensor_plunger_gate] = sensor_voltage_fb
+                        # Also update tracked state if in adaptive mode
+                        if gradient_adaptation_enabled:
+                            current_sensor_voltage = sensor_voltage_fb
+                        logger.warning(
+                            "Sensor voltage for %s after feedback out of bounds: %.6fV clipped to %.6fV (valid range: %.1f to %.1fV). "
+                            "Point %d, Rep %d. Consider reducing beta or max_feedback_correction.",
+                            charge_sensor_plunger_gate,
+                            original_voltage_fb,
+                            sensor_voltage_fb,
+                            min_voltage,
+                            max_voltage,
+                            point_idx,
+                            i,
+                        )
+
                     device.jump(voltage_dict, wait_for_settling=True)
 
                     # Re-measure current after feedback adjustment
@@ -649,7 +788,30 @@ def charge_sensor_csd_readout(  # pylint: disable=too-many-locals,too-many-state
                         gradient_update = (
                             gamma_factors[g1_name] / delta_v1
                         ) * current_error_pre  # type: ignore
+
+                        # Store old gradient before update for logging
+                        old_gradient = adaptive_gradients[g1_name]  # type: ignore
                         adaptive_gradients[g1_name] += gradient_update  # type: ignore
+
+                        # Clip adaptive gradient to prevent unbounded growth
+                        adaptive_gradients[g1_name] = float(
+                            np.clip(
+                                adaptive_gradients[g1_name],  # type: ignore
+                                -max_adaptive_gradient,
+                                max_adaptive_gradient,
+                            )
+                        )  # type: ignore
+
+                        # Log if clipping occurred
+                        if abs(old_gradient + gradient_update) > max_adaptive_gradient:
+                            logger.warning(
+                                "Adaptive gradient for %s clipped: %.6f -> %.6f (limit: ±%.6f V/V)",
+                                g1_name,
+                                old_gradient + gradient_update,
+                                adaptive_gradients[g1_name],  # type: ignore
+                                max_adaptive_gradient,
+                            )
+
                         gradient_update_count[g1_name] += 1
                         # Log to gradient history
                         gradient_history.append(  # type: ignore
@@ -668,7 +830,30 @@ def charge_sensor_csd_readout(  # pylint: disable=too-many-locals,too-many-state
                         gradient_update = (
                             gamma_factors[g2_name] / delta_v2
                         ) * current_error_pre  # type: ignore
+
+                        # Store old gradient before update for logging
+                        old_gradient = adaptive_gradients[g2_name]  # type: ignore
                         adaptive_gradients[g2_name] += gradient_update  # type: ignore
+
+                        # Clip adaptive gradient to prevent unbounded growth
+                        adaptive_gradients[g2_name] = float(
+                            np.clip(
+                                adaptive_gradients[g2_name],  # type: ignore
+                                -max_adaptive_gradient,
+                                max_adaptive_gradient,
+                            )
+                        )  # type: ignore
+
+                        # Log if clipping occurred
+                        if abs(old_gradient + gradient_update) > max_adaptive_gradient:
+                            logger.warning(
+                                "Adaptive gradient for %s clipped: %.6f -> %.6f (limit: ±%.6f V/V)",
+                                g2_name,
+                                old_gradient + gradient_update,
+                                adaptive_gradients[g2_name],  # type: ignore
+                                max_adaptive_gradient,
+                            )
+
                         gradient_update_count[g2_name] += 1
                         # Log to gradient history
                         gradient_history.append(  # type: ignore
@@ -704,16 +889,22 @@ def charge_sensor_csd_readout(  # pylint: disable=too-many-locals,too-many-state
             current_measurements = current_measurements_rep
             currents_list.append(current_measurements)
             feedback_corrections_list.append(feedback_corrections_rep)
+            current_grid = _reshape_serpentine_grid(
+                current_measurements, sweep_resolution
+            )
+            g1_name, g2_name = control_plunger_gates
+            g1_start, g1_end = control_plunger_ranges[g1_name]
+            g2_start, g2_end = control_plunger_ranges[g2_name]
             plt.imshow(
-                np.array(current_measurements).reshape(
-                    sweep_resolution, sweep_resolution
-                ),
+                current_grid,
                 cmap="viridis",
                 origin="lower",
+                extent=[g2_start, g2_end, g1_start, g1_end],
+                aspect="auto",
             )
             plt.colorbar(label="Current (A)")
-            plt.xlabel("G10 Voltage (V)")
-            plt.ylabel("G8 Voltage (V)")
+            plt.xlabel(f"{g2_name} Voltage (V)")
+            plt.ylabel(f"{g1_name} Voltage (V)")
             plt.title("Compensated Charge Sensor Readout")
             plt.savefig(f"current_measurements_{i}.png")
             plt.close()
