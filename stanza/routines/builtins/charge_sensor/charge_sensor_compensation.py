@@ -2,15 +2,22 @@
 Charge sensor compensation routines for quantum dot devices.
 
 This module provides automated charge sensor compensation gradient calculation
-for quantum devices using peak fitting and ML-based Coulomb blockade detection.
+for quantum dot devices using peak fitting and ML-based Coulomb blockade
+detection. The routines measure how control gate voltages affect the sensor's
+operating point and calculate compensation gradients for real-time cross-talk
+correction.
 
 Physical Context:
 -----------------
 In quantum dot devices, gate electrodes control the electrostatic potential
 landscape. The "charge sensor" is a quantum dot configured to operate near
 a Coulomb blockade peak, where conductance changes rapidly with electron
-number. Control gates can unintentionally shift the sensor's operating point
-through capacitive coupling (cross-talk).
+number. This high sensitivity makes it ideal for detecting charge state changes
+in nearby control quantum dots.
+
+However, control gates can unintentionally shift the sensor's operating point
+through capacitive coupling (cross-talk). When control gates change voltage,
+the sensor peak position shifts, degrading charge sensing performance.
 
 Compensation gradients quantify this capacitive coupling between gates:
     gradient = dV_sensor_peak / dV_control_gate
@@ -19,7 +26,36 @@ These gradients enable real-time correction of sensor gate voltages when
 control gates change, maintaining optimal charge sensing fidelity throughout
 device operation.
 
-The module includes two main routines:
+Measurement Methodology:
+-------------------------
+The run_compensation routine uses a systematic approach to measure gradients:
+
+1. Baseline Measurement: Performs multiple sensor plunger sweeps at the initial
+   control gate configuration to establish a reference peak position using median
+   averaging for robustness to outliers.
+
+2. Perturbation Sweeps: For each control gate to compensate:
+   - Applies voltage perturbations relative to baseline
+   - Performs sensor plunger sweeps at each perturbation
+   - Measures peak position shifts using multi-model peak fitting
+
+3. Gradient Calculation: Uses RANSAC (RANdom SAmple Consensus) regression to
+   robustly fit gradients while rejecting outlier measurements caused by:
+   - Measurement noise
+   - Device instabilities
+   - Poor peak fits
+   - Environmental fluctuations
+
+4. Quality Assessment: Each measurement sample is marked as inlier or outlier
+   based on the RANSAC fit, providing diagnostic information about measurement
+   quality.
+
+The routine collects multiple samples per voltage point (typically 10) and
+randomizes the measurement sequence to average out temporal drift effects.
+
+Integration with Charge Sensor Workflow:
+----------------------------------------
+This module is part of a three-stage charge sensor workflow:
 
 1. find_sensor_peak: Locates optimal charge sensing operating point
    - Sweeps sensor plunger to identify Coulomb blockade peaks
@@ -28,7 +64,12 @@ The module includes two main routines:
 
 2. run_compensation: Calculates compensation gradients for control gates
    - Measures how each control gate voltage affects sensor peak position
-   - Returns gradient matrix for cross-talk compensation in tuneup sequences
+   - Returns gradient dictionary for cross-talk compensation
+
+3. charge_sensor_csd_readout: Performs compensated 2D sweeps
+   - Uses gradients from run_compensation for feedforward compensation
+   - Optionally uses adaptive gradient learning for continuous improvement
+   - Applies proportional feedback for residual error correction
 """
 
 # Standard library imports
@@ -88,12 +129,10 @@ def analyze_single_window_barrier_sweep(
     Returns:
         FittedPeak object with multi-model fit results and quality metrics
     """
-    # Extract window data - treat entire trace as single window
     window_currents = aggregated_currents
     window_indices = np.arange(len(aggregated_currents))
     center_index = int(len(aggregated_currents) / 2)
 
-    # Fit all three models and select best
     fitted_peak = fit_peak_multi_model(
         window_currents=window_currents,
         window_indices=window_indices,
@@ -104,13 +143,10 @@ def analyze_single_window_barrier_sweep(
         peak_idx_aggregated=center_index,
     )
 
-    # For single peak, sensitivity_score is always 1.0 (no other peaks to compare)
-    # Use helper function for consistency
     fitted_peak.sensitivity_score = 1.0
     fitted_peaks_list = [fitted_peak]
     calculate_quality_scores(fitted_peaks_list)
 
-    # Log analysis results with all three model fits
     if analysis_session:
         analysis_session.log_analysis(
             name="peak_multi_model_fit",
@@ -121,7 +157,6 @@ def analyze_single_window_barrier_sweep(
                 "sensitivity": fitted_peak.sensitivity,
                 "sensitivity_voltage": fitted_peak.sensitivity_voltage,
                 "peak_voltage": fitted_peak.peak_voltage,
-                # Lorentzian fit details
                 "lorentzian": {
                     "amplitude": fitted_peak.lorentzian_fit.amplitude,
                     "center_idx": fitted_peak.lorentzian_fit.center_idx,
@@ -134,7 +169,6 @@ def analyze_single_window_barrier_sweep(
                     "area": fitted_peak.lorentzian_fit.area,
                     "skew_resid": fitted_peak.lorentzian_fit.skew_resid,
                 },
-                # sech² fit details
                 "sech2": {
                     "amplitude": fitted_peak.sech2_fit.amplitude,
                     "center_idx": fitted_peak.sech2_fit.center_idx,
@@ -147,7 +181,6 @@ def analyze_single_window_barrier_sweep(
                     "area": fitted_peak.sech2_fit.area,
                     "skew_resid": fitted_peak.sech2_fit.skew_resid,
                 },
-                # Voigt fit details
                 "voigt": {
                     "amplitude": fitted_peak.voigt_fit.amplitude,
                     "center_idx": fitted_peak.voigt_fit.center_idx,
@@ -208,25 +241,18 @@ def _single_window_sensor_plunger_sweep(
     """
     device = ctx.resources.device
 
-    # Apply bias voltage to bias gate
     device.jump({bias_gate: bias_voltage}, wait_for_settling=True)
     time.sleep(DEFAULT_SETTLING_TIME_S)
 
-    # Calculate sequential sweep parameters
     min_v, max_v = sensor_plunger_range
 
-    # Initialize aggregated trace arrays
     aggregated_voltages = np.array([], dtype=np.float32)
     aggregated_currents = np.array([], dtype=np.float32)
-    last_classification = False  # Track last classification result
+    last_classification = False
 
-    # Generate sensor plunger voltages with matching resolution
-    # Calculate number of points needed based on step_size to match initial
-    # sweep resolution
     num_points = int(np.ceil((max_v - min_v) / step_size)) + 1
     sp_sweep_voltages = np.linspace(min_v, max_v, num_points, endpoint=True)
 
-    # Build voltage list for sweep_nd using helper function
     voltage_list = build_sensor_sweep_voltage_list(
         sensor_gates_list=sensor_gates_list,
         sensor_plunger_index=sensor_plunger_index,
@@ -237,7 +263,6 @@ def _single_window_sensor_plunger_sweep(
     if not voltage_list:
         raise RoutineError("Sensor sweep voltage list is empty - cannot start sweep.")
 
-    # Set device to first voltage point and allow settling time to avoid current spikes
     first_voltage_point = {
         gate: float(voltage)
         for gate, voltage in zip(sensor_gates_list, voltage_list[0], strict=False)
@@ -256,7 +281,6 @@ def _single_window_sensor_plunger_sweep(
     device.jump(first_voltage_point, wait_for_settling=True)
     time.sleep(DEFAULT_SETTLING_TIME_S)
 
-    # Perform current trace measurement
     try:
         _, current_trace = device.sweep_nd(
             gate_electrodes=sensor_gates_list,
@@ -264,8 +288,6 @@ def _single_window_sensor_plunger_sweep(
             measure_electrode=measure_electrode,
             session=session,
         )
-
-        # Append to aggregated trace
         aggregated_voltages = np.concatenate([aggregated_voltages, sp_sweep_voltages])
         aggregated_currents = np.concatenate([aggregated_currents, current_trace])
 
@@ -354,18 +376,12 @@ def run_compensation(
     if peak_spacing <= 0:
         raise RoutineError("peak_spacing must be greater than 0")
 
-    # Get device
     device = ctx.resources.device
 
-    # Get groups from device config
     control_group = device.device_config.groups[control_group_name]
     control_gates = list(control_group.gates)
     control_gates = filter_gates_by_group(ctx, control_gates)
 
-    # Get results from peak-finding routine
-    # Check for find_stable_sensor_peak first as it provides more robust peaks
-    # by measuring current stability at multiple candidate peaks over time.
-    # Fall back to find_sensor_peak for backward compatibility.
     find_sensor_peak_results = ctx.results.get("find_stable_sensor_peak")
     if find_sensor_peak_results is None:
         find_sensor_peak_results = ctx.results.get("find_sensor_peak", {})
@@ -375,8 +391,6 @@ def run_compensation(
             "Peak-finding results not found in ctx.results. "
             "Please run either find_stable_sensor_peak or find_sensor_peak routine first."
         )
-
-    # Extract values from find_sensor_peak results
     narrowed_sensor_plunger_range = find_sensor_peak_results[
         "narrowed_sensor_plunger_range"
     ]
@@ -389,8 +403,6 @@ def run_compensation(
     new_step_size = find_sensor_peak_results["step_size"]
 
     voltage_range = MULTIPLER_OF_PEAK_SPACING * peak_spacing
-    # Create symmetric voltage points around zero, excluding zero itself
-    # to avoid division by zero
     half_n = PERTURBATION_DIVISOR // 2
     voltage_differences = np.concatenate(
         [
@@ -400,8 +412,6 @@ def run_compensation(
     )
     rng = np.random.default_rng()
 
-    # Get non-reservoir gates from control side
-    # Apply filter_gates_by_group to honor device exclusions
     all_plungers = device.get_gates_by_type(GateType.PLUNGER)
     all_barriers = device.get_gates_by_type(GateType.BARRIER)
     all_plungers = filter_gates_by_group(ctx, all_plungers)
@@ -410,9 +420,7 @@ def run_compensation(
         g for g in (all_plungers + all_barriers) if g in control_gates
     ]
 
-    # Apply additional filtering if gates_to_compensate is specified
     if gates_to_compensate is not None:
-        # Validate that all requested gates are in the eligible set
         invalid_gates = [
             g for g in gates_to_compensate if g not in control_non_reservoir_gates
         ]
@@ -423,15 +431,11 @@ def run_compensation(
                 f"'{control_group_name}'. "
                 f"Eligible gates: {control_non_reservoir_gates}"
             )
-        # Filter to only include requested gates
         control_non_reservoir_gates = [
             g for g in control_non_reservoir_gates if g in gates_to_compensate
         ]
 
-    # Capture initial device state for cleanup in finally block
     initial_control_voltages = device.check(control_non_reservoir_gates)
-
-    # Determine baseline control state
     if zero_control_side:
         logger.info("Acquiring baseline measurement with control gates at 0V.")
         baseline_control_state = dict.fromkeys(control_non_reservoir_gates, 0.0)
@@ -446,10 +450,8 @@ def run_compensation(
             zip(control_non_reservoir_gates, initial_control_voltages, strict=False)
         )
 
-    # Set control side gates to baseline state
     device.jump(baseline_control_state, wait_for_settling=True)
     time.sleep(DEFAULT_SETTLING_TIME_S)
-    # Perform baseline sweep NUM_OF_SAMPLES_FOR_AVERAGING times and take median for robust estimate
     try:
         baseline_sensitivity_voltages = []
         baseline_peak_center_voltages = []
@@ -495,10 +497,7 @@ def run_compensation(
                     },
                 )
 
-        # Reference for parking (max gradient) - use median for robustness to outliers
-        # (consistent with RANSAC approach for gradient fitting)
         reference_max_gradient_voltage = float(np.median(baseline_sensitivity_voltages))
-        # Reference for gradient calculation (peak center) - use median for robustness
         reference_peak_center_voltage = float(np.median(baseline_peak_center_voltages))
     except Exception as e:
         raise RoutineError(f"Error in baseline measurement: {str(e)}") from e
@@ -507,7 +506,7 @@ def run_compensation(
     )
     sensor_park_point_voltages[sensor_gate_key] = reference_max_gradient_voltage
     compensation_gradients_dict = {}
-    per_gate_details = {}  # Store detailed arrays for each gate
+    per_gate_details = {}
     for gate in control_non_reservoir_gates:
         num_deltas = len(voltage_differences)
         measurement_indices = np.repeat(
@@ -529,13 +528,11 @@ def run_compensation(
                 f"{voltage_difference:+.6f} V"
             )
 
-            # Apply voltage perturbation relative to baseline
             device_state = baseline_control_state.copy()
             device_state[gate] = baseline_control_state[gate] + voltage_difference
             device.jump(device_state, wait_for_settling=True)
             time.sleep(DEFAULT_SETTLING_TIME_S)
 
-            # Single sensor plunger sweep for this sample
             iteration_sweep_output = _single_window_sensor_plunger_sweep(
                 ctx=ctx,
                 sensor_gates_list=sensor_gates_list,
@@ -552,21 +549,17 @@ def run_compensation(
             best_peak = iteration_sweep_output.best_peak
             peak_center_voltage = float(best_peak.peak_voltage)
             per_delta_measurements[delta_index].append(peak_center_voltage)
-            # Log per-sample deltas explicitly (with clear names + aliases)
             peak_shift = float(peak_center_voltage - reference_peak_center_voltage)
             sample_record = {
-                # Plunger delta (control gate change relative to baseline)
                 "control_delta": voltage_difference,
-                "delta_plunger": voltage_difference,  # alias for clarity
-                # Peak location at this sample and its delta vs baseline (using center)
+                "delta_plunger": voltage_difference,
                 "peak_position": peak_center_voltage,
                 "peak_shift": peak_shift,
-                "delta_peak": peak_shift,  # alias for clarity
+                "delta_peak": peak_shift,
                 "sensitivity_voltage": float(best_peak.sensitivity_voltage),
             }
             measurement_samples.append(sample_record)
 
-            # Emit per-sample analysis immediately so each measurement is logged in real time
             if session:
                 session.log_analysis(
                     name=f"compensation_measurement_sample_{gate}",
@@ -589,11 +582,8 @@ def run_compensation(
                 )
             peak_positions[idx] = float(np.mean(measurements))
         peak_positions_difference = peak_positions - reference_peak_center_voltage
-        # Keep per-point gradients for diagnostics, but use RANSAC regression
-        # to robustly fit the gradient while rejecting outliers from bad measurements.
         per_point_gradients = peak_positions_difference / voltage_differences
 
-        # Use RANSAC to robustly fit gradient through all individual measurements
         ransac_result = fit_compensation_gradient_ransac(
             measurement_samples=measurement_samples,
             reference_peak_center_voltage=reference_peak_center_voltage,
@@ -614,15 +604,11 @@ def run_compensation(
 
         compensation_gradients_dict[gate] = least_squares_gradient
 
-        # Mark each measurement sample with its inlier status
         for i, sample in enumerate(measurement_samples):
             sample["is_inlier"] = bool(inlier_mask[i])
 
-        # Calculate per-averaged-point inlier ratios
-        # For each of the 10 voltage points, count how many of its 10 samples were inliers
         per_voltage_inlier_counts = []
         for idx in range(num_deltas):
-            # Find which of the 100 measurements correspond to this voltage point
             samples_for_this_voltage = [
                 i
                 for i, sample in enumerate(measurement_samples)
@@ -633,7 +619,6 @@ def run_compensation(
             )
             per_voltage_inlier_counts.append(num_inliers_for_voltage)
 
-        # Store detailed arrays for this gate for later analysis/logging
         per_gate_details[gate] = {
             "peak_positions": peak_positions,
             "peak_positions_difference": peak_positions_difference,
@@ -642,7 +627,6 @@ def run_compensation(
             "drift_intercept": drift_intercept,
             "mean_per_point_gradient": float(np.mean(per_point_gradients)),
             "mean_gradient": least_squares_gradient,
-            # RANSAC-specific fields (based on 100 raw measurements)
             "inlier_mask": inlier_mask.tolist(),
             "num_inliers": num_inliers,
             "num_outliers": num_outliers,
@@ -673,15 +657,12 @@ def run_compensation(
             "measurement_samples": measurement_samples,
         }
 
-        # Reset this gate back to baseline before moving to next gate
         reset_state = {gate: baseline_control_state[gate]}
         device.jump(reset_state, wait_for_settling=True)
         time.sleep(DEFAULT_SETTLING_TIME_S)
 
     logger.info("Compensation gradients: %s", compensation_gradients_dict)
 
-    # Save compensation gradient analysis to disk using passed session
-    # Log per-gate gradient details
     if session:
         for gate, details in per_gate_details.items():
             session.log_analysis(
@@ -698,7 +679,6 @@ def run_compensation(
                     "least_squares_gradient": details["least_squares_gradient"],
                     "drift_intercept": details["drift_intercept"],
                     "mean_per_point_gradient": details["mean_per_point_gradient"],
-                    # RANSAC-specific fields (based on 100 raw measurements)
                     "regression_method": "ransac",
                     "inlier_mask": details["inlier_mask"],
                     "num_inliers": details["num_inliers"],

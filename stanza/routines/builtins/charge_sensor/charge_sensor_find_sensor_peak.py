@@ -1,3 +1,93 @@
+"""
+Charge sensor peak finding routines for quantum dot devices.
+
+This module provides automated charge sensor peak detection and characterization
+for quantum dot devices using ML-based classification, multi-model peak fitting,
+and stability analysis. The routines identify optimal operating points for charge
+sensing by locating Coulomb blockade peaks with high sensitivity and stability.
+
+Physical Context:
+-----------------
+In quantum dot devices, a charge sensor is a quantum dot configured to operate
+near a Coulomb blockade peak, where conductance changes rapidly with electron
+number. This high sensitivity makes it ideal for detecting charge state changes
+in nearby control quantum dots. The sensor's performance depends critically on
+operating at the optimal point on the Coulomb blockade peak.
+
+The optimal operating point balances two competing factors:
+1. Sensitivity: Maximum current change per unit charge (steepest slope)
+2. Stability: Minimum voltage noise from current fluctuations
+
+Peak Finding Methodology:
+--------------------------
+The find_sensor_peak routine uses a multi-stage approach:
+
+1. Wide-Range Sweep: Performs a coarse sweep of the sensor plunger gate across
+   a wide voltage range to identify candidate Coulomb blockade peaks using
+   ML-based peak detection.
+
+2. Peak Fitting: For each detected peak, extracts a window around the peak and
+   fits multiple models (Lorentzian, Sech², Voigt) to determine precise peak
+   parameters including:
+   - Peak center voltage
+   - Peak width (FWHM)
+   - Peak amplitude
+   - Sensitivity (maximum gradient point)
+
+3. Quality Scoring: Calculates a composite quality score for each peak based on:
+   - Fit quality (R², RMSE, skew residual): 70% weight
+   - Normalized sensitivity: 20% weight
+   - Fit statistics: 10% weight
+
+4. Peak Selection: Selects the peak with the highest quality score as the
+   optimal operating point.
+
+Stability Analysis:
+--------------------
+The find_stable_sensor_peak routine extends peak finding with stability testing:
+
+1. Candidate Selection: Identifies the top N peaks (typically 3) by quality score
+
+2. Stability Measurement: For each candidate:
+   - Positions device at the peak's maximum gradient point (highest sensitivity)
+   - Performs a 2-minute hold measurement
+   - Records time-series current data
+   - Calculates voltage noise: σ_V = σ_I / |dI/dV|
+
+3. Combined Scoring: Computes a final score combining:
+   - Original quality score (30% weight)
+   - Stability score (70% weight)
+
+4. Optimal Peak Selection: Returns the peak with the highest combined score,
+   ensuring both high sensitivity and low noise.
+
+ML-Based Peak Detection:
+------------------------
+The routine uses machine learning models for robust peak detection:
+- Peak Detector Model: Identifies candidate peak locations in current traces
+- Coulomb Classifier Model: Validates that detected features are genuine
+  Coulomb blockade peaks rather than noise or artifacts
+
+This ML-based approach provides robust peak detection even in noisy measurements
+and handles various peak shapes and sizes automatically.
+
+Integration with Charge Sensor Workflow:
+----------------------------------------
+This module is the first stage in a three-stage charge sensor workflow:
+
+1. find_sensor_peak: Locates optimal charge sensing operating point
+   - Returns peak location, sensitivity voltage, and narrowed voltage range
+   - Provides quality metrics for peak assessment
+
+2. run_compensation: Calculates compensation gradients for control gates
+   - Uses the narrowed range from find_sensor_peak for high-resolution sweeps
+   - Measures how control gates affect sensor peak position
+
+3. charge_sensor_csd_readout: Performs compensated 2D sweeps
+   - Uses gradients from run_compensation for feedforward compensation
+   - Maintains sensor at optimal operating point during control gate sweeps
+"""
+
 # Standard library imports
 import logging
 import time

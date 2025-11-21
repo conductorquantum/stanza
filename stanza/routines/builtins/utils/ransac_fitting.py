@@ -12,7 +12,13 @@ from dataclasses import dataclass
 
 # Third-party imports
 import numpy as np
-from sklearn.linear_model import RANSACRegressor
+
+try:
+    from sklearn.linear_model import RANSACRegressor
+
+    HAS_SKLEARN = True
+except ImportError:
+    HAS_SKLEARN = False
 
 # First-party imports
 from stanza.exceptions import RoutineError
