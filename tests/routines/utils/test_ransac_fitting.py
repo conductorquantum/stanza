@@ -4,10 +4,10 @@ import numpy as np
 import pytest
 
 from stanza.exceptions import RoutineError
-from stanza.routines.builtins.charge_sensor.charge_sensor_compensation import (
+from stanza.routines.builtins.utils.ransac_fitting import (
+    RANSACFitResult,
     fit_compensation_gradient_ransac,
 )
-from stanza.routines.builtins.utils.ransac_fitting import RANSACFitResult
 
 
 def test_fit_compensation_gradient_ransac_recovers_gradient():
@@ -82,3 +82,30 @@ def test_ransac_vs_mse_gradient_fitting():
     ransac_error = abs(ransac_result.gradient - true_gradient)
     lsq_error = abs(lsq_gradient - true_gradient)
     assert ransac_error < lsq_error
+
+
+def test_measurement_samples_marked_inlier_outlier():
+    """After RANSAC fit, confirm each sample in measurement_samples has
+    is_inlier boolean field matching RANSAC inlier_mask."""
+    true_gradient = 0.3
+    reference_center = 0.15
+
+    np.random.seed(42)
+    control_deltas = np.linspace(-0.02, 0.02, 30)
+    peak_positions = reference_center + true_gradient * control_deltas
+    peak_positions[5] += 0.05
+    peak_positions[20] -= 0.04
+
+    measurement_samples = [
+        {"control_delta": cd, "peak_position": pp}
+        for cd, pp in zip(control_deltas, peak_positions, strict=True)
+    ]
+
+    result = fit_compensation_gradient_ransac(
+        measurement_samples=measurement_samples,
+        reference_peak_center_voltage=reference_center,
+        gate_name="test_gate",
+    )
+
+    assert len(result.inlier_mask) == len(measurement_samples)
+    assert result.num_inliers + result.num_outliers == len(measurement_samples)

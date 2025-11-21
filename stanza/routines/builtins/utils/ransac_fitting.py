@@ -48,33 +48,6 @@ class RANSACFitResult:
     all_peak_shifts: np.ndarray  # All peak shifts (y values)
 
 
-def test_measurement_samples_marked_inlier_outlier():
-    """After RANSAC fit, confirm each sample in measurement_samples has
-    is_inlier boolean field matching RANSAC inlier_mask."""
-    true_gradient = 0.3
-    reference_center = 0.15
-
-    np.random.seed(42)
-    control_deltas = np.linspace(-0.02, 0.02, 30)
-    peak_positions = reference_center + true_gradient * control_deltas
-    peak_positions[5] += 0.05
-    peak_positions[20] -= 0.04
-
-    measurement_samples = [
-        {"control_delta": cd, "peak_position": pp}
-        for cd, pp in zip(control_deltas, peak_positions, strict=True)
-    ]
-
-    result = fit_compensation_gradient_ransac(
-        measurement_samples=measurement_samples,
-        reference_peak_center_voltage=reference_center,
-        gate_name="test_gate",
-    )
-
-    assert len(result.inlier_mask) == len(measurement_samples)
-    assert result.num_inliers + result.num_outliers == len(measurement_samples)
-
-
 def fit_compensation_gradient_ransac(
     measurement_samples: list[dict[str, float]],
     reference_peak_center_voltage: float,

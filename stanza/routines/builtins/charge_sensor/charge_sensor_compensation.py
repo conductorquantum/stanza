@@ -262,6 +262,7 @@ def run_compensation(
     zero_control_side: bool = False,
     gates_to_compensate: list[str] | None = None,
     session: LoggerSession | None = None,
+    seed: int | None = None,
     **kwargs: Any,  # pylint: disable=unused-argument
 ) -> dict[str, float]:
     """Calculate compensation gradients for control gates affecting charge sensor.
@@ -280,6 +281,7 @@ def run_compensation(
         zero_control_side: If True, measure gradients relative to 0V baseline (default: False)
         gates_to_compensate: Optional list of gate names to test (default: None, tests all)
         session: Logger session for measurements and analysis
+        seed: Random seed for reproducible measurement ordering (default: None, non-deterministic)
 
     Returns:
         dict: Dictionary mapping gate names to compensation gradients (V/V)
@@ -324,7 +326,7 @@ def run_compensation(
             np.linspace(voltage_range / half_n, voltage_range, half_n),
         ]
     )
-    rng = np.random.default_rng()
+    rng = np.random.default_rng(seed)
 
     all_plungers = device.get_gates_by_type(GateType.PLUNGER)
     all_barriers = device.get_gates_by_type(GateType.BARRIER)
