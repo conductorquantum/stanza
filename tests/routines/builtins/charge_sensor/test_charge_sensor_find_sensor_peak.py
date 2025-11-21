@@ -9,6 +9,7 @@ from stanza.exceptions import RoutineError
 from stanza.models import DeviceGroup
 from stanza.routines import RoutineContext
 from stanza.routines.builtins.charge_sensor.charge_sensor_find_sensor_peak import (
+    SensorDotPlungerSweepOutput,
     StablePeakCandidate,
     _calculate_combined_scores,
     _calculate_local_slope,
@@ -765,10 +766,6 @@ def test_peak_detector_model_output_parsing():
     with patch(
         "stanza.routines.builtins.charge_sensor.charge_sensor_find_sensor_peak.many_window_barrier_sweep"
     ) as mock_sweep:
-        from stanza.routines.builtins.charge_sensor.charge_sensor_find_sensor_peak import (
-            SensorDotPlungerSweepOutput,
-        )
-
         # Create mock output with correct structure
         best_peak_voltage = voltages[
             mock_peak_indices[0]
