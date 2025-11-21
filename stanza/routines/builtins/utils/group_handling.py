@@ -77,7 +77,8 @@ def get_routine_result(
         group_key = f"{routine_name}_{group_name}"
         result = ctx.results.get(group_key)
         if result:
-            return result
+            return dict(result)
 
     # Fall back to non-grouped result
-    return ctx.results.get(routine_name, default)
+    result = ctx.results.get(routine_name, default)
+    return dict(result)

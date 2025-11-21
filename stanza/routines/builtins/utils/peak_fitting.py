@@ -509,7 +509,7 @@ def _calculate_peak_metrics(
     window_voltages: np.ndarray,
     aggregated_voltages: np.ndarray,
     window_start_idx: int,
-) -> tuple[float, float]:
+) -> tuple[float, float, float]:
     """
     Calculate sensitivity (max gradient) and peak voltage from fitted model.
 

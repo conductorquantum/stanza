@@ -303,7 +303,7 @@ def charge_sensor_csd_readout(  # pylint: disable=too-many-locals,too-many-state
 
     if gradient_adaptation_enabled:
         adaptive_gradients = compensation_gradients.copy()  # type: ignore
-        gradient_history = []
+        gradient_history: list[dict[str, Any]] | None = []
         delta_v_threshold = 1e-9
         logger.info(
             "Gradient adaptation initialized with delta_v_threshold=%.3e V",
@@ -394,7 +394,7 @@ def charge_sensor_csd_readout(  # pylint: disable=too-many-locals,too-many-state
         # Reset to initial position before each sweep
         reset_dict = {}
         if compensation_enabled:
-            reset_dict[charge_sensor_plunger_gate] = initial_sensor_voltage  # type: ignore
+            reset_dict[charge_sensor_plunger_gate] = initial_sensor_voltage
         for gate in control_plunger_gates:
             reset_dict[gate] = initial_control_plunger_voltages[gate]
 
@@ -414,6 +414,9 @@ def charge_sensor_csd_readout(  # pylint: disable=too-many-locals,too-many-state
 
         for point_idx, voltage_point in enumerate(voltages_with_compensation):
             if gradient_adaptation_enabled:
+                assert adaptive_gradients is not None
+                assert gradient_history is not None
+                assert delta_v_threshold is not None
                 control_v1, control_v2 = voltage_point[0], voltage_point[1]
                 g1_name, g2_name = (
                     control_plunger_gates[0],
@@ -424,8 +427,8 @@ def charge_sensor_csd_readout(  # pylint: disable=too-many-locals,too-many-state
                 delta_v2 = control_v2 - previous_control_voltages[g2_name]
 
                 compensation_update = 0.0
-                compensation_update += adaptive_gradients[g1_name] * delta_v1  # type: ignore
-                compensation_update += adaptive_gradients[g2_name] * delta_v2  # type: ignore
+                compensation_update += adaptive_gradients[g1_name] * delta_v1
+                compensation_update += adaptive_gradients[g2_name] * delta_v2
 
                 current_sensor_voltage += compensation_update
 
@@ -487,7 +490,8 @@ def charge_sensor_csd_readout(  # pylint: disable=too-many-locals,too-many-state
 
             feedback_correction = 0.0
             if feedback_enabled:
-                feedback_correction_raw = -beta * current_error_pre  # type: ignore
+                assert beta is not None
+                feedback_correction_raw = -beta * current_error_pre
 
                 current_sensor_v = voltage_dict[charge_sensor_plunger_gate]
                 min_v, max_v = device.channel_configs[
@@ -522,21 +526,26 @@ def charge_sensor_csd_readout(  # pylint: disable=too-many-locals,too-many-state
                 current = device.measure(measure_electrode)
 
             if gradient_adaptation_enabled:
-                if abs(delta_v1) > delta_v_threshold:  # type: ignore
+                assert adaptive_gradients is not None
+                assert gradient_history is not None
+                assert delta_v_threshold is not None
+                assert gamma_factors is not None
+                if abs(delta_v1) > delta_v_threshold:
+                    assert current_error_pre is not None
                     gradient_update = (
                         gamma_factors[g1_name] / delta_v1
-                    ) * current_error_pre  # type: ignore
+                    ) * current_error_pre
 
-                    old_gradient = adaptive_gradients[g1_name]  # type: ignore
-                    adaptive_gradients[g1_name] += gradient_update  # type: ignore
+                    old_gradient = adaptive_gradients[g1_name]
+                    adaptive_gradients[g1_name] += gradient_update
 
                     adaptive_gradients[g1_name] = float(
                         np.clip(
-                            adaptive_gradients[g1_name],  # type: ignore
+                            adaptive_gradients[g1_name],
                             -max_adaptive_gradient,
                             max_adaptive_gradient,
                         )
-                    )  # type: ignore
+                    )
 
                     if abs(old_gradient + gradient_update) > max_adaptive_gradient:
                         gradient_clipping_events += 1
@@ -544,12 +553,12 @@ def charge_sensor_csd_readout(  # pylint: disable=too-many-locals,too-many-state
                             "Adaptive gradient for %s clipped: %.6f -> %.6f (limit: ±%.6f V/V)",
                             g1_name,
                             old_gradient + gradient_update,
-                            adaptive_gradients[g1_name],  # type: ignore
+                            adaptive_gradients[g1_name],
                             max_adaptive_gradient,
                         )
 
                     gradient_update_count[g1_name] += 1
-                    gradient_history.append(  # type: ignore
+                    gradient_history.append(
                         {
                             "point_index": point_idx,
                             "repetition": i,
@@ -557,25 +566,26 @@ def charge_sensor_csd_readout(  # pylint: disable=too-many-locals,too-many-state
                             "delta_v": float(delta_v1),
                             "current_error_pre_feedback": float(current_error_pre),
                             "gradient_update": float(gradient_update),
-                            "new_gradient": float(adaptive_gradients[g1_name]),  # type: ignore
+                            "new_gradient": float(adaptive_gradients[g1_name]),
                         }
                     )
 
-                if abs(delta_v2) > delta_v_threshold:  # type: ignore
+                if abs(delta_v2) > delta_v_threshold:
+                    assert current_error_pre is not None
                     gradient_update = (
                         gamma_factors[g2_name] / delta_v2
-                    ) * current_error_pre  # type: ignore
+                    ) * current_error_pre
 
-                    old_gradient = adaptive_gradients[g2_name]  # type: ignore
-                    adaptive_gradients[g2_name] += gradient_update  # type: ignore
+                    old_gradient = adaptive_gradients[g2_name]
+                    adaptive_gradients[g2_name] += gradient_update
 
                     adaptive_gradients[g2_name] = float(
                         np.clip(
-                            adaptive_gradients[g2_name],  # type: ignore
+                            adaptive_gradients[g2_name],
                             -max_adaptive_gradient,
                             max_adaptive_gradient,
                         )
-                    )  # type: ignore
+                    )
 
                     if abs(old_gradient + gradient_update) > max_adaptive_gradient:
                         gradient_clipping_events += 1
@@ -583,12 +593,12 @@ def charge_sensor_csd_readout(  # pylint: disable=too-many-locals,too-many-state
                             "Adaptive gradient for %s clipped: %.6f -> %.6f (limit: ±%.6f V/V)",
                             g2_name,
                             old_gradient + gradient_update,
-                            adaptive_gradients[g2_name],  # type: ignore
+                            adaptive_gradients[g2_name],
                             max_adaptive_gradient,
                         )
 
                     gradient_update_count[g2_name] += 1
-                    gradient_history.append(  # type: ignore
+                    gradient_history.append(
                         {
                             "point_index": point_idx,
                             "repetition": i,
@@ -596,7 +606,7 @@ def charge_sensor_csd_readout(  # pylint: disable=too-many-locals,too-many-state
                             "delta_v": float(delta_v2),
                             "current_error_pre_feedback": float(current_error_pre),
                             "gradient_update": float(gradient_update),
-                            "new_gradient": float(adaptive_gradients[g2_name]),  # type: ignore
+                            "new_gradient": float(adaptive_gradients[g2_name]),
                         }
                     )
 
@@ -620,14 +630,15 @@ def charge_sensor_csd_readout(  # pylint: disable=too-many-locals,too-many-state
 
         g1_name, g2_name = control_plunger_gates
 
-        session.log_sweep(
-            name="charge_sensor_csd_readout",
-            x_data=voltage_measurements,
-            y_data=current_measurements,
-            x_label=control_plunger_gates,
-            y_label="current",
-            metadata={"repetition": i + 1},
-        )
+        if session is not None:
+            session.log_sweep(
+                name="charge_sensor_csd_readout",
+                x_data=voltage_measurements,
+                y_data=current_measurements,
+                x_label=", ".join(control_plunger_gates),
+                y_label="current",
+                metadata={"repetition": i + 1},
+            )
 
     # Average currents across all sweeps
     average_currents = np.mean(currents_list, axis=0)
@@ -669,12 +680,15 @@ def charge_sensor_csd_readout(  # pylint: disable=too-many-locals,too-many-state
         )
 
     if gradient_adaptation_enabled:
+        assert compensation_gradients is not None
+        assert adaptive_gradients is not None
+        assert gradient_history is not None
         logger.info("Gradient adaptation summary:")
         logger.info("  Initial gradients: %s", compensation_gradients)
         logger.info("  Final gradients: %s", adaptive_gradients)
         for gate in control_plunger_gates:
-            initial_grad = compensation_gradients[gate]  # type: ignore
-            final_grad = adaptive_gradients[gate]  # type: ignore
+            initial_grad = compensation_gradients[gate]
+            final_grad = adaptive_gradients[gate]
             change = final_grad - initial_grad
             percent_change = (change / initial_grad * 100) if initial_grad != 0 else 0
             logger.info(
@@ -685,7 +699,7 @@ def charge_sensor_csd_readout(  # pylint: disable=too-many-locals,too-many-state
                 change,
                 percent_change,
             )
-        logger.info("  Total gradient updates: %d", len(gradient_history))  # type: ignore
+        logger.info("  Total gradient updates: %d", len(gradient_history))
 
     voltage_measurements_2d = [[v[0], v[1]] for v in voltage_measurements]
 
@@ -695,7 +709,7 @@ def charge_sensor_csd_readout(  # pylint: disable=too-many-locals,too-many-state
             name="charge_sensor_csd_readout",
             x_data=voltage_measurements_2d,
             y_data=differential_currents.tolist(),
-            x_label=control_plunger_gates,
+            x_label=", ".join(control_plunger_gates),
             y_label="differential_current",
             metadata={
                 "compensation_enabled": compensation_enabled,
@@ -742,6 +756,7 @@ def charge_sensor_csd_readout(  # pylint: disable=too-many-locals,too-many-state
             )
 
         if feedback_enabled:
+            assert beta is not None
             session.log_analysis(
                 name="charge_sensor_csd_feedback_summary",
                 data={
@@ -749,36 +764,38 @@ def charge_sensor_csd_readout(  # pylint: disable=too-many-locals,too-many-state
                     "feedback_max": float(np.max(average_feedback_corrections)),
                     "feedback_mean": float(np.mean(average_feedback_corrections)),
                     "feedback_std": float(np.std(average_feedback_corrections)),
-                    "beta": float(beta),  # type: ignore
+                    "beta": float(beta),
                 },
             )
 
         if gradient_adaptation_enabled:
+            assert adaptive_gradients is not None
+            assert gradient_history is not None
+            assert compensation_gradients is not None
+            assert gamma_factors is not None
             session.log_analysis(
                 name="charge_sensor_csd_gradient_adaptation_summary",
                 data={
                     "initial_gradients": {
-                        k: float(v)
-                        for k, v in compensation_gradients.items()  # type: ignore
+                        k: float(v) for k, v in compensation_gradients.items()
                     },
                     "final_gradients": {
-                        k: float(v)
-                        for k, v in adaptive_gradients.items()  # type: ignore
+                        k: float(v) for k, v in adaptive_gradients.items()
                     },
                     "gradient_changes": {
                         gate: float(
                             adaptive_gradients[gate] - compensation_gradients[gate]
-                        )  # type: ignore
+                        )
                         for gate in control_plunger_gates
                     },
-                    "gamma_factors": {k: float(v) for k, v in gamma_factors.items()},  # type: ignore
-                    "total_updates": len(gradient_history),  # type: ignore
+                    "gamma_factors": {k: float(v) for k, v in gamma_factors.items()},
+                    "total_updates": len(gradient_history),
                 },
             )
 
             session.log_analysis(
                 name="charge_sensor_csd_gradient_history",
-                data={"gradient_history": gradient_history},  # type: ignore
+                data={"gradient_history": gradient_history},
             )
 
     result = {
@@ -792,7 +809,7 @@ def charge_sensor_csd_readout(  # pylint: disable=too-many-locals,too-many-state
         "bias_voltage": float(bias_voltage),
         "bias_gate": bias_gate,
         "initial_sensor_plunger_voltage": (
-            initial_sensor_voltage if compensation_enabled else None  # type: ignore
+            initial_sensor_voltage if compensation_enabled else None
         ),
         "sensor_park_point_voltages": sensor_park_point_voltages,
         "initial_control_voltages": initial_control_voltages,
