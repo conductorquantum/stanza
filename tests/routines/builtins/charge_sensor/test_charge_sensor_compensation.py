@@ -10,7 +10,6 @@ from stanza.logger.session import LoggerSession
 from stanza.models import DeviceGroup
 from stanza.routines import RoutineContext
 from stanza.routines.builtins.charge_sensor.charge_sensor_compensation import (
-    RANSACFitResult,
     _single_window_sensor_plunger_sweep,
     fit_compensation_gradient_ransac,
     run_compensation,
@@ -24,6 +23,7 @@ from stanza.routines.builtins.utils.peak_fitting import (
     fit_peak_multi_model,
     lorentzian,
 )
+from stanza.routines.builtins.utils.ransac_fitting import RANSACFitResult
 
 # =============================================================================
 # Regression Math Tests
