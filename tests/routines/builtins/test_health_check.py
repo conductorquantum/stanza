@@ -12,9 +12,9 @@ from stanza.models import GateType
 from stanza.registry import ResourceRegistry, ResultsRegistry
 from stanza.routines import RoutineContext
 from stanza.routines.builtins.health_check import (
-    _calculate_leakage_matrix,
-    _check_leakage_threshold,
     analyze_single_gate_heuristic,
+    calculate_leakage_matrix,
+    check_leakage_threshold,
     finger_gate_characterization,
     global_accumulation,
     leakage_test,
@@ -481,7 +481,7 @@ class TestAnalyzeSingleGateHeuristic:
 
 class TestLeakageHelperFunctions:
     def test_calculate_leakage_matrix(self):
-        leakage_matrix = _calculate_leakage_matrix(
+        leakage_matrix = calculate_leakage_matrix(
             0.1, np.array([1e-9, 2e-9, 0.0, 5e-9])
         )
         assert leakage_matrix.shape == (4,)
@@ -490,12 +490,12 @@ class TestLeakageHelperFunctions:
         assert np.all(np.isfinite(leakage_matrix[:2]))
 
     def test_calculate_leakage_matrix_handles_negatives(self):
-        leakage_matrix = _calculate_leakage_matrix(-0.1, np.array([-1e-9, 1e-9]))
+        leakage_matrix = calculate_leakage_matrix(-0.1, np.array([-1e-9, 1e-9]))
         assert np.all(leakage_matrix > 0)
         assert np.all(np.isfinite(leakage_matrix))
 
     def test_check_leakage_threshold_no_leakage(self):
-        leaked = _check_leakage_threshold(
+        leaked = check_leakage_threshold(
             np.array([[np.inf, 1e8], [1e8, np.inf]]),
             leakage_threshold_resistance=50e6,
             leakage_threshold_count=0,
@@ -507,7 +507,7 @@ class TestLeakageHelperFunctions:
 
     def test_check_leakage_threshold_with_leakage(self):
         session = MockLoggerSession()
-        leaked = _check_leakage_threshold(
+        leaked = check_leakage_threshold(
             np.array([[np.inf, 1e5], [1e5, np.inf]]),
             leakage_threshold_resistance=50e6,
             leakage_threshold_count=0,

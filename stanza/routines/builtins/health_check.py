@@ -636,7 +636,7 @@ def finger_gate_characterization(
     }
 
 
-def _calculate_leakage_matrix(delta_V: float, current_diff: np.ndarray) -> np.ndarray:
+def calculate_leakage_matrix(delta_V: float, current_diff: np.ndarray) -> np.ndarray:
     """Calculate leakage resistance matrix from voltage change and current differences.
 
     Args:
@@ -653,7 +653,7 @@ def _calculate_leakage_matrix(delta_V: float, current_diff: np.ndarray) -> np.nd
     return leakage_matrix
 
 
-def _check_leakage_threshold(
+def check_leakage_threshold(
     leakage_matrix: np.ndarray,
     leakage_threshold_resistance: int,
     leakage_threshold_count: int,
@@ -766,7 +766,7 @@ def _test_single_voltage_bound(
             continue
 
         currents_diff = np.array(currents_matrix) - initial_currents_array
-        leakage_matrix = _calculate_leakage_matrix(delta_V, currents_diff)
+        leakage_matrix = calculate_leakage_matrix(delta_V, currents_diff)
 
         if session:
             session.log_measurement(
@@ -780,7 +780,7 @@ def _test_single_voltage_bound(
             )
 
         # Check if leakage threshold exceeded
-        if _check_leakage_threshold(
+        if check_leakage_threshold(
             leakage_matrix,
             leakage_threshold_resistance,
             leakage_threshold_count,

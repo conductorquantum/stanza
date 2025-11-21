@@ -49,7 +49,7 @@ from stanza.routines.builtins.utils.ransac_fitting import (
 logger = logging.getLogger(__name__)
 
 
-def analyze_single_window_barrier_sweep(
+def _analyze_single_window_barrier_sweep(
     aggregated_currents: np.ndarray,
     aggregated_voltages: np.ndarray,
     analysis_session: LoggerSession | None,
@@ -221,7 +221,7 @@ def _single_window_sensor_plunger_sweep(
         aggregated_voltages = np.concatenate([aggregated_voltages, sp_sweep_voltages])
         aggregated_currents = np.concatenate([aggregated_currents, current_trace])
 
-        fitted_peak = analyze_single_window_barrier_sweep(
+        fitted_peak = _analyze_single_window_barrier_sweep(
             aggregated_currents, aggregated_voltages, session
         )
 
