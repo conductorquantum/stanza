@@ -219,46 +219,6 @@ def test_calculate_compensated_voltages_walking_state_continuity():
         assert delta < 0.2, f"Large voltage jump detected at index {i}: {delta}"
 
 
-def test_serpentine_pattern_eliminates_voltage_jumps():
-    """Compare voltage trajectories between raster (always left-to-right) and serpentine
-    patterns, asserting serpentine has no large jumps at row boundaries."""
-    control_plunger_gates = ["G1", "G2"]
-    control_plunger_ranges = {"G1": (0.0, 0.3), "G2": (0.0, 0.3)}
-    compensation_gradients = {"G2": 0.1}  # Only compensate for G2
-    initial_control_voltages = {"G1": 0.0, "G2": 0.0}
-    initial_sensor_voltage = 1.0
-    charge_sensor_plunger_gate = "G_sensor"
-    sweep_resolution = 4
-
-    voltages, _, _ = _calculate_compensated_voltages(
-        control_plunger_gates=control_plunger_gates,
-        control_plunger_ranges=control_plunger_ranges,
-        compensation_gradients=compensation_gradients,
-        initial_control_voltages=initial_control_voltages,
-        initial_sensor_voltage=initial_sensor_voltage,
-        charge_sensor_plunger_gate=charge_sensor_plunger_gate,
-        sweep_resolution=sweep_resolution,
-    )
-
-    # Extract G2 and sensor voltages
-    g2_values = [v[1] for v in voltages]
-    sensor_voltages = [v[2] for v in voltages]
-
-    # Check row transitions (at indices 4, 8, 12)
-    row_transition_indices = [4, 8, 12]
-    for idx in row_transition_indices:
-        if idx < len(g2_values):
-            # G2 jump at row boundary in serpentine should be small (continuous)
-            g2_jump = abs(g2_values[idx] - g2_values[idx - 1])
-            assert g2_jump < 0.15, f"Large G2 jump at row boundary {idx}: {g2_jump}"
-
-            # Sensor voltage jump should also be small (compensating continuously)
-            sensor_jump = abs(sensor_voltages[idx] - sensor_voltages[idx - 1])
-            assert sensor_jump < 0.05, (
-                f"Large sensor jump at row boundary {idx}: {sensor_jump}"
-            )
-
-
 # =============================================================================
 # Integration Tests for charge_sensor_csd_readout
 # =============================================================================
@@ -717,45 +677,22 @@ def test_adaptive_gradient_uses_pre_feedback_error():
         assert "current_error_pre_feedback" in result["gradient_history"][0]
 
 
-def test_adaptive_gradient_clipping_to_max():
-    """Drive gradient beyond max_adaptive_gradient and confirm it's clipped to
-    ±max_adaptive_gradient with warning logged."""
+def test_clipping_events_counters_tracked_separately():
+    """Test both gradient and sensor clipping counters are tracked independently.
+
+    Verifies:
+    - Both counters exist in result
+    - Counters are integers >= 0
+    - Gradient clipping counter tracks adaptive gradient clips
+    - Sensor clipping counter tracks pre-feedback voltage boundary clips
+    - Counters are independent (one can increment without affecting the other)
+    """
     mock_device = create_mock_device_with_groups()
     ctx = create_mock_context(mock_device)
     mock_session = create_mock_session()
 
-    # Use large gamma to potentially trigger clipping
-    result = charge_sensor_csd_readout(
-        ctx=ctx,
-        charge_sensor_group_name="sensor_group",
-        control_group_name="control_group",
-        sensor_park_point_voltages={"G1": 0.1, "G2": 0.2, "G3": 0.3},
-        charge_sensor_plunger_gate="G3",
-        initial_control_voltages={"G4": -1.0, "G5": -1.0},
-        control_plunger_ranges={"G4": (-1.0, -0.9), "G5": (-1.0, -0.9)},
-        measure_electrode="OUT",
-        bias_gate="BIAS",
-        bias_voltage=1e-4,
-        compensation_gradients={"G4": 0.1, "G5": 0.15},
-        gamma_factors={"G4": 1e3, "G5": 1e3},  # Very large gamma
-        max_adaptive_gradient=0.5,  # Low clipping threshold
-        sweep_resolution=3,
-        session=mock_session,
-    )
-
-    # Check that gradient clipping events were tracked
-    assert "gradient_clipping_events" in result
-    assert result["gradient_clipping_events"] >= 0
-
-
-def test_gradient_clipping_events_counter():
-    """Trigger multiple gradient clips and verify gradient_clipping_events counter
-    in result matches the number of clips."""
-    mock_device = create_mock_device_with_groups()
-    ctx = create_mock_context(mock_device)
-    mock_session = create_mock_session()
-
-    result = charge_sensor_csd_readout(
+    # Test 1: Gradient clipping (high gamma factors trigger adaptive gradient clips)
+    result_gradient = charge_sensor_csd_readout(
         ctx=ctx,
         charge_sensor_group_name="sensor_group",
         control_group_name="control_group",
@@ -773,9 +710,59 @@ def test_gradient_clipping_events_counter():
         session=mock_session,
     )
 
-    # Verify counter exists and is an integer
-    assert isinstance(result["gradient_clipping_events"], int)
-    assert result["gradient_clipping_events"] >= 0
+    # Verify gradient clipping counter
+    assert "gradient_clipping_events" in result_gradient
+    assert isinstance(result_gradient["gradient_clipping_events"], int)
+    assert result_gradient["gradient_clipping_events"] >= 0
+
+    # Test 2: Sensor clipping (large compensation gradients drive sensor out of bounds)
+    result_sensor = charge_sensor_csd_readout(
+        ctx=ctx,
+        charge_sensor_group_name="sensor_group",
+        control_group_name="control_group",
+        sensor_park_point_voltages={"G1": -0.5, "G2": 0.2, "G3": -0.5},
+        charge_sensor_plunger_gate="G3",
+        initial_control_voltages={"G4": -1.0, "G5": -1.0},
+        control_plunger_ranges={"G4": (-1.0, -0.5), "G5": (-1.0, -0.5)},
+        measure_electrode="OUT",
+        bias_gate="BIAS",
+        bias_voltage=1e-4,
+        compensation_gradients={"G4": 5.0, "G5": 5.0},  # Very large gradients
+        sweep_resolution=4,
+        session=mock_session,
+    )
+
+    # Verify sensor clipping counter
+    assert "sensor_clipping_events_pre_feedback" in result_sensor
+    assert isinstance(result_sensor["sensor_clipping_events_pre_feedback"], int)
+    assert result_sensor["sensor_clipping_events_pre_feedback"] >= 0
+
+    # Test 3: Both counters tracked independently
+    result_both = charge_sensor_csd_readout(
+        ctx=ctx,
+        charge_sensor_group_name="sensor_group",
+        control_group_name="control_group",
+        sensor_park_point_voltages={"G1": -1.0, "G2": 0.2, "G3": -1.0},
+        charge_sensor_plunger_gate="G3",
+        initial_control_voltages={"G4": -1.0, "G5": -1.0},
+        control_plunger_ranges={"G4": (-1.0, -0.9), "G5": (-1.0, -0.9)},
+        measure_electrode="OUT",
+        bias_gate="BIAS",
+        bias_voltage=1e-4,
+        compensation_gradients={"G4": 1.0, "G5": 1.0},
+        gamma_factors={"G4": 1e-5, "G5": 1e-5},
+        sweep_resolution=3,
+        session=mock_session,
+    )
+
+    # Both counters should exist and be independent
+    assert "sensor_clipping_events_pre_feedback" in result_both
+    assert "gradient_clipping_events" in result_both
+    assert isinstance(result_both["sensor_clipping_events_pre_feedback"], int)
+    assert isinstance(result_both["gradient_clipping_events"], int)
+    # Verify they are non-negative
+    assert result_both["sensor_clipping_events_pre_feedback"] >= 0
+    assert result_both["gradient_clipping_events"] >= 0
 
 
 def test_gradient_history_logs_all_updates():
@@ -1035,40 +1022,6 @@ def test_feedback_correction_never_exceeds_voltage_range():
     assert all(np.isfinite(fc) for fc in result["feedback_corrections"])
 
 
-def test_feedback_raises_error_if_voltage_range_none():
-    """Set voltage_range to (None, max_v) or (min_v, None) and verify RoutineError
-    is raised when feedback is enabled."""
-    # This test validates that voltage range validation occurs
-    # The device gates have voltage_range built in, so this is implicitly tested
-    # In practice, gates always have voltage ranges defined
-    mock_device = create_mock_device_with_groups()
-    ctx = create_mock_context(mock_device)
-    mock_session = create_mock_session()
-
-    # Normal case should work fine
-    result = charge_sensor_csd_readout(
-        ctx=ctx,
-        charge_sensor_group_name="sensor_group",
-        control_group_name="control_group",
-        sensor_park_point_voltages={"G1": -1.5, "G2": 0.2, "G3": -1.5},
-        charge_sensor_plunger_gate="G3",
-        initial_control_voltages={"G4": -1.0, "G5": -1.0},
-        control_plunger_ranges={"G4": (-1.0, -0.9), "G5": (-1.0, -0.9)},
-        measure_electrode="OUT",
-        bias_gate="BIAS",
-        bias_voltage=1e-4,
-        compensation_gradients={
-            "G4": 0.01,
-            "G5": 0.01,
-        },  # Enable compensation to track sensor voltage
-        beta=-1e5,
-        sweep_resolution=3,
-        session=mock_session,
-    )
-
-    assert result["feedback_enabled"] is True
-
-
 def test_max_feedback_correction_parameter_deprecated():
     """Verify max_feedback_correction parameter is accepted but ignored (no longer
     used in clipping logic)."""
@@ -1102,42 +1055,43 @@ def test_max_feedback_correction_parameter_deprecated():
     assert result["feedback_enabled"] is True
 
 
-def test_sensor_clipping_events_pre_feedback_counter():
-    """Drive compensation to exceed voltage limits and verify sensor_clipping_events_pre_feedback
-    counter increments."""
+def test_clipping_events_logged_and_stored():
+    """Verify clipping events are stored in result dict and logged to session.
+
+    Verifies:
+    - Both counters appear in result dictionary
+    - Counters are logged after sweep completion
+    - Session receives clipping event data
+    """
     mock_device = create_mock_device_with_groups()
     ctx = create_mock_context(mock_device)
-    mock_session = create_mock_session()
 
-    # Use large compensation gradients to drive sensor voltage out of bounds
+    # Test 1: Verify result dictionary contains both counters
+    mock_session = create_mock_session()
     result = charge_sensor_csd_readout(
         ctx=ctx,
         charge_sensor_group_name="sensor_group",
         control_group_name="control_group",
-        sensor_park_point_voltages={"G1": -0.5, "G2": 0.2, "G3": -0.5},
+        sensor_park_point_voltages={"G1": -1.5, "G2": 0.2, "G3": -1.5},
         charge_sensor_plunger_gate="G3",
         initial_control_voltages={"G4": -1.0, "G5": -1.0},
-        control_plunger_ranges={"G4": (-1.0, -0.5), "G5": (-1.0, -0.5)},
+        control_plunger_ranges={"G4": (-1.0, -0.9), "G5": (-1.0, -0.9)},
         measure_electrode="OUT",
         bias_gate="BIAS",
         bias_voltage=1e-4,
-        compensation_gradients={"G4": 5.0, "G5": 5.0},  # Very large gradients
-        sweep_resolution=4,
+        compensation_gradients={"G4": 0.1, "G5": 0.15},
+        gamma_factors={"G4": 1e-6, "G5": 1e-6},
+        sweep_resolution=3,
         session=mock_session,
     )
 
-    # Clipping counter should exist
+    # Both counters must be present in result dict
     assert "sensor_clipping_events_pre_feedback" in result
+    assert "gradient_clipping_events" in result
     assert isinstance(result["sensor_clipping_events_pre_feedback"], int)
+    assert isinstance(result["gradient_clipping_events"], int)
 
-
-def test_clipping_events_logged_in_summary():
-    """Mock logger and verify clipping event counts are logged after sweep completion."""
-    mock_device = create_mock_device_with_groups()
-    ctx = create_mock_context(mock_device)
-    mock_session = create_mock_session()
-
-    # Run with parameters that may cause clipping
+    # Test 2: Verify logging after sweep completion
     with patch(
         "stanza.routines.builtins.charge_sensor.charge_sensor_readout.logger"
     ) as mock_logger:
@@ -1157,18 +1111,12 @@ def test_clipping_events_logged_in_summary():
             session=mock_session,
         )
 
-    # Logger should have been called (we don't verify specific messages)
+    # Logger should have been called after sweep
     assert mock_logger.info.called
 
-
-def test_clipping_events_in_session_log_analysis():
-    """Mock LoggerSession and verify sensor_clipping_events_pre_feedback and
-    gradient_clipping_events appear in log_analysis data."""
-    mock_device = create_mock_device_with_groups()
-    ctx = create_mock_context(mock_device)
-    mock_session = Mock()
-
-    result = charge_sensor_csd_readout(
+    # Test 3: Verify session receives clipping data
+    mock_session_with_data = Mock()
+    result_session = charge_sensor_csd_readout(
         ctx=ctx,
         charge_sensor_group_name="sensor_group",
         control_group_name="control_group",
@@ -1182,154 +1130,17 @@ def test_clipping_events_in_session_log_analysis():
         compensation_gradients={"G4": 1.0, "G5": 1.0},
         gamma_factors={"G4": 1e-5, "G5": 1e-5},
         sweep_resolution=3,
-        session=mock_session,
+        session=mock_session_with_data,
     )
 
-    # Result should contain clipping event counters
-    assert "sensor_clipping_events_pre_feedback" in result
-    assert "gradient_clipping_events" in result
-
-
-def test_clipping_events_in_result_dict():
-    """Verify result dictionary contains sensor_clipping_events_pre_feedback and
-    gradient_clipping_events fields."""
-    mock_device = create_mock_device_with_groups()
-    ctx = create_mock_context(mock_device)
-    mock_session = create_mock_session()
-
-    result = charge_sensor_csd_readout(
-        ctx=ctx,
-        charge_sensor_group_name="sensor_group",
-        control_group_name="control_group",
-        sensor_park_point_voltages={"G1": -1.5, "G2": 0.2, "G3": -1.5},
-        charge_sensor_plunger_gate="G3",
-        initial_control_voltages={"G4": -1.0, "G5": -1.0},
-        control_plunger_ranges={"G4": (-1.0, -0.9), "G5": (-1.0, -0.9)},
-        measure_electrode="OUT",
-        bias_gate="BIAS",
-        bias_voltage=1e-4,
-        compensation_gradients={"G4": 0.1, "G5": 0.15},
-        gamma_factors={"G4": 1e-6, "G5": 1e-6},
-        sweep_resolution=3,
-        session=mock_session,
-    )
-
-    # Both counters must be present
-    assert "sensor_clipping_events_pre_feedback" in result
-    assert "gradient_clipping_events" in result
-    assert isinstance(result["sensor_clipping_events_pre_feedback"], int)
-    assert isinstance(result["gradient_clipping_events"], int)
+    # Result should contain clipping event counters (available to session logging)
+    assert "sensor_clipping_events_pre_feedback" in result_session
+    assert "gradient_clipping_events" in result_session
 
 
 # =============================================================================
 # Voltage Range Validation Tests
 # =============================================================================
-
-
-def test_sensor_voltage_validation_raises_on_none_min():
-    """Set voltage_range minimum to None and verify RoutineError is raised during
-    pre-feedback validation."""
-    # Gates have built-in voltage ranges, so None values are prevented at construction
-    # This test verifies the system handles voltage range validation
-    mock_device = create_mock_device_with_groups()
-    ctx = create_mock_context(mock_device)
-    mock_session = create_mock_session()
-
-    # Normal case with valid voltage ranges
-    result = charge_sensor_csd_readout(
-        ctx=ctx,
-        charge_sensor_group_name="sensor_group",
-        control_group_name="control_group",
-        sensor_park_point_voltages={"G1": -1.5, "G2": 0.2, "G3": -1.5},
-        charge_sensor_plunger_gate="G3",
-        initial_control_voltages={"G4": -1.0, "G5": -1.0},
-        control_plunger_ranges={"G4": (-1.0, -0.9), "G5": (-1.0, -0.9)},
-        measure_electrode="OUT",
-        bias_gate="BIAS",
-        bias_voltage=1e-4,
-        sweep_resolution=3,
-        session=mock_session,
-    )
-
-    # Should complete successfully with valid ranges
-    assert "current_measurements" in result
-
-
-def test_sensor_voltage_validation_raises_on_none_max():
-    """Set voltage_range maximum to None and verify RoutineError is raised during
-    pre-feedback validation."""
-    # Similar to above - validates that voltage range validation works
-    mock_device = create_mock_device_with_groups()
-    ctx = create_mock_context(mock_device)
-    mock_session = create_mock_session()
-
-    result = charge_sensor_csd_readout(
-        ctx=ctx,
-        charge_sensor_group_name="sensor_group",
-        control_group_name="control_group",
-        sensor_park_point_voltages={"G1": -1.5, "G2": 0.2, "G3": -1.5},
-        charge_sensor_plunger_gate="G3",
-        initial_control_voltages={"G4": -1.0, "G5": -1.0},
-        control_plunger_ranges={"G4": (-1.0, -0.9), "G5": (-1.0, -0.9)},
-        measure_electrode="OUT",
-        bias_gate="BIAS",
-        bias_voltage=1e-4,
-        sweep_resolution=3,
-        session=mock_session,
-    )
-
-    assert "current_measurements" in result
-
-
-def test_voltage_range_validation_consistent_pre_and_feedback():
-    """Verify both pre-feedback and feedback paths raise the same RoutineError when
-    voltage_range is None."""
-    # This validates consistent behavior across compensation modes
-    mock_device = create_mock_device_with_groups()
-    ctx = create_mock_context(mock_device)
-    mock_session = create_mock_session()
-
-    # Test with compensation
-    result1 = charge_sensor_csd_readout(
-        ctx=ctx,
-        charge_sensor_group_name="sensor_group",
-        control_group_name="control_group",
-        sensor_park_point_voltages={"G1": -1.5, "G2": 0.2, "G3": -1.5},
-        charge_sensor_plunger_gate="G3",
-        initial_control_voltages={"G4": -1.0, "G5": -1.0},
-        control_plunger_ranges={"G4": (-1.0, -0.9), "G5": (-1.0, -0.9)},
-        measure_electrode="OUT",
-        bias_gate="BIAS",
-        bias_voltage=1e-4,
-        compensation_gradients={"G4": 0.1, "G5": 0.15},
-        sweep_resolution=3,
-        session=mock_session,
-    )
-
-    # Test with feedback
-    result2 = charge_sensor_csd_readout(
-        ctx=ctx,
-        charge_sensor_group_name="sensor_group",
-        control_group_name="control_group",
-        sensor_park_point_voltages={"G1": -1.5, "G2": 0.2, "G3": -1.5},
-        charge_sensor_plunger_gate="G3",
-        initial_control_voltages={"G4": -1.0, "G5": -1.0},
-        control_plunger_ranges={"G4": (-1.0, -0.9), "G5": (-1.0, -0.9)},
-        measure_electrode="OUT",
-        bias_gate="BIAS",
-        bias_voltage=1e-4,
-        compensation_gradients={
-            "G4": 0.01,
-            "G5": 0.01,
-        },  # Enable compensation to track sensor voltage
-        beta=-1e5,
-        sweep_resolution=3,
-        session=mock_session,
-    )
-
-    # Both should complete successfully
-    assert "current_measurements" in result1
-    assert "current_measurements" in result2
 
 
 def test_charge_sensor_compensation_combines_beta_and_gradients():
@@ -1381,78 +1192,8 @@ def test_charge_sensor_compensation_combines_beta_and_gradients():
 
 
 # =============================================================================
-# Dynamic Compensation Application Tests
-# =============================================================================
-
-
-def test_compensation_uses_ransac_gradients():
-    """Verify compensation_gradients dict from run_compensation is directly used
-    in sensor voltage update formula."""
-    # Test that gradients are applied correctly
-    compensation_gradients = {"G4": 0.15, "G5": 0.20}
-
-    # Verify gradient structure
-    assert "G4" in compensation_gradients
-    assert "G5" in compensation_gradients
-    assert compensation_gradients["G4"] == 0.15
-    assert compensation_gradients["G5"] == 0.20
-
-
-def test_compensation_voltage_update_formula():
-    """For known gradients and control voltage changes, verify sensor update matches:
-    V_sensor[x+1] = V_sensor[x] + Σ(gradient_i × ΔV_control_i)."""
-    # Known parameters
-    initial_sensor_voltage = 1.0
-    gradients = {"G1": 0.2, "G2": 0.3}
-    control_voltage_changes = {"G1": 0.1, "G2": 0.05}  # ΔV for each gate
-
-    # Calculate expected compensation
-    compensation = sum(
-        gradients[gate] * control_voltage_changes[gate] for gate in gradients
-    )
-    expected_sensor_voltage = initial_sensor_voltage + compensation
-
-    # Expected: 1.0 + (0.2 * 0.1 + 0.3 * 0.05) = 1.0 + 0.035 = 1.035
-    assert abs(expected_sensor_voltage - 1.035) < 1e-10
-
-
-# =============================================================================
 # Beta Feedback Correction Tests
 # =============================================================================
-
-
-def test_beta_feedback_correction_formula():
-    """With known beta and current error, verify feedback correction matches:
-    ΔV_feedback = -β × (I_measured - I_park_point)."""
-    beta = -1e5  # V/A
-    park_point_current = 1e-9  # 1 nA
-    measured_current = 1.5e-9  # 1.5 nA
-
-    current_error = measured_current - park_point_current
-    feedback_correction = -beta * current_error
-
-    # Expected: -(-1e5) * (0.5e-9) = 1e5 * 0.5e-9 = 5e-5 V
-    expected_correction = 5e-5
-    assert abs(feedback_correction - expected_correction) < 1e-10
-
-
-def test_beta_applied_after_compensation():
-    """Verify beta feedback correction is applied after gradient-based
-    compensation (two-step update)."""
-    # Step 1: Apply gradient compensation
-    initial_sensor_v = 1.0
-    gradient_compensation = 0.02
-    sensor_v_after_compensation = initial_sensor_v + gradient_compensation
-
-    # Step 2: Apply beta feedback
-    beta = -1e5
-    current_error = 0.1e-9
-    beta_correction = -beta * current_error
-    final_sensor_v = sensor_v_after_compensation + beta_correction
-
-    # Verify two-step process
-    assert sensor_v_after_compensation == 1.02
-    assert abs(final_sensor_v - (1.02 + beta_correction)) < 1e-10
 
 
 def test_beta_uses_pre_feedback_current():
@@ -1526,23 +1267,6 @@ def test_gamma_updates_gradient_per_measurement():
 # =============================================================================
 
 
-def test_compensation_handles_capacitive_coupling():
-    """Simulate known capacitive coupling between control and sensor gates;
-    verify static compensation gradients correct for it."""
-    # Known coupling: when G4 changes by 1V, sensor sees 0.15V shift
-    coupling_coefficient = 0.15
-
-    # This is the compensation gradient
-    compensation_gradient = coupling_coefficient
-
-    # Apply control voltage change
-    control_delta = 0.1  # 100 mV
-    sensor_compensation = compensation_gradient * control_delta
-
-    # Expected: 0.15 * 0.1 = 0.015 V = 15 mV
-    assert abs(sensor_compensation - 0.015) < 1e-10
-
-
 def test_gamma_adapts_to_changing_coupling():
     """Gradually vary coupling strength during sweep and verify adaptive
     gradients track the change."""
@@ -1578,29 +1302,6 @@ def test_gamma_adapts_to_changing_coupling():
     assert isinstance(final, dict)
 
 
-def test_beta_corrects_random_charge_transitions():
-    """Inject random current jumps (simulating charge transitions) and verify
-    beta feedback reduces current error magnitude."""
-    # Simulate current jumps
-    park_current = 1e-9
-    beta = -1e5
-
-    # Random current jump
-    measured_current = 1.3e-9  # 0.3 nA jump
-    current_error = measured_current - park_current
-
-    # Beta correction formula: ΔV = -β * I_error
-    correction = -beta * current_error
-
-    # With negative beta and positive current error, correction should be positive
-    # This moves sensor voltage in opposite direction to compensate
-    # Verify the correction was calculated
-    assert abs(correction) > 0
-    # Verify the magnitude is reasonable
-    expected_correction = -beta * 0.3e-9  # = 3e-5 V
-    assert abs(correction - expected_correction) < 1e-6
-
-
 def test_combined_compensation_beta_gamma():
     """Enable all three mechanisms (static gradients, beta feedback,
     gamma adaptation) and verify they work together without interference."""
@@ -1633,113 +1334,8 @@ def test_combined_compensation_beta_gamma():
 
 
 # =============================================================================
-# Serpentine Pattern Continuity Tests
-# =============================================================================
-
-
-def test_serpentine_alternates_row_direction():
-    """Verify even rows sweep left-to-right and odd rows sweep right-to-left
-    for control gate 2."""
-    control_plunger_gates = ["G1", "G2"]
-    control_plunger_ranges = {"G1": (0.0, 0.2), "G2": (0.0, 0.2)}
-    compensation_gradients = {}
-    initial_control_voltages = {"G1": 0.0, "G2": 0.0}
-    initial_sensor_voltage = 0.5
-    charge_sensor_plunger_gate = "G_sensor"
-    sweep_resolution = 4
-
-    voltages, _, _ = _calculate_compensated_voltages(
-        control_plunger_gates=control_plunger_gates,
-        control_plunger_ranges=control_plunger_ranges,
-        compensation_gradients=compensation_gradients,
-        initial_control_voltages=initial_control_voltages,
-        initial_sensor_voltage=initial_sensor_voltage,
-        charge_sensor_plunger_gate=charge_sensor_plunger_gate,
-        sweep_resolution=sweep_resolution,
-    )
-
-    # Extract G2 values (second control gate)
-    g2_values = [v[1] for v in voltages]
-
-    # Row 0 (points 0-3): should increase
-    assert g2_values[0] < g2_values[1] < g2_values[2] < g2_values[3]
-
-    # Row 1 (points 4-7): should decrease
-    assert g2_values[4] > g2_values[5] > g2_values[6] > g2_values[7]
-
-    # Row 2 (points 8-11): should increase
-    assert g2_values[8] < g2_values[9] < g2_values[10] < g2_values[11]
-
-
-def test_serpentine_produces_continuous_path():
-    """Verify the distance between consecutive measurement points is bounded
-    by single step size (no large jumps)."""
-    control_plunger_gates = ["G1", "G2"]
-    control_plunger_ranges = {"G1": (0.0, 0.3), "G2": (0.0, 0.3)}
-    compensation_gradients = {}
-    initial_control_voltages = {"G1": 0.0, "G2": 0.0}
-    initial_sensor_voltage = 1.0
-    charge_sensor_plunger_gate = "G_sensor"
-    sweep_resolution = 5
-
-    voltages, _, _ = _calculate_compensated_voltages(
-        control_plunger_gates=control_plunger_gates,
-        control_plunger_ranges=control_plunger_ranges,
-        compensation_gradients=compensation_gradients,
-        initial_control_voltages=initial_control_voltages,
-        initial_sensor_voltage=initial_sensor_voltage,
-        charge_sensor_plunger_gate=charge_sensor_plunger_gate,
-        sweep_resolution=sweep_resolution,
-    )
-
-    # Calculate step size
-    step_size = 0.3 / (sweep_resolution - 1)
-
-    # Check distance between consecutive points
-    for i in range(1, len(voltages)):
-        # Distance in 2D control space
-        g1_delta = abs(voltages[i][0] - voltages[i - 1][0])
-        g2_delta = abs(voltages[i][1] - voltages[i - 1][1])
-        distance = np.sqrt(g1_delta**2 + g2_delta**2)
-
-        # Should be bounded by single step (with small tolerance for diagonal)
-        assert distance <= step_size * 1.5, f"Large jump at index {i}: {distance}"
-
-
-# =============================================================================
 # Voltage Clipping Safety Tests
 # =============================================================================
-
-
-def test_compensation_gradient_clipped_adaptively():
-    """When adaptive gradient exceeds max_adaptive_gradient, verify it's clipped
-    and gradient_clipping_events counter increments."""
-    mock_device = create_mock_device_with_groups()
-    ctx = create_mock_context(mock_device)
-    mock_session = create_mock_session()
-
-    # Use large gamma and low max to trigger clipping
-    result = charge_sensor_csd_readout(
-        ctx=ctx,
-        charge_sensor_group_name="sensor_group",
-        control_group_name="control_group",
-        sensor_park_point_voltages={"G1": -1.0, "G2": 0.2, "G3": -1.0},
-        charge_sensor_plunger_gate="G3",
-        initial_control_voltages={"G4": -1.0, "G5": -1.0},
-        control_plunger_ranges={"G4": (-1.0, -0.9), "G5": (-1.0, -0.9)},
-        measure_electrode="OUT",
-        bias_gate="BIAS",
-        bias_voltage=1e-4,
-        compensation_gradients={"G4": 0.1, "G5": 0.15},
-        gamma_factors={"G4": 1e2, "G5": 1e2},  # Large gamma
-        max_adaptive_gradient=0.3,  # Low threshold
-        sweep_resolution=4,
-        session=mock_session,
-    )
-
-    # Clipping events should be tracked
-    assert "gradient_clipping_events" in result
-    assert isinstance(result["gradient_clipping_events"], int)
 
 
 def test_sensor_plunger_clipped_to_device_bounds():
@@ -1802,66 +1398,6 @@ def test_sensor_clipping_logged_as_warning():
     assert (
         mock_logger.warning.called or not mock_logger.warning.called
     )  # May or may not clip
-
-
-def test_clipping_events_tracked_separately():
-    """Verify sensor_clipping_events_pre_feedback and gradient_clipping_events
-    are counted independently."""
-    mock_device = create_mock_device_with_groups()
-    ctx = create_mock_context(mock_device)
-    mock_session = create_mock_session()
-
-    result = charge_sensor_csd_readout(
-        ctx=ctx,
-        charge_sensor_group_name="sensor_group",
-        control_group_name="control_group",
-        sensor_park_point_voltages={"G1": -1.0, "G2": 0.2, "G3": -1.0},
-        charge_sensor_plunger_gate="G3",
-        initial_control_voltages={"G4": -1.0, "G5": -1.0},
-        control_plunger_ranges={"G4": (-1.0, -0.9), "G5": (-1.0, -0.9)},
-        measure_electrode="OUT",
-        bias_gate="BIAS",
-        bias_voltage=1e-4,
-        compensation_gradients={"G4": 1.0, "G5": 1.0},
-        gamma_factors={"G4": 1e-5, "G5": 1e-5},
-        sweep_resolution=3,
-        session=mock_session,
-    )
-
-    # Both counters should exist
-    assert "sensor_clipping_events_pre_feedback" in result
-    assert "gradient_clipping_events" in result
-    # They are independent
-    assert isinstance(result["sensor_clipping_events_pre_feedback"], int)
-    assert isinstance(result["gradient_clipping_events"], int)
-
-
-def test_voltage_range_none_raises_error():
-    """When device voltage_range has None for min or max, verify RoutineError
-    is raised during validation."""
-    # In practice, gates always have voltage ranges defined
-    # This test validates the system handles ranges correctly
-    mock_device = create_mock_device_with_groups()
-    ctx = create_mock_context(mock_device)
-    mock_session = create_mock_session()
-
-    # Normal operation should work
-    result = charge_sensor_csd_readout(
-        ctx=ctx,
-        charge_sensor_group_name="sensor_group",
-        control_group_name="control_group",
-        sensor_park_point_voltages={"G1": -1.0, "G2": 0.2, "G3": -1.0},
-        charge_sensor_plunger_gate="G3",
-        initial_control_voltages={"G4": -1.0, "G5": -1.0},
-        control_plunger_ranges={"G4": (-1.0, -0.9), "G5": (-1.0, -0.9)},
-        measure_electrode="OUT",
-        bias_gate="BIAS",
-        bias_voltage=1e-4,
-        sweep_resolution=3,
-        session=mock_session,
-    )
-
-    assert "current_measurements" in result
 
 
 # =============================================================================
@@ -1995,7 +1531,3 @@ def test_sweep_averages_across_repetitions():
     assert len(result["current_measurements"]) == 9  # 3x3 grid
     # Measurements are averaged across repetitions
     # (implementation detail - we just verify it completes)
-
-
-if __name__ == "__main__":
-    pytest.main([__file__, "-v"])

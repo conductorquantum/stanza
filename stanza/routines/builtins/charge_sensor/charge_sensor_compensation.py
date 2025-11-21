@@ -430,7 +430,7 @@ def _single_window_sensor_plunger_sweep(
 
 
 @routine
-def run_compensation(  # pylint: disable=too-many-locals,too-many-statements
+def run_compensation(
     ctx: RoutineContext,
     peak_spacing: float,
     control_group_name: str,

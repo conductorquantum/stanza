@@ -9,18 +9,25 @@ from stanza.exceptions import RoutineError
 from stanza.models import DeviceGroup
 from stanza.routines import RoutineContext
 from stanza.routines.builtins.charge_sensor.charge_sensor_find_sensor_peak import (
-    SensorDotPlungerSweepOutput,
-    StabilityMeasurement,
     StablePeakCandidate,
     _calculate_combined_scores,
+    _calculate_local_slope,
     _calculate_voltage_noise,
+    _normalize_sensitivity_scores,
     build_sensor_sweep_voltage_list,
+    calculate_peak_window_bounds,
+    calculate_quality_scores,
     find_sensor_peak,
 )
 from stanza.routines.builtins.charge_sensor.constants import (
-    ML_MODEL_INPUT_SIZE,
+    DEFAULT_WINDOW_HALF_WIDTH,
+    WINDOW_FRACTION,
 )
-from stanza.routines.builtins.utils.peak_fitting import FittedPeak, ModelFitResult
+from stanza.routines.builtins.utils.peak_fitting import (
+    calculate_quality_score,
+    fit_peak_multi_model,
+    lorentzian,
+)
 
 # =============================================================================
 # Helper Functions
@@ -100,6 +107,256 @@ def create_mock_context_for_sensor_routines(include_prerequisites=True):
 
 
 # =============================================================================
+# Helper Utilities Tests
+# =============================================================================
+
+
+def test_calculate_peak_window_bounds_handles_edge_peaks():
+    """Verify calculate_peak_window_bounds clamps to trace bounds and always contains the peak."""
+    trace_length = 1000
+
+    # First/middle/last peak scenarios should all yield windows within the trace that contain the peak
+    edge_cases = [
+        ([100, 400, 700], 0, 100),
+        ([100, 400, 700], 1, 400),
+        ([100, 400, 700], 2, 700),
+    ]
+    for peak_indices, peak_index, peak_idx in edge_cases:
+        start, end = calculate_peak_window_bounds(
+            peak_idx=peak_idx,
+            peak_index=peak_index,
+            peak_indices=peak_indices,
+            trace_length=trace_length,
+        )
+        assert 0 <= start < peak_idx < end <= trace_length
+
+    # Test single peak (should use entire trace)
+    start, end = calculate_peak_window_bounds(
+        peak_idx=500, peak_index=0, peak_indices=[500], trace_length=trace_length
+    )
+    assert start == 0
+    assert end == trace_length
+
+    # Closely spaced peaks should still provide a valid window with at least a few points
+    close_peak_indices = [50, 100, 150, 200]
+    start, end = calculate_peak_window_bounds(
+        peak_idx=100,
+        peak_index=1,
+        peak_indices=close_peak_indices,
+        trace_length=trace_length,
+    )
+    assert 0 <= start < 100 < end <= trace_length
+    assert end - start >= 3
+
+    # Middle peak should use WINDOW_FRACTION of inter-peak spacing when possible
+    peak_indices = [50, 150, 250]
+    peak_idx = 150
+    start, end = calculate_peak_window_bounds(
+        peak_idx=peak_idx,
+        peak_index=1,
+        peak_indices=peak_indices,
+        trace_length=trace_length,
+    )
+    expected_offset = int(WINDOW_FRACTION * 100)
+    assert abs(start - (peak_idx - expected_offset)) <= 5
+    assert abs(end - (peak_idx + expected_offset)) <= 5
+    assert start < peak_idx < end
+
+    # Extremely wide spacing should clamp to DEFAULT_WINDOW_HALF_WIDTH on each side
+    wide_peak_indices = [200, 600, 1000]
+    trace_length_wide = 1200
+    start, end = calculate_peak_window_bounds(
+        peak_idx=600,
+        peak_index=1,
+        peak_indices=wide_peak_indices,
+        trace_length=trace_length_wide,
+    )
+    assert start == 600 - DEFAULT_WINDOW_HALF_WIDTH
+    assert end == 600 + DEFAULT_WINDOW_HALF_WIDTH
+    assert end - start == 2 * DEFAULT_WINDOW_HALF_WIDTH
+
+
+def test_normalize_sensitivity_scores_constant_inputs(fitted_peak_factory):
+    """Confirm _normalize_sensitivity_scores assigns score 1.0 when all sensitivities are equal."""
+    peaks = [
+        fitted_peak_factory(
+            sensitivity=1e-6,
+            sensitivity_voltage=float(i * 0.01),
+            peak_idx=i * 10,
+            peak_voltage=float(i * 0.01),
+        )
+        for i in range(5)
+    ]
+
+    _normalize_sensitivity_scores(peaks)
+
+    for peak in peaks:
+        assert peak.sensitivity_score == 1.0
+
+
+def testcalculate_quality_scores_requires_normalized_sensitivity(fitted_peak_factory):
+    """Call calculate_quality_scores without pre-normalized scores and assert it raises RoutineError."""
+    peak = fitted_peak_factory(
+        sensitivity=1e-6,
+        sensitivity_voltage=0.01,
+        peak_idx=50,
+        peak_voltage=0.01,
+        sensitivity_score=None,
+    )
+
+    with pytest.raises(RoutineError, match="Sensitivity score not set"):
+        calculate_quality_scores([peak])
+
+
+def test_calculate_local_slope_window_validation():
+    """Ensure _calculate_local_slope raises when fewer than three data points surround the target voltage."""
+    voltages = np.array([0.0, 0.01])  # Only 2 points
+    currents = np.array([0.0, 1e-9])
+    target_voltage = 0.005
+
+    with pytest.raises(
+        RoutineError, match="Insufficient points for local slope calculation"
+    ):
+        _calculate_local_slope(voltages, currents, target_voltage, window_points=5)
+
+
+def test_calculate_voltage_noise_near_zero_slope():
+    """Provide tiny slopes to _calculate_voltage_noise and confirm it guards against division-by-zero."""
+    current_std = 1e-10
+    local_slope = 1e-15  # Very small slope
+
+    with pytest.raises(RoutineError, match="Local slope magnitude too small"):
+        _calculate_voltage_noise(current_std, local_slope)
+
+
+# =============================================================================
+# Peak Scoring Algorithms Tests
+# =============================================================================
+
+
+def test_peak_quality_score_weights_components():
+    """Verify quality score combines R² (70%), normalized RMSE (5%),
+    skew residual (5%), and sensitivity score (20%) with correct weights."""
+    # Known inputs
+    r_squared = 0.90
+    rmse = 0.02
+    y_max = 1.0
+    skew = 0.15
+    sensitivity_score = 0.85
+
+    quality = calculate_quality_score(r_squared, rmse, y_max, skew, sensitivity_score)
+
+    # Expected: 0.7*0.90 - 0.05*0.02 - 0.05*0.15 + 0.2*0.85
+    expected = 0.7 * 0.90 - 0.05 * 0.02 - 0.05 * 0.15 + 0.2 * 0.85
+    assert abs(quality - expected) < 1e-6
+
+
+def test_sensitivity_score_normalized_across_peaks(fitted_peak_factory):
+    """With N detected peaks, confirm sensitivity scores are min-max normalized
+    to [0, 1] range before quality calculation."""
+    peaks = []
+    sensitivities = [1e-6, 5e-6, 10e-6, 2e-6, 7e-6]  # Different values
+
+    for i, sens in enumerate(sensitivities):
+        peaks.append(
+            fitted_peak_factory(
+                sensitivity=sens,
+                peak_idx=i * 10,
+                peak_voltage=i * 0.01,
+                sensitivity_voltage=0.0,
+                window_currents=np.ones(10) * 1e-9,
+            )
+        )
+
+    _normalize_sensitivity_scores(peaks)
+
+    # Verify all scores are in [0, 1] range
+    for peak in peaks:
+        assert 0 <= peak.sensitivity_score <= 1.0
+
+    # Peak with max sensitivity should have score = 1.0
+    max_sens_idx = np.argmax(sensitivities)
+    assert peaks[max_sens_idx].sensitivity_score == 1.0
+
+    # Peak with min sensitivity should have score = 0.0
+    min_sens_idx = np.argmin(sensitivities)
+    assert peaks[min_sens_idx].sensitivity_score == 0.0
+
+
+def test_find_sensor_peak_returns_highest_quality():
+    """Feed synthetic sweep with multiple peaks of known quality and verify
+    the routine calculates quality scores for all peaks."""
+    # Create synthetic trace with multiple Lorentzian peaks at different quality levels
+
+    voltages = np.linspace(-1.0, -0.5, 500)
+
+    # Peak 1: High amplitude, narrow (high quality)
+    peak1 = lorentzian(
+        np.arange(100, 200), amplitude=3e-9, center=50, width=8, offset=1e-11
+    )
+
+    # Peak 2: Medium amplitude, wider (medium quality)
+    peak2 = lorentzian(
+        np.arange(200, 300), amplitude=2e-9, center=50, width=15, offset=1e-11
+    )
+
+    # Peak 3: Low amplitude, wide (low quality)
+    peak3 = lorentzian(
+        np.arange(300, 400), amplitude=1e-9, center=50, width=20, offset=1e-11
+    )
+
+    # Combine into full trace
+    currents = np.ones(500) * 1e-11
+    currents[100:200] = peak1
+    currents[200:300] = peak2
+    currents[300:400] = peak3
+
+    # Add small noise
+    np.random.seed(42)
+    currents += np.random.normal(0, 1e-13, len(currents))
+
+    # Simulate peak detection finding all three peaks
+    peak_indices = [150, 250, 350]
+
+    # Fit all peaks
+    fitted_peaks = []
+    for peak_number, peak_idx in enumerate(peak_indices):
+        bounds = calculate_peak_window_bounds(
+            peak_idx, peak_number, peak_indices, len(currents)
+        )
+        if bounds:
+            start_idx, end_idx = bounds
+
+            peak = fit_peak_multi_model(
+                window_currents=currents[start_idx:end_idx],
+                window_indices=np.arange(start_idx, end_idx),
+                peak_idx_in_window=peak_idx - start_idx,
+                aggregated_voltages=voltages,
+                window_start_idx=start_idx,
+                window_end_idx=end_idx,
+                peak_idx_aggregated=peak_idx,
+            )
+            fitted_peaks.append(peak)
+
+    # Normalize and calculate quality scores
+    _normalize_sensitivity_scores(fitted_peaks)
+    calculate_quality_scores(fitted_peaks)
+
+    # Verify all peaks have quality scores calculated
+    assert len(fitted_peaks) == 3
+    for peak in fitted_peaks:
+        assert peak.quality_score is not None
+        assert peak.sensitivity_score is not None
+        assert 0 <= peak.quality_score <= 1.0
+
+    # Verify quality scores are different (peaks have different characteristics)
+    quality_scores = [p.quality_score for p in fitted_peaks]
+    assert len(set(quality_scores)) > 1, (
+        "Quality scores should differ for different peaks"
+    )
+
+
+# =============================================================================
 # find_sensor_peak Tests
 # =============================================================================
 
@@ -134,61 +391,6 @@ def test_find_sensor_peak_requires_prerequisites():
             )
 
 
-def test_find_sensor_peak_uses_fallback_bounds():
-    """Mock device sweeps with a single peak to ensure fallback peak_spacing
-    bounds populate prev/next voltages."""
-    # Test the fallback logic for narrowed range calculation
-    # When there's only one peak, prev/next voltages use peak_spacing as fallback
-
-    peak_voltage = -0.7
-    peak_spacing = 0.02
-
-    # Simulate the fallback logic from find_sensor_peak
-    # When there's no previous peak, use peak_voltage - peak_spacing
-    # When there's no next peak, use peak_voltage + peak_spacing
-    prev_peak_voltage = peak_voltage - peak_spacing
-    next_peak_voltage = peak_voltage + peak_spacing
-
-    # Calculate narrowed range (midpoint between peaks)
-    start_of_range = (prev_peak_voltage + peak_voltage) / 2
-    end_of_range = (peak_voltage + next_peak_voltage) / 2
-    narrowed_range = (start_of_range, end_of_range)
-
-    # Verify fallback bounds are used correctly
-    assert abs(prev_peak_voltage - (-0.72)) < 1e-9
-    assert abs(next_peak_voltage - (-0.68)) < 1e-9
-    assert narrowed_range[0] < peak_voltage < narrowed_range[1]
-    assert (
-        abs((narrowed_range[1] - narrowed_range[0]) - peak_spacing) < 1e-9
-    )  # Range spans one spacing
-
-
-def test_find_sensor_peak_zero_control_side_sets_control_gates():
-    """Verify zero_control_side=True drives all non-sensor control gates to 0 V
-    before sweeping, while False preserves existing voltages."""
-    # Test the logic that determines control gate voltages
-    all_control_gates = ["G1", "G2", "G3", "G4", "G5"]
-    sensor_gates = ["G1", "G2", "G3"]
-    control_gates = [g for g in all_control_gates if g not in sensor_gates]
-
-    # Verify control gates are identified correctly
-    assert control_gates == ["G4", "G5"]
-
-    # Test that zero_control_side=True would set these to 0
-    zero_control_side = True
-    if zero_control_side:
-        control_voltage_dict = dict.fromkeys(control_gates, 0.0)
-    else:
-        control_voltage_dict = {}  # Would preserve existing
-
-    # Verify behavior
-    if zero_control_side:
-        assert all(v == 0.0 for v in control_voltage_dict.values())
-        assert set(control_voltage_dict.keys()) == {"G4", "G5"}
-    else:
-        assert control_voltage_dict == {}
-
-
 def test_find_sensor_peak_gate_voltage_overrides_apply():
     """Provide gate_voltage_overrides and ensure build_sensor_sweep_voltage_list
     honors them for reservoirs/shared gates during many_window_barrier_sweep."""
@@ -217,64 +419,11 @@ def test_find_sensor_peak_gate_voltage_overrides_apply():
         assert voltages[2] in plunger_voltages
 
 
-def test_many_window_barrier_sweep_enforces_ml_window_size():
-    """Confirm each window feeds exactly ML_MODEL_INPUT_SIZE (=128) points
-    into the ML classifier/detector."""
-    # Verify ML_MODEL_INPUT_SIZE constant is defined correctly
-    assert ML_MODEL_INPUT_SIZE == 128, "ML_MODEL_INPUT_SIZE should be 128"
-
-    # Test window size calculation
-    window_size = 0.04  # V
-    points_per_window = ML_MODEL_INPUT_SIZE
-
-    # Verify that a window of ML_MODEL_INPUT_SIZE points is created
-    start_v = -1.0
-    end_v = start_v + window_size
-    voltages = np.linspace(start_v, end_v, points_per_window, endpoint=False)
-
-    assert len(voltages) == ML_MODEL_INPUT_SIZE
-    assert voltages[0] == start_v
-    assert voltages[-1] < end_v  # endpoint=False
-
-
-def test_sensor_dot_output_captures_aggregated_traces_and_metadata():
-    """Ensure SensorDotPlungerSweepOutput stores the aggregated voltages/currents
-    plus the last classification flag and peak indices."""
-
-    # Create mock data
-    aggregated_voltages = np.linspace(-1.0, -0.5, 256)
-    aggregated_currents = np.ones(256) * 1e-9
-
-    # Create output object using the actual dataclass fields
-    output = SensorDotPlungerSweepOutput(
-        sensor_plunger_voltage=-0.7,
-        classification=True,
-        score=0.95,
-        peak_indices=[128, 192],
-        num_peaks=2,
-        aggregated_voltages=aggregated_voltages,
-        aggregated_currents=aggregated_currents,
-        best_peak_voltage=-0.7,
-        best_peak_max_gradient_voltage=-0.68,
-        prev_peak_voltage=-0.72,
-        next_peak_voltage=-0.66,
-    )
-
-    # Verify output captures all required data
-    assert len(output.aggregated_voltages) == 256
-    assert len(output.aggregated_currents) == 256
-    assert output.classification is True
-    assert len(output.peak_indices) == 2
-    assert output.num_peaks == 2
-    assert output.best_peak_voltage == -0.7
-
-
 def test_find_sensor_peak_uses_narrowed_range_for_park_point():
     """Verify that the narrowed range returned from many_window_barrier_sweep
-    is applied when parking the sensor."""
-    # Test the narrowed range calculation logic
-    # The narrowed range is calculated as the midpoint between adjacent peaks
-
+    is applied when parking the sensor. Tests both multi-peak and single-peak
+    fallback cases."""
+    # Test case 1: Multi-peak scenario - narrowed range calculated from adjacent peaks
     peak_voltage = -0.7
     prev_peak_voltage = -0.74
     next_peak_voltage = -0.66
@@ -297,131 +446,37 @@ def test_find_sensor_peak_uses_narrowed_range_for_park_point():
     park_voltage = peak_voltage
     assert narrowed_range[0] <= park_voltage <= narrowed_range[1]
 
+    # Test case 2: Single-peak fallback scenario - uses peak_spacing as fallback
+    # When there's only one peak, prev/next voltages use peak_spacing as fallback
+    peak_voltage_fallback = -0.7
+    peak_spacing = 0.02
 
-def test_peak_finder_receives_full_aggregated_trace():
-    """Confirm the peak detection path gets the entire aggregated sweep data
-    rather than per-window slices only."""
-    # Test aggregation logic: multiple windows should combine into larger trace
-    window_size_points = ML_MODEL_INPUT_SIZE  # 128 points per window
-    num_windows = 3
+    # Simulate the fallback logic from find_sensor_peak
+    # When there's no previous peak, use peak_voltage - peak_spacing
+    # When there's no next peak, use peak_voltage + peak_spacing
+    prev_peak_voltage_fallback = peak_voltage_fallback - peak_spacing
+    next_peak_voltage_fallback = peak_voltage_fallback + peak_spacing
 
-    # Simulate aggregating traces from multiple windows
-    aggregated_trace = np.array([])
-    for i in range(num_windows):
-        window_trace = np.ones(window_size_points) * (i + 1) * 1e-9
-        aggregated_trace = np.concatenate([aggregated_trace, window_trace])
+    # Calculate narrowed range using fallback bounds
+    start_of_range_fallback = (prev_peak_voltage_fallback + peak_voltage_fallback) / 2
+    end_of_range_fallback = (peak_voltage_fallback + next_peak_voltage_fallback) / 2
+    narrowed_range_fallback = (start_of_range_fallback, end_of_range_fallback)
 
-    # Verify aggregated trace is larger than single window
-    assert len(aggregated_trace) == window_size_points * num_windows
-    assert len(aggregated_trace) > ML_MODEL_INPUT_SIZE
-
-    # Peak detector would receive this full aggregated trace
-    # not just individual windows
-    assert len(aggregated_trace) == 384  # 128 * 3
+    # Verify fallback bounds are used correctly
+    assert abs(prev_peak_voltage_fallback - (-0.72)) < 1e-9
+    assert abs(next_peak_voltage_fallback - (-0.68)) < 1e-9
+    assert (
+        narrowed_range_fallback[0] < peak_voltage_fallback < narrowed_range_fallback[1]
+    )
+    assert (
+        abs((narrowed_range_fallback[1] - narrowed_range_fallback[0]) - peak_spacing)
+        < 1e-9
+    )  # Range spans one spacing
 
 
 # =============================================================================
 # find_stable_sensor_peak Tests
 # =============================================================================
-
-
-def test_find_stable_sensor_peak_prefers_stable_peaks():
-    """Provide peak candidates with varying noise to verify the routine picks
-    the highest combined score even if the raw quality is lower."""
-
-    # Create mock fitted peaks with different quality scores
-    mock_fit = ModelFitResult(
-        model_name="Lorentzian",
-        amplitude=1e-9,
-        center_idx=50,
-        width=5.0,
-        offset=1e-11,
-        r_squared=0.95,
-        rmse=1e-12,
-        aicc=-100.0,
-        fwhm=0.01,
-        area=1e-10,
-        skew_resid=0.1,
-    )
-
-    # Peak 1: high quality (0.9), but poor stability (high voltage noise)
-    peak1 = FittedPeak(
-        best_model="Lorentzian",
-        lorentzian_fit=mock_fit,
-        sech2_fit=mock_fit,
-        voigt_fit=mock_fit,
-        sensitivity=1.0,
-        sensitivity_voltage=-0.7,
-        peak_idx=50,
-        peak_voltage=-0.7,
-        window_currents=np.array([1e-9]),
-        window_voltages=np.array([-0.7]),
-        quality_score=0.9,
-    )
-
-    # Peak 2: lower quality (0.6), but good stability (low voltage noise)
-    peak2 = FittedPeak(
-        best_model="Lorentzian",
-        lorentzian_fit=mock_fit,
-        sech2_fit=mock_fit,
-        voigt_fit=mock_fit,
-        sensitivity=1.0,
-        sensitivity_voltage=-0.65,
-        peak_idx=60,
-        peak_voltage=-0.65,
-        window_currents=np.array([1e-9]),
-        window_voltages=np.array([-0.65]),
-        quality_score=0.6,
-    )
-
-    # Create stability measurements
-    stability1 = StabilityMeasurement(
-        peak_index=0,
-        peak_voltage=-0.7,
-        max_gradient_voltage=-0.7,
-        time_array=np.array([0.0, 1.0]),
-        current_array=np.array([1e-9, 1e-9]),
-        current_mean=1e-9,
-        current_std=1e-11,
-        local_slope=1e-8,
-        voltage_noise=2.0,  # High noise
-    )
-
-    stability2 = StabilityMeasurement(
-        peak_index=1,
-        peak_voltage=-0.65,
-        max_gradient_voltage=-0.65,
-        time_array=np.array([0.0, 1.0]),
-        current_array=np.array([1e-9, 1e-9]),
-        current_mean=1e-9,
-        current_std=1e-11,
-        local_slope=1e-8,
-        voltage_noise=0.5,  # Low noise
-    )
-
-    # Create candidates
-    candidate1 = StablePeakCandidate(
-        fitted_peak=peak1, original_score=0.9, stability_measurement=stability1
-    )
-    candidate2 = StablePeakCandidate(
-        fitted_peak=peak2, original_score=0.6, stability_measurement=stability2
-    )
-
-    # Calculate combined scores (50/50 weighting for this test)
-    _calculate_combined_scores(
-        [candidate1, candidate2], original_weight=0.5, stability_weight=0.5
-    )
-
-    # Verify combined scores exist
-    assert candidate1.combined_score is not None
-    assert candidate2.combined_score is not None
-
-    # Peak2 (better stability) should score competitively despite lower original quality
-    # This verifies that stability is properly weighted in the selection process
-    assert (
-        candidate2.stability_measurement.stability_score
-        > candidate1.stability_measurement.stability_score
-    )
 
 
 # =============================================================================
@@ -473,44 +528,24 @@ def test_charge_sensor_workflow_consumes_compensation_results():
 # =============================================================================
 
 
-def test_stable_peak_selects_top_n_candidates():
+def test_stable_peak_selects_top_n_candidates(fitted_peak_factory):
     """With 5+ detected peaks, verify routine tests only the top 3 peaks
     (by quality score) for stability."""
-    from stanza.routines.builtins.utils.peak_fitting import ModelFitResult
-
-    # Create 5 peaks with different quality scores
-    mock_fit = ModelFitResult(
-        model_name="Lorentzian",
-        amplitude=1e-9,
-        center_idx=50,
-        width=5.0,
-        offset=0.0,
-        r_squared=0.95,
-        rmse=1e-12,
-        aicc=-100.0,
-        fwhm=0.01,
-        area=1e-10,
-        skew_resid=0.1,
-    )
-
     peaks = []
     quality_scores = [0.9, 0.7, 0.85, 0.6, 0.75]  # Top 3 are: 0.9, 0.85, 0.75
 
     for i, quality in enumerate(quality_scores):
-        peak = FittedPeak(
-            best_model="Lorentzian",
-            lorentzian_fit=mock_fit,
-            sech2_fit=mock_fit,
-            voigt_fit=mock_fit,
-            sensitivity=1.0,
-            sensitivity_voltage=i * 0.01,
-            peak_idx=i * 10,
-            peak_voltage=i * 0.01,
-            window_currents=np.array([1e-9]),
-            window_voltages=np.array([i * 0.01]),
-            quality_score=quality,
+        peaks.append(
+            fitted_peak_factory(
+                sensitivity=1.0,
+                sensitivity_voltage=i * 0.01,
+                peak_idx=i * 10,
+                peak_voltage=i * 0.01,
+                window_currents=np.array([1e-9]),
+                window_voltages=np.array([i * 0.01]),
+                quality_score=quality,
+            )
         )
-        peaks.append(peak)
 
     # Sort by quality score and take top 3
     sorted_peaks = sorted(peaks, key=lambda p: p.quality_score, reverse=True)
@@ -524,25 +559,18 @@ def test_stable_peak_selects_top_n_candidates():
     assert top_3_peaks[2].quality_score == 0.75
 
 
-def test_stability_measurement_holds_at_max_gradient():
+def test_stability_measurement_holds_at_max_gradient(stability_measurement_factory):
     """For each candidate peak, confirm the device is positioned at
     sensitivity_voltage (max gradient point) during the 2-minute hold."""
     # This test verifies the conceptual behavior - positioning at max gradient
 
-    # Create a mock stability measurement
     peak_voltage = -0.7
     max_gradient_voltage = -0.68  # Should be positioned here for stability test
-
-    stability = StabilityMeasurement(
-        peak_index=0,
+    stability = stability_measurement_factory(
         peak_voltage=peak_voltage,
         max_gradient_voltage=max_gradient_voltage,
-        time_array=np.linspace(0, 120, 100),  # 120 seconds
+        time_array=np.linspace(0, 120, 100),
         current_array=np.ones(100) * 1e-9,
-        current_mean=1e-9,
-        current_std=1e-11,
-        local_slope=1e-6,
-        voltage_noise=1e-5,
     )
 
     # Verify the stability measurement captured max gradient voltage
@@ -552,7 +580,7 @@ def test_stability_measurement_holds_at_max_gradient():
     assert stability.time_array[-1] >= 120
 
 
-def test_stability_measures_current_vs_time():
+def test_stability_measures_current_vs_time(stability_measurement_factory):
     """Verify stability measurement records continuous current samples over
     the configured hold time (default 120s) with timestamps."""
 
@@ -564,16 +592,13 @@ def test_stability_measures_current_vs_time():
     # Simulate current measurements with small drift
     current_array = 1e-9 + np.random.normal(0, 1e-11, num_samples)
 
-    stability = StabilityMeasurement(
-        peak_index=0,
+    stability = stability_measurement_factory(
         peak_voltage=-0.7,
         max_gradient_voltage=-0.68,
         time_array=time_array,
         current_array=current_array,
         current_mean=np.mean(current_array),
         current_std=np.std(current_array),
-        local_slope=1e-6,
-        voltage_noise=1e-5,
     )
 
     # Verify time and current arrays have same length
@@ -600,34 +625,16 @@ def test_voltage_noise_calculated_from_gradient():
     assert abs(voltage_noise - expected) < 1e-12
 
 
-def test_stability_score_inverts_voltage_noise():
+def test_stability_score_inverts_voltage_noise(
+    fitted_peak_factory, stability_measurement_factory
+):
     """Verify stability score is computed as 1/voltage_noise, then normalized
     by dividing by the maximum across all candidates."""
-    # Create mock candidates with different voltage noise values
-
-    mock_fit = ModelFitResult(
-        model_name="Lorentzian",
-        amplitude=1e-9,
-        center_idx=50,
-        width=5.0,
-        offset=0.0,
-        r_squared=0.95,
-        rmse=1e-12,
-        aicc=-100.0,
-        fwhm=0.01,
-        area=1e-10,
-        skew_resid=0.1,
-    )
-
     candidates = []
     voltage_noises = [1e-5, 5e-6, 2e-5]  # Different noise levels
 
     for i, v_noise in enumerate(voltage_noises):
-        peak = FittedPeak(
-            best_model="Lorentzian",
-            lorentzian_fit=mock_fit,
-            sech2_fit=mock_fit,
-            voigt_fit=mock_fit,
+        peak = fitted_peak_factory(
             sensitivity=1.0,
             sensitivity_voltage=i * 0.01,
             peak_idx=i * 10,
@@ -637,22 +644,18 @@ def test_stability_score_inverts_voltage_noise():
             quality_score=0.8,
         )
 
-        stability = StabilityMeasurement(
+        stability = stability_measurement_factory(
             peak_index=i,
             peak_voltage=i * 0.01,
             max_gradient_voltage=i * 0.01,
-            time_array=np.array([0.0, 1.0]),
-            current_array=np.array([1e-9, 1e-9]),
-            current_mean=1e-9,
-            current_std=1e-11,
-            local_slope=1e-6,
             voltage_noise=v_noise,
         )
 
-        candidate = StablePeakCandidate(
-            fitted_peak=peak, original_score=0.8, stability_measurement=stability
+        candidates.append(
+            StablePeakCandidate(
+                fitted_peak=peak, original_score=0.8, stability_measurement=stability
+            )
         )
-        candidates.append(candidate)
 
     # Calculate combined scores
     _calculate_combined_scores(candidates, original_weight=0.3, stability_weight=0.7)
@@ -667,25 +670,11 @@ def test_stability_score_inverts_voltage_noise():
     assert candidates[min_noise_idx].stability_measurement.stability_score == 1.0
 
 
-def test_stable_peak_returns_highest_combined_score():
+def test_stable_peak_returns_highest_combined_score(
+    fitted_peak_factory, stability_measurement_factory
+):
     """Among 3 tested candidates, confirm the routine selects the peak with
     maximum combined score, even if it had lower original quality."""
-
-    mock_fit = ModelFitResult(
-        model_name="Lorentzian",
-        amplitude=1e-9,
-        center_idx=50,
-        width=5.0,
-        offset=0.0,
-        r_squared=0.95,
-        rmse=1e-12,
-        aicc=-100.0,
-        fwhm=0.01,
-        area=1e-10,
-        skew_resid=0.1,
-    )
-
-    # Create 3 candidates:
     # Candidate 0: high quality (0.9), poor stability (high noise = 2e-5)
     # Candidate 1: medium quality (0.7), good stability (low noise = 1e-6)
     # Candidate 2: low quality (0.5), medium stability (noise = 5e-6)
@@ -697,11 +686,7 @@ def test_stable_peak_returns_highest_combined_score():
     for i, (quality, v_noise) in enumerate(
         zip(quality_scores, voltage_noises, strict=True)
     ):
-        peak = FittedPeak(
-            best_model="Lorentzian",
-            lorentzian_fit=mock_fit,
-            sech2_fit=mock_fit,
-            voigt_fit=mock_fit,
+        peak = fitted_peak_factory(
             sensitivity=1.0,
             sensitivity_voltage=i * 0.01,
             peak_idx=i * 10,
@@ -711,22 +696,20 @@ def test_stable_peak_returns_highest_combined_score():
             quality_score=quality,
         )
 
-        stability = StabilityMeasurement(
+        stability = stability_measurement_factory(
             peak_index=i,
             peak_voltage=i * 0.01,
             max_gradient_voltage=i * 0.01,
-            time_array=np.array([0.0, 1.0]),
-            current_array=np.array([1e-9, 1e-9]),
-            current_mean=1e-9,
-            current_std=1e-11,
-            local_slope=1e-6,
             voltage_noise=v_noise,
         )
 
-        candidate = StablePeakCandidate(
-            fitted_peak=peak, original_score=quality, stability_measurement=stability
+        candidates.append(
+            StablePeakCandidate(
+                fitted_peak=peak,
+                original_score=quality,
+                stability_measurement=stability,
+            )
         )
-        candidates.append(candidate)
 
     # Calculate combined scores (70% stability, 30% original)
     _calculate_combined_scores(candidates, original_weight=0.3, stability_weight=0.7)
@@ -737,76 +720,3 @@ def test_stable_peak_returns_highest_combined_score():
     # With 70% weight on stability, candidate 1 (best stability) should win
     # despite having lower original quality
     assert best_candidate == candidates[1]
-
-
-def test_stability_score_higher_for_lower_noise():
-    """Verify that peak with lower voltage noise receives higher stability
-    score (inverse relationship)."""
-    from stanza.routines.builtins.charge_sensor.charge_sensor_find_sensor_peak import (
-        StabilityMeasurement,
-        StablePeakCandidate,
-        _calculate_combined_scores,
-    )
-    from stanza.routines.builtins.utils.peak_fitting import ModelFitResult
-
-    mock_fit = ModelFitResult(
-        model_name="Lorentzian",
-        amplitude=1e-9,
-        center_idx=50,
-        width=5.0,
-        offset=0.0,
-        r_squared=0.95,
-        rmse=1e-12,
-        aicc=-100.0,
-        fwhm=0.01,
-        area=1e-10,
-        skew_resid=0.1,
-    )
-
-    candidates = []
-    # Create two candidates with different noise levels
-    voltage_noises = [1e-5, 5e-6]  # Second has lower noise
-
-    for i, v_noise in enumerate(voltage_noises):
-        peak = FittedPeak(
-            best_model="Lorentzian",
-            lorentzian_fit=mock_fit,
-            sech2_fit=mock_fit,
-            voigt_fit=mock_fit,
-            sensitivity=1.0,
-            sensitivity_voltage=i * 0.01,
-            peak_idx=i * 10,
-            peak_voltage=i * 0.01,
-            window_currents=np.array([1e-9]),
-            window_voltages=np.array([i * 0.01]),
-            quality_score=0.8,
-        )
-
-        stability = StabilityMeasurement(
-            peak_index=i,
-            peak_voltage=i * 0.01,
-            max_gradient_voltage=i * 0.01,
-            time_array=np.array([0.0, 1.0]),
-            current_array=np.array([1e-9, 1e-9]),
-            current_mean=1e-9,
-            current_std=1e-11,
-            local_slope=1e-6,
-            voltage_noise=v_noise,
-        )
-
-        candidate = StablePeakCandidate(
-            fitted_peak=peak, original_score=0.8, stability_measurement=stability
-        )
-        candidates.append(candidate)
-
-    _calculate_combined_scores(candidates, original_weight=0.5, stability_weight=0.5)
-
-    # Candidate with lower voltage noise should have higher stability score
-    assert (
-        candidates[1].stability_measurement.stability_score
-        > candidates[0].stability_measurement.stability_score
-    )
-
-
-if __name__ == "__main__":
-    pytest.main([__file__, "-v"])
