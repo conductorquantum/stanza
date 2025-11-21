@@ -3,6 +3,7 @@
 import numpy as np
 import pytest
 
+from stanza.exceptions import RoutineError
 from stanza.routines.builtins.utils.peak_fitting import (
     FittedPeak,
     calculate_aicc,
@@ -69,21 +70,34 @@ def test_calculate_fwhm_voigt_uses_numerical_branches():
     assert fwhm < 100  # Should be on order of 2*width
 
 
-def test_calculate_aicc_returns_inf_for_invalid_inputs():
-    """Validate calculate_aicc emits np.inf when RSS <= 0 or n <= k + 1."""
+def test_calculate_aicc_returns_inf_for_invalid_inputs(caplog):
+    """Validate calculate_aicc emits np.inf when RSS <= 0 or n <= k + 1 and logs warnings."""
+    import logging
+
     n = 10
     k = 4
     residuals = np.zeros(n)  # RSS = 0
 
-    aicc = calculate_aicc(n, k, residuals)
-    assert aicc == np.inf
+    # Capture warnings
+    with caplog.at_level(logging.WARNING):
+        aicc = calculate_aicc(n, k, residuals)
+        assert aicc == np.inf
+        # Verify warning was logged for RSS <= 0
+        assert any("RSS <= 0" in record.message for record in caplog.records)
 
     # Test n <= k + 1
     n = 5
     k = 4
     residuals = np.array([0.1, 0.2, 0.3, 0.4, 0.5])
-    aicc = calculate_aicc(n, k, residuals)
-    assert aicc == np.inf
+
+    caplog.clear()
+    with caplog.at_level(logging.WARNING):
+        aicc = calculate_aicc(n, k, residuals)
+        assert aicc == np.inf
+        # Verify warning was logged for insufficient data points
+        assert any(
+            "insufficient data points" in record.message for record in caplog.records
+        )
 
 
 def test_measure_peak_stability_combines_quality_and_noise():
@@ -321,6 +335,27 @@ def test_calculate_quality_score_formula():
     # Calculate expected value: 0.7*0.95 - 0.05*0.01 - 0.05*0.1 + 0.2*0.8
     expected = 0.7 * 0.95 - 0.05 * 0.01 - 0.05 * 0.1 + 0.2 * 0.8
     assert abs(quality - expected) < 1e-6
+
+
+def test_lorentzian_raises_error_for_zero_width():
+    """Verify lorentzian raises RoutineError for zero width parameter."""
+    x = np.linspace(-10, 10, 100)
+    with pytest.raises(RoutineError, match="Zero width parameter"):
+        lorentzian(x, amplitude=1.0, center=0.0, width=0.0, offset=0.0)
+
+
+def test_sech_squared_raises_error_for_zero_width():
+    """Verify sech_squared raises RoutineError for zero width parameter."""
+    x = np.linspace(-10, 10, 100)
+    with pytest.raises(RoutineError, match="Zero width parameter"):
+        sech_squared(x, amplitude=1.0, center=0.0, width=0.0, offset=0.0)
+
+
+def test_pseudo_voigt_raises_error_for_zero_width():
+    """Verify pseudo_voigt raises RoutineError for zero width parameter."""
+    x = np.linspace(-10, 10, 100)
+    with pytest.raises(RoutineError, match="Zero width parameter"):
+        pseudo_voigt(x, amplitude=1.0, center=0.0, width=0.0, offset=0.0, eta=0.5)
 
 
 if __name__ == "__main__":

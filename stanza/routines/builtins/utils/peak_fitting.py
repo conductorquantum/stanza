@@ -112,6 +112,11 @@ def lorentzian(
         width: Half-width at half-maximum (HWHM)
         offset: Baseline offset
     """
+    if width == 0:
+        raise RoutineError(
+            "Zero width parameter in Lorentzian model indicates invalid input. "
+            "Width must be positive for peak fitting."
+        )
     return amplitude / (1 + ((x - center) / width) ** 2) + offset
 
 
@@ -131,9 +136,11 @@ def sech_squared(
         width: Width parameter (controls peak sharpness)
         offset: Baseline offset
     """
-    # Avoid division by zero
     if width == 0:
-        width = np.finfo(float).eps
+        raise RoutineError(
+            "Zero width parameter in sech² model indicates invalid input. "
+            "Width must be positive for peak fitting."
+        )
 
     u = (x - center) / width
     # Use numerically stable formula to avoid overflow
@@ -175,6 +182,11 @@ def pseudo_voigt(
         offset: Baseline offset
         eta: Mixing parameter (0=pure Gaussian, 1=pure Lorentzian)
     """
+    if width == 0:
+        raise RoutineError(
+            "Zero width parameter in pseudo-Voigt model indicates invalid input. "
+            "Width must be positive for peak fitting."
+        )
     # Gaussian component
     gaussian = np.exp(-np.log(2) * ((x - center) / width) ** 2)
     # Lorentzian component
@@ -216,7 +228,20 @@ def calculate_aicc(n: int, k: int, residuals: np.ndarray) -> float:
     """
     rss = np.sum(residuals**2)
     # Avoid log(0) and division by zero
-    if rss <= 0 or n <= k + 1:
+    if rss <= 0:
+        logger.warning(
+            "AICc calculation: RSS <= 0 (rss=%.2e). This indicates a perfect fit "
+            "or numerical issues. Returning infinity.",
+            rss,
+        )
+        return np.inf
+    if n <= k + 1:
+        logger.warning(
+            "AICc calculation: insufficient data points (n=%d, k=%d, need n > k+1). "
+            "Small sample correction undefined. Returning infinity.",
+            n,
+            k,
+        )
         return np.inf
     aic = n * np.log(rss / n) + 2 * k
     # Small sample size correction
