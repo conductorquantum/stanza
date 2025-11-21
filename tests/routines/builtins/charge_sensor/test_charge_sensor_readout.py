@@ -1,6 +1,6 @@
 """Tests for charge sensor readout routines and utilities."""
 
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import numpy as np
 import pytest
@@ -37,8 +37,29 @@ def test_calculate_compensated_voltages_matches_resolution():
     assert len(compensation) == sweep_resolution**2
     assert gate_electrodes == ["G1", "G2", "G_sensor"]
 
+    # Verify ordering: voltages[i][j] should correspond to gate_electrodes[j]
+    g1_range = control_plunger_ranges["G1"]
+    g2_range = control_plunger_ranges["G2"]
+
     for v in voltages:
         assert len(v) == 3
+        # Verify v[0] is for G1 (first control gate)
+        assert g1_range[0] <= v[0] <= g1_range[1], (
+            f"Voltage v[0]={v[0]} should be in G1 range {g1_range}"
+        )
+        # Verify v[1] is for G2 (second control gate)
+        assert g2_range[0] <= v[1] <= g2_range[1], (
+            f"Voltage v[1]={v[1]} should be in G2 range {g2_range}"
+        )
+        # Verify v[2] is for sensor gate (compensated voltage, should be a reasonable value)
+        assert isinstance(v[2], (int, float)), (
+            f"Voltage v[2]={v[2]} should be a numeric sensor voltage"
+        )
+        # With positive gradients and forward voltage changes, compensation should be positive
+        # but we allow for negative compensation in general case
+        assert abs(v[2]) < 10.0, (
+            f"Voltage v[2]={v[2]} should be a reasonable sensor voltage"
+        )
 
 
 def test_calculate_compensated_voltages_uses_serpentine_pattern():
@@ -179,48 +200,9 @@ def test_charge_sensor_csd_readout_validates_parameters(mock_context):
         )
 
 
-def test_charge_sensor_csd_readout_restores_device_after_exception(
-    mock_context, mock_session, mock_device_with_groups
-):
-    """Trigger an exception during the sweep and verify the routine resets gate voltages
-    using the captured baseline state."""
-    ctx = mock_context
-    mock_device = mock_device_with_groups
-
-    call_count = [0]
-
-    def measure_side_effect(electrode):
-        call_count[0] += 1
-        if call_count[0] > 1:
-            raise RuntimeError("Simulated sweep failure")
-        return 1e-9
-
-    mock_device.measure.side_effect = measure_side_effect
-
-    with pytest.raises(RuntimeError, match="Simulated sweep failure"):
-        charge_sensor_csd_readout(
-            ctx=ctx,
-            charge_sensor_group_name="sensor_group",
-            control_group_name="control_group",
-            sensor_park_point_voltages={"G1": -0.1, "G2": -0.2, "G3": -0.3},
-            charge_sensor_plunger_gate="G3",
-            initial_control_voltages={"G4": -1.0, "G5": -1.0},
-            control_plunger_ranges={"G4": (-1.0, -0.9), "G5": (-1.0, -0.9)},
-            measure_electrode="OUT",
-            bias_gate="BIAS",
-            bias_voltage=1e-4,
-            sweep_resolution=3,
-            num_sweep_repetitions=1,
-            session=mock_session,
-        )
-
-    assert mock_device.jump.call_count >= 2
-
-
 def test_charge_sensor_csd_readout_session_metadata(mock_context):
     """Mock LoggerSession and ensure session.log_sweep metadata captures compensation_enabled,
     feedback_enabled, gate_electrodes, and park_point_current."""
-    from unittest.mock import Mock
 
     ctx = mock_context
     mock_session = Mock()

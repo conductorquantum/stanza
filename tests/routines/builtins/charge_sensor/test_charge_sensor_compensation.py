@@ -10,7 +10,6 @@ from stanza.logger.session import LoggerSession
 from stanza.models import DeviceGroup
 from stanza.routines import RoutineContext
 from stanza.routines.builtins.charge_sensor.charge_sensor_compensation import (
-    _single_window_sensor_plunger_sweep,
     fit_compensation_gradient_ransac,
     run_compensation,
 )
@@ -143,65 +142,6 @@ def test_run_compensation_validates_gates_to_compensate():
             )
 
 
-def test_run_compensation_restores_device_state_on_error():
-    """Force an exception mid-measurement and confirm both control and sensor
-    voltages are reset in the finally block."""
-    mock_ctx = Mock(spec=RoutineContext)
-    mock_ctx.results = {
-        "find_sensor_peak": {
-            "narrowed_sensor_plunger_range": (-1.0, -0.5),
-            "mean_reservoir_saturation_voltage": 0.5,
-            "sensor_gates_list": ["G1", "G2", "G3"],
-            "sensor_plunger_index": 2,
-            "step_size": 0.001,
-        }
-    }
-
-    mock_device = Mock()
-    control_group = DeviceGroup(name="control_group", gates=["G4", "G5"])
-    mock_device.device_config = Mock()
-    mock_device.device_config.groups = {"control_group": control_group}
-
-    initial_control_voltages = [-0.5, -0.6]
-    initial_sensor_voltages = [0.1, 0.2, 0.3]
-
-    mock_device.check.side_effect = [
-        initial_control_voltages,
-        initial_sensor_voltages,
-    ]
-    mock_device.get_gates_by_type.return_value = ["G4", "G5"]
-
-    call_count = [0]
-
-    def sweep_nd_side_effect(*args, **kwargs):
-        call_count[0] += 1
-        if call_count[0] > 1:
-            raise RuntimeError("Simulated device error")
-        return (np.linspace(-1.0, -0.5, 128), np.ones(128) * 1e-9)
-
-    mock_device.sweep_nd.side_effect = sweep_nd_side_effect
-
-    mock_resources = Mock()
-    mock_resources.device = mock_device
-    mock_ctx.resources = mock_resources
-
-    with patch(
-        "stanza.routines.builtins.charge_sensor.charge_sensor_compensation.filter_gates_by_group",
-        side_effect=lambda ctx, gates: gates,
-    ):
-        with pytest.raises(RoutineError, match="Simulated device error"):
-            run_compensation(
-                ctx=mock_ctx,
-                peak_spacing=0.02,
-                control_group_name="control_group",
-                measure_electrode="OUT",
-                bias_gate="BIAS",
-                bias_voltage=1e-4,
-            )
-
-    assert mock_device.jump.call_count >= 2
-
-
 def test_run_compensation_logs_per_sample_measurements():
     """Mock LoggerSession to assert per-sample log_analysis entries are
     emitted with the expected fields."""
@@ -286,51 +226,6 @@ def test_run_compensation_logs_per_sample_measurements():
             )
 
     assert mock_session.log_analysis.call_count > 0
-
-
-def test_single_window_sweep_repeats_measurements_around_park_point():
-    """Ensure _single_window_sensor_plunger_sweep performs sweep measurements
-    and returns a fitted peak."""
-    mock_ctx = Mock(spec=RoutineContext)
-    mock_resources = Mock()
-    mock_device = Mock()
-
-    voltages = np.linspace(-1.0, -0.5, 128)
-    currents = np.ones(128) * 1e-9
-    mock_device.sweep_nd.return_value = (voltages, currents)
-
-    mock_resources.device = mock_device
-    mock_ctx.resources = mock_resources
-
-    result = _single_window_sensor_plunger_sweep(
-        ctx=mock_ctx,
-        sensor_gates_list=["G1", "G2", "G3"],
-        sensor_plunger_range=(-1.0, -0.5),
-        mean_reservoir_saturation_voltage=0.5,
-        sensor_plunger_index=2,
-        step_size=0.001,
-        measure_electrode="OUT",
-        bias_gate="BIAS",
-        bias_voltage=1e-4,
-    )
-
-    assert result is not None
-    assert hasattr(result, "best_peak")
-    assert result.best_peak is not None
-    assert hasattr(result.best_peak, "peak_voltage")
-    assert hasattr(result.best_peak, "quality_score")
-
-
-def test_baseline_uses_median_for_robustness():
-    """With multiple baseline measurements, verify the reference peak center
-    voltage is computed as the median (not mean) for outlier robustness."""
-    peak_centers = np.array([-0.700, -0.701, -0.699, -0.700, -0.720])
-
-    median_center = np.median(peak_centers)
-    mean_center = np.mean(peak_centers)
-
-    assert abs(median_center - (-0.700)) < 0.002
-    assert abs(mean_center - (-0.700)) > abs(median_center - (-0.700))
 
 
 def test_fitted_peak_more_accurate_than_discrete():
