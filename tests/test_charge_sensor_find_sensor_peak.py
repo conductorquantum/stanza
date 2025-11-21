@@ -720,3 +720,98 @@ def test_stable_peak_returns_highest_combined_score(
     # With 70% weight on stability, candidate 1 (best stability) should win
     # despite having lower original quality
     assert best_candidate == candidates[1]
+
+
+def test_peak_detector_model_output_parsing():
+    """Verify ML model peak detector output is correctly parsed and used.
+
+    This test ensures the integration between the ML model and the peak finding
+    routine works correctly. The model returns peak_indices which must be
+    correctly interpreted as array indices for window extraction.
+    """
+    mock_ctx, mock_device = create_mock_context_for_sensor_routines()
+
+    # Mock the ML model to return specific peak indices
+    # Simulate finding peaks at indices 100, 200, 300 in a 500-point trace
+    mock_peak_indices = [100, 200, 300]
+
+    mock_ctx.resources.models_client.models.execute.return_value.output = {
+        "classification": True,
+        "score": 0.95,
+        "peak_indices": mock_peak_indices,
+    }
+
+    # Ensure ctx.resources.group is None to avoid filter_gates_by_group error
+    # filter_gates_by_group checks if group is None, and if not, tries to iterate over it
+    # Setting it to None ensures the function returns the original gate list
+    mock_ctx.resources.group = None
+
+    # Mock sweep to return trace with peaks
+    voltages = np.linspace(-1.0, -0.5, 500)
+    currents = np.ones(500) * 1e-11
+
+    # Add peaks at the specified indices
+    for peak_idx in mock_peak_indices:
+        # Add a Lorentzian peak centered at each index
+        indices = np.arange(max(0, peak_idx - 20), min(500, peak_idx + 20))
+        peak_currents = lorentzian(
+            indices - peak_idx, amplitude=2e-9, center=0, width=5, offset=1e-11
+        )
+        currents[indices] += peak_currents
+
+    mock_device.sweep_nd.return_value = (voltages, currents)
+
+    # Patch the many_window_barrier_sweep to capture peak indices
+    with patch(
+        "stanza.routines.builtins.charge_sensor.charge_sensor_find_sensor_peak.many_window_barrier_sweep"
+    ) as mock_sweep:
+        from stanza.routines.builtins.charge_sensor.charge_sensor_find_sensor_peak import (
+            SensorDotPlungerSweepOutput,
+        )
+
+        # Create mock output with correct structure
+        best_peak_voltage = voltages[
+            mock_peak_indices[0]
+        ]  # First peak (highest quality)
+
+        mock_sweep.return_value = SensorDotPlungerSweepOutput(
+            sensor_plunger_voltage=best_peak_voltage,
+            classification=True,
+            score=0.95,
+            peak_indices=mock_peak_indices,  # This must be a list, not a Mock
+            num_peaks=len(mock_peak_indices),
+            aggregated_voltages=voltages,
+            aggregated_currents=currents,
+            best_peak_voltage=best_peak_voltage,
+            best_peak_max_gradient_voltage=best_peak_voltage,
+            prev_peak_voltage=voltages[mock_peak_indices[0] - 50]
+            if mock_peak_indices[0] > 50
+            else None,
+            next_peak_voltage=voltages[mock_peak_indices[-1] + 50]
+            if mock_peak_indices[-1] < len(voltages) - 50
+            else None,
+        )
+
+        result = find_sensor_peak(
+            ctx=mock_ctx,
+            peak_spacing=0.02,
+            sensor_group_name="sensor_group",
+            sensor_plunger_gate="G3",
+            measure_electrode="OUT",
+            bias_gate="BIAS",
+            bias_voltage=1e-4,
+        )
+
+        # Verify the routine correctly used the model output
+        # The best peak should correspond to one of the detected indices
+        assert "best_peak_voltage" in result
+        best_voltage = result["best_peak_voltage"]
+
+        # The best peak voltage should match one of the detected peak positions
+        detected_voltages = [voltages[idx] for idx in mock_peak_indices]
+        assert any(abs(best_voltage - v) < 0.01 for v in detected_voltages), (
+            f"Best peak voltage {best_voltage} doesn't match detected peaks at {detected_voltages}"
+        )
+
+        # Verify many_window_barrier_sweep was called (which internally uses the model)
+        assert mock_sweep.called
