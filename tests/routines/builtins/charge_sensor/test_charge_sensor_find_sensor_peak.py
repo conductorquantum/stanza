@@ -30,16 +30,11 @@ from stanza.routines.builtins.utils.peak_fitting import (
     lorentzian,
 )
 
-# =============================================================================
-# Helper Functions
-# =============================================================================
-
 
 def create_mock_device_for_sensor_routines():
     """Create a comprehensive mock device for sensor routine tests."""
     mock_device = Mock()
 
-    # Setup device config with groups
     sensor_group = DeviceGroup(name="sensor_group", gates=["G1", "G2", "G3"])
     control_group = DeviceGroup(name="control_group", gates=["G4", "G5"])
 
@@ -49,16 +44,13 @@ def create_mock_device_for_sensor_routines():
         "control_group": control_group,
     }
 
-    # Mock gate lookups - make control_gates iterable
     mock_device.control_gates = ["G1", "G2", "G3", "G4", "G5"]
     mock_device.get_gates_by_type.return_value = ["G1", "G2", "G3", "G4", "G5"]
 
-    # Mock device methods
     mock_device.check.return_value = [0.0, 0.0, 0.0]
     mock_device.jump = Mock()
     mock_device.measure.return_value = 1e-9
 
-    # Mock sweep_nd to return reasonable data
     voltages = np.linspace(-1.0, -0.5, 128)
     currents = np.ones(128) * 1e-9
     mock_device.sweep_nd.return_value = (voltages, currents)
@@ -74,7 +66,7 @@ def create_mock_context_for_sensor_routines(include_prerequisites=True):
         mock_ctx.results = {
             "global_accumulation_sensor_group": {"global_turn_on_voltage": -0.8},
             "finger_gate_characterization_sensor_group": {
-                "G3": {  # sensor plunger gate
+                "G3": {
                     "saturation_voltage": 0.5,
                     "cutoff_voltage": -1.5,
                     "pinch_off_voltage": -2.0,
@@ -86,7 +78,6 @@ def create_mock_context_for_sensor_routines(include_prerequisites=True):
 
     mock_device = create_mock_device_for_sensor_routines()
 
-    # Create mock models_client for ML model calls
     mock_models_client = Mock()
     mock_models = Mock()
     mock_execute_result = Mock()
@@ -107,16 +98,10 @@ def create_mock_context_for_sensor_routines(include_prerequisites=True):
     return mock_ctx, mock_device
 
 
-# =============================================================================
-# Helper Utilities Tests
-# =============================================================================
-
-
 def test_calculate_peak_window_bounds_handles_edge_peaks():
     """Verify calculate_peak_window_bounds clamps to trace bounds and always contains the peak."""
     trace_length = 1000
 
-    # First/middle/last peak scenarios should all yield windows within the trace that contain the peak
     edge_cases = [
         ([100, 400, 700], 0, 100),
         ([100, 400, 700], 1, 400),
@@ -131,14 +116,12 @@ def test_calculate_peak_window_bounds_handles_edge_peaks():
         )
         assert 0 <= start < peak_idx < end <= trace_length
 
-    # Test single peak (should use entire trace)
     start, end = calculate_peak_window_bounds(
         peak_idx=500, peak_index=0, peak_indices=[500], trace_length=trace_length
     )
     assert start == 0
     assert end == trace_length
 
-    # Closely spaced peaks should still provide a valid window with at least a few points
     close_peak_indices = [50, 100, 150, 200]
     start, end = calculate_peak_window_bounds(
         peak_idx=100,
@@ -149,7 +132,6 @@ def test_calculate_peak_window_bounds_handles_edge_peaks():
     assert 0 <= start < 100 < end <= trace_length
     assert end - start >= 3
 
-    # Middle peak should use WINDOW_FRACTION of inter-peak spacing when possible
     peak_indices = [50, 150, 250]
     peak_idx = 150
     start, end = calculate_peak_window_bounds(
@@ -163,7 +145,6 @@ def test_calculate_peak_window_bounds_handles_edge_peaks():
     assert abs(end - (peak_idx + expected_offset)) <= 5
     assert start < peak_idx < end
 
-    # Extremely wide spacing should clamp to DEFAULT_WINDOW_HALF_WIDTH on each side
     wide_peak_indices = [200, 600, 1000]
     trace_length_wide = 1200
     start, end = calculate_peak_window_bounds(
@@ -230,11 +211,6 @@ def test_calculate_voltage_noise_near_zero_slope():
         _calculate_voltage_noise(current_std, local_slope)
 
 
-# =============================================================================
-# Peak Scoring Algorithms Tests
-# =============================================================================
-
-
 def test_peak_quality_score_weights_components():
     """Verify quality score combines R² (70%), normalized RMSE (5%),
     skew residual (5%), and sensitivity score (20%) with correct weights."""
@@ -256,7 +232,7 @@ def test_sensitivity_score_normalized_across_peaks(fitted_peak_factory):
     """With N detected peaks, confirm sensitivity scores are min-max normalized
     to [0, 1] range before quality calculation."""
     peaks = []
-    sensitivities = [1e-6, 5e-6, 10e-6, 2e-6, 7e-6]  # Different values
+    sensitivities = [1e-6, 5e-6, 10e-6, 2e-6, 7e-6]
 
     for i, sens in enumerate(sensitivities):
         peaks.append(
@@ -271,15 +247,12 @@ def test_sensitivity_score_normalized_across_peaks(fitted_peak_factory):
 
     _normalize_sensitivity_scores(peaks)
 
-    # Verify all scores are in [0, 1] range
     for peak in peaks:
         assert 0 <= peak.sensitivity_score <= 1.0
 
-    # Peak with max sensitivity should have score = 1.0
     max_sens_idx = np.argmax(sensitivities)
     assert peaks[max_sens_idx].sensitivity_score == 1.0
 
-    # Peak with min sensitivity should have score = 0.0
     min_sens_idx = np.argmin(sensitivities)
     assert peaks[min_sens_idx].sensitivity_score == 0.0
 
@@ -287,39 +260,30 @@ def test_sensitivity_score_normalized_across_peaks(fitted_peak_factory):
 def test_find_sensor_peak_returns_highest_quality():
     """Feed synthetic sweep with multiple peaks of known quality and verify
     the routine calculates quality scores for all peaks."""
-    # Create synthetic trace with multiple Lorentzian peaks at different quality levels
-
     voltages = np.linspace(-1.0, -0.5, 500)
 
-    # Peak 1: High amplitude, narrow (high quality)
     peak1 = lorentzian(
         np.arange(100, 200), amplitude=3e-9, center=50, width=8, offset=1e-11
     )
 
-    # Peak 2: Medium amplitude, wider (medium quality)
     peak2 = lorentzian(
         np.arange(200, 300), amplitude=2e-9, center=50, width=15, offset=1e-11
     )
 
-    # Peak 3: Low amplitude, wide (low quality)
     peak3 = lorentzian(
         np.arange(300, 400), amplitude=1e-9, center=50, width=20, offset=1e-11
     )
 
-    # Combine into full trace
     currents = np.ones(500) * 1e-11
     currents[100:200] = peak1
     currents[200:300] = peak2
     currents[300:400] = peak3
 
-    # Add small noise
     np.random.seed(42)
     currents += np.random.normal(0, 1e-13, len(currents))
 
-    # Simulate peak detection finding all three peaks
     peak_indices = [150, 250, 350]
 
-    # Fit all peaks
     fitted_peaks = []
     for peak_number, peak_idx in enumerate(peak_indices):
         bounds = calculate_peak_window_bounds(
@@ -339,27 +303,19 @@ def test_find_sensor_peak_returns_highest_quality():
             )
             fitted_peaks.append(peak)
 
-    # Normalize and calculate quality scores
     _normalize_sensitivity_scores(fitted_peaks)
     calculate_quality_scores(fitted_peaks)
 
-    # Verify all peaks have quality scores calculated
     assert len(fitted_peaks) == 3
     for peak in fitted_peaks:
         assert peak.quality_score is not None
         assert peak.sensitivity_score is not None
         assert 0 <= peak.quality_score <= 1.0
 
-    # Verify quality scores are different (peaks have different characteristics)
     quality_scores = [p.quality_score for p in fitted_peaks]
     assert len(set(quality_scores)) > 1, (
         "Quality scores should differ for different peaks"
     )
-
-
-# =============================================================================
-# find_sensor_peak Tests
-# =============================================================================
 
 
 def test_find_sensor_peak_requires_prerequisites():
@@ -395,10 +351,8 @@ def test_find_sensor_peak_requires_prerequisites():
 def test_find_sensor_peak_gate_voltage_overrides_apply():
     """Provide gate_voltage_overrides and ensure build_sensor_sweep_voltage_list
     honors them for reservoirs/shared gates during many_window_barrier_sweep."""
-
-    # Test the helper function directly
     sensor_gates_list = ["G1", "G2", "G3"]
-    sensor_plunger_index = 2  # G3
+    sensor_plunger_index = 2
     base_voltage = -0.8
     plunger_voltages = np.linspace(-1.0, -0.5, 5)
     gate_overrides = {"G1": 0.8, "G2": 0.9}
@@ -411,12 +365,9 @@ def test_find_sensor_peak_gate_voltage_overrides_apply():
         gate_voltage_overrides=gate_overrides,
     )
 
-    # Verify overrides are applied
-    # Each entry in voltage_list should be a list of [G1, G2, G3] voltages
     for voltages in voltage_list:
         assert voltages[0] == 0.8, "G1 should use override voltage 0.8"
         assert voltages[1] == 0.9, "G2 should use override voltage 0.9"
-        # G3 varies as the plunger
         assert voltages[2] in plunger_voltages
 
 
@@ -424,46 +375,34 @@ def test_find_sensor_peak_uses_narrowed_range_for_park_point():
     """Verify that the narrowed range returned from many_window_barrier_sweep
     is applied when parking the sensor. Tests both multi-peak and single-peak
     fallback cases."""
-    # Test case 1: Multi-peak scenario - narrowed range calculated from adjacent peaks
     peak_voltage = -0.7
     prev_peak_voltage = -0.74
     next_peak_voltage = -0.66
 
-    # Calculate narrowed range (midpoint between peaks)
     start_of_range = (prev_peak_voltage + peak_voltage) / 2
     end_of_range = (peak_voltage + next_peak_voltage) / 2
     narrowed_range = (start_of_range, end_of_range)
 
-    # Verify narrowed range is valid
     assert isinstance(narrowed_range, tuple)
     assert len(narrowed_range) == 2
     assert narrowed_range[0] < narrowed_range[1]
 
-    # Verify range is centered around the peak
     range_center = (narrowed_range[0] + narrowed_range[1]) / 2
     assert abs(range_center - peak_voltage) < 0.001
 
-    # Verify park point would be within the narrowed range
     park_voltage = peak_voltage
     assert narrowed_range[0] <= park_voltage <= narrowed_range[1]
 
-    # Test case 2: Single-peak fallback scenario - uses peak_spacing as fallback
-    # When there's only one peak, prev/next voltages use peak_spacing as fallback
     peak_voltage_fallback = -0.7
     peak_spacing = 0.02
 
-    # Simulate the fallback logic from find_sensor_peak
-    # When there's no previous peak, use peak_voltage - peak_spacing
-    # When there's no next peak, use peak_voltage + peak_spacing
     prev_peak_voltage_fallback = peak_voltage_fallback - peak_spacing
     next_peak_voltage_fallback = peak_voltage_fallback + peak_spacing
 
-    # Calculate narrowed range using fallback bounds
     start_of_range_fallback = (prev_peak_voltage_fallback + peak_voltage_fallback) / 2
     end_of_range_fallback = (peak_voltage_fallback + next_peak_voltage_fallback) / 2
     narrowed_range_fallback = (start_of_range_fallback, end_of_range_fallback)
 
-    # Verify fallback bounds are used correctly
     assert abs(prev_peak_voltage_fallback - (-0.72)) < 1e-9
     assert abs(next_peak_voltage_fallback - (-0.68)) < 1e-9
     assert (
@@ -472,25 +411,12 @@ def test_find_sensor_peak_uses_narrowed_range_for_park_point():
     assert (
         abs((narrowed_range_fallback[1] - narrowed_range_fallback[0]) - peak_spacing)
         < 1e-9
-    )  # Range spans one spacing
-
-
-# =============================================================================
-# find_stable_sensor_peak Tests
-# =============================================================================
-
-
-# =============================================================================
-# Workflow Integration Tests
-# =============================================================================
+    )
 
 
 def test_charge_sensor_workflow_consumes_compensation_results():
     """Chain find_sensor_peak → run_compensation → charge_sensor_csd_readout
     with mocks to ensure outputs from one step feed the next."""
-    # Test the workflow data flow conceptually
-
-    # Step 1: find_sensor_peak would return these results
     peak_result = {
         "best_peak_voltage": -0.7,
         "best_peak_max_gradient_voltage": -0.68,
@@ -499,34 +425,22 @@ def test_charge_sensor_workflow_consumes_compensation_results():
         "sensor_park_point": {"G1": -0.8, "G2": -0.8, "G3": -0.7},
     }
 
-    # Step 2: run_compensation would return gradients based on peak results
     compensation_gradients = {"G4": 0.15, "G5": 0.20}
 
-    # Step 3: charge_sensor_csd_readout consumes these results
-    # Verify that the data flows correctly
     sensor_park_voltages = {
         "G1": peak_result["mean_reservoir_saturation_voltage"],
         "G2": peak_result["mean_reservoir_saturation_voltage"],
         "G3": peak_result["best_peak_voltage"],
     }
 
-    # Verify workflow data consistency
     assert sensor_park_voltages["G1"] == -0.8
     assert sensor_park_voltages["G2"] == -0.8
     assert sensor_park_voltages["G3"] == -0.7
 
-    # Verify compensation gradients are available for CSD readout
     assert "G4" in compensation_gradients
     assert "G5" in compensation_gradients
     assert compensation_gradients["G4"] == 0.15
     assert compensation_gradients["G5"] == 0.20
-
-    # This verifies the data structure compatibility between workflow steps
-
-
-# =============================================================================
-# Stability Measurement Algorithm Tests (find_stable_sensor_peak)
-# =============================================================================
 
 
 def test_stable_peak_selects_top_n_candidates(fitted_peak_factory):

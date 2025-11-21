@@ -20,11 +20,6 @@ class MockResources:
         self.group = group
 
 
-# =============================================================================
-# Group Handling Tests
-# =============================================================================
-
-
 def test_filter_gates_by_group_with_group():
     """Test filter_gates_by_group when group is present."""
     group = {"G1": {}, "G2": {}, "G3": {}}

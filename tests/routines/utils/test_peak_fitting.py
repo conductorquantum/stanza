@@ -14,10 +14,6 @@ from stanza.routines.builtins.utils.peak_fitting import (
     sech_squared,
 )
 
-# =============================================================================
-# Regression Math Tests
-# =============================================================================
-
 
 def test_fit_peak_multi_model_prefers_lowest_aicc():
     """Generate traces matching a specific model (e.g., Lorentzian) to verify
@@ -256,11 +252,6 @@ def test_fit_peak_multi_model_accuracy_within_threshold():
 
     # Fitted peak voltage should be close to true center
     assert abs(fitted_peak.peak_voltage - true_center_voltage) < 0.01
-
-
-# =============================================================================
-# Model Function Tests
-# =============================================================================
 
 
 def test_lorentzian_model():

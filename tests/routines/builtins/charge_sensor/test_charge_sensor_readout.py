@@ -14,16 +14,11 @@ from stanza.routines.builtins.charge_sensor.charge_sensor_readout import (
 )
 from stanza.routines.core import RoutineContext
 
-# =============================================================================
-# Test Fixtures and Helpers
-# =============================================================================
-
 
 def create_mock_device_with_groups():
     """Create a mock device with sensor and control groups."""
     mock_device = Mock()
 
-    # Create device config with groups
     sensor_group = DeviceGroup(
         name="sensor_group", gates=["G1", "G2", "G3"], description="Sensor group"
     )
@@ -38,10 +33,8 @@ def create_mock_device_with_groups():
         "control_group": control_group,
     }
 
-    # Mock gate properties
     mock_device.control_gates = ["G1", "G2", "G3", "G4", "G5", "G6", "G7"]
 
-    # Mock device.check() to return current voltages
     mock_device.check.return_value = {
         "G1": 0.0,
         "G2": 0.0,
@@ -52,20 +45,14 @@ def create_mock_device_with_groups():
         "G7": 0.0,
     }
 
-    # Mock device.jump() for voltage setting
     mock_device.jump = Mock()
-
-    # Mock device.measure() to return a current value
     mock_device.measure.return_value = 1e-9
 
-    # Mock device.sweep_nd() to return current measurements
     def mock_sweep_nd(electrodes, voltages, measure_electrode):
-        # Return synthetic current measurements
         return np.random.normal(1e-9, 1e-11, len(voltages))
 
     mock_device.sweep_nd = Mock(side_effect=mock_sweep_nd)
 
-    # Mock device properties
     gates_dict = {
         f"G{i}": Gate(
             name=f"G{i}",
@@ -79,7 +66,6 @@ def create_mock_device_with_groups():
 
     mock_device.device_config.gates = gates_dict
 
-    # Mock channel_configs for voltage_range access
     mock_channel_configs = {}
     for gate_name in gates_dict:
         mock_channel = Mock()
@@ -111,11 +97,6 @@ def create_mock_session():
     return mock_session
 
 
-# =============================================================================
-# Compensation & Readout Behavior Tests
-# =============================================================================
-
-
 def test_calculate_compensated_voltages_matches_resolution():
     """Validate _calculate_compensated_voltages returns sweep_resolution**2 entries,
     preserves control gate ordering, and includes the sensor gate when compensation is enabled."""
@@ -137,21 +118,12 @@ def test_calculate_compensated_voltages_matches_resolution():
         sweep_resolution=sweep_resolution,
     )
 
-    # Should have sweep_resolution**2 points
     assert len(voltages) == sweep_resolution**2
     assert len(compensation) == sweep_resolution**2
-
-    # Gate electrodes should be [G1, G2, G_sensor]
     assert gate_electrodes == ["G1", "G2", "G_sensor"]
 
-    # Each voltage should be a list of 3 values
     for v in voltages:
         assert len(v) == 3
-
-
-# =============================================================================
-# Serpentine Scanning Pattern Tests
-# =============================================================================
 
 
 def test_calculate_compensated_voltages_uses_serpentine_pattern():
@@ -175,16 +147,10 @@ def test_calculate_compensated_voltages_uses_serpentine_pattern():
         sweep_resolution=sweep_resolution,
     )
 
-    # Extract G2 values (second column)
     g2_values = [v[1] for v in voltages]
 
-    # Row 0 (points 0-2): should go 0.0 -> 0.1 -> 0.2 (increasing)
     assert g2_values[0] < g2_values[1] < g2_values[2]
-
-    # Row 1 (points 3-5): should go 0.2 -> 0.1 -> 0.0 (decreasing)
     assert g2_values[3] > g2_values[4] > g2_values[5]
-
-    # Row 2 (points 6-8): should go 0.0 -> 0.1 -> 0.2 (increasing)
     assert g2_values[6] < g2_values[7] < g2_values[8]
 
 
@@ -209,19 +175,11 @@ def test_calculate_compensated_voltages_walking_state_continuity():
         sweep_resolution=sweep_resolution,
     )
 
-    # Extract sensor voltages (third column)
     sensor_voltages = [v[2] for v in voltages]
 
-    # Verify sensor voltage changes are smooth (no large jumps)
     for i in range(1, len(sensor_voltages)):
         delta = abs(sensor_voltages[i] - sensor_voltages[i - 1])
-        # Max single-step change should be reasonable (not jumping back to initial)
         assert delta < 0.2, f"Large voltage jump detected at index {i}: {delta}"
-
-
-# =============================================================================
-# Integration Tests for charge_sensor_csd_readout
-# =============================================================================
 
 
 def test_charge_sensor_csd_readout_validates_parameters():
@@ -230,7 +188,6 @@ def test_charge_sensor_csd_readout_validates_parameters():
     mock_device = create_mock_device_with_groups()
     ctx = create_mock_context(mock_device)
 
-    # Test invalid sweep_resolution
     with pytest.raises(RoutineError, match="sweep_resolution must be greater than 0"):
         charge_sensor_csd_readout(
             ctx=ctx,
@@ -243,10 +200,9 @@ def test_charge_sensor_csd_readout_validates_parameters():
             measure_electrode="OUT",
             bias_gate="BIAS",
             bias_voltage=1e-4,
-            sweep_resolution=0,  # Invalid
+            sweep_resolution=0,
         )
 
-    # Test invalid num_sweep_repetitions
     with pytest.raises(
         RoutineError, match="num_sweep_repetitions must be greater than 0"
     ):
@@ -261,10 +217,9 @@ def test_charge_sensor_csd_readout_validates_parameters():
             measure_electrode="OUT",
             bias_gate="BIAS",
             bias_voltage=1e-4,
-            num_sweep_repetitions=0,  # Invalid
+            num_sweep_repetitions=0,
         )
 
-    # Test empty sensor_park_point_voltages
     with pytest.raises(
         RoutineError, match="sensor_park_point_voltages cannot be empty"
     ):
@@ -272,7 +227,7 @@ def test_charge_sensor_csd_readout_validates_parameters():
             ctx=ctx,
             charge_sensor_group_name="sensor_group",
             control_group_name="control_group",
-            sensor_park_point_voltages={},  # Empty
+            sensor_park_point_voltages={},
             charge_sensor_plunger_gate="G3",
             initial_control_voltages={"G4": -1.0, "G5": -1.0},
             control_plunger_ranges={"G4": (-1.0, -0.9), "G5": (-1.0, -0.9)},
@@ -281,13 +236,12 @@ def test_charge_sensor_csd_readout_validates_parameters():
             bias_voltage=1e-4,
         )
 
-    # Test missing sensor plunger gate in sensor_park_point_voltages
     with pytest.raises(RoutineError, match="not found in sensor_park_point_voltages"):
         charge_sensor_csd_readout(
             ctx=ctx,
             charge_sensor_group_name="sensor_group",
             control_group_name="control_group",
-            sensor_park_point_voltages={"G1": 0.1, "G2": 0.2},  # Missing G3
+            sensor_park_point_voltages={"G1": 0.1, "G2": 0.2},
             charge_sensor_plunger_gate="G3",
             initial_control_voltages={"G4": -1.0, "G5": -1.0},
             control_plunger_ranges={"G4": (-1.0, -0.9), "G5": (-1.0, -0.9)},
@@ -296,7 +250,6 @@ def test_charge_sensor_csd_readout_validates_parameters():
             bias_voltage=1e-4,
         )
 
-    # Test wrong number of control plunger ranges
     with pytest.raises(RoutineError, match="must contain exactly 2 gates"):
         charge_sensor_csd_readout(
             ctx=ctx,
@@ -305,7 +258,7 @@ def test_charge_sensor_csd_readout_validates_parameters():
             sensor_park_point_voltages={"G1": 0.1, "G2": 0.2, "G3": 0.3},
             charge_sensor_plunger_gate="G3",
             initial_control_voltages={"G4": -1.0},
-            control_plunger_ranges={"G4": (-1.0, -0.9)},  # Only 1 gate
+            control_plunger_ranges={"G4": (-1.0, -0.9)},
             measure_electrode="OUT",
             bias_gate="BIAS",
             bias_voltage=1e-4,
@@ -319,15 +272,13 @@ def test_charge_sensor_csd_readout_restores_device_after_exception():
     ctx = create_mock_context(mock_device)
     mock_session = create_mock_session()
 
-    # Make device.measure raise an exception during the sweep
-    # Set it to succeed a few times (for baseline measurement) then fail
     call_count = [0]
 
     def measure_side_effect(electrode):
         call_count[0] += 1
-        if call_count[0] > 1:  # Fail after baseline measurement
+        if call_count[0] > 1:
             raise RuntimeError("Simulated sweep failure")
-        return 1e-9  # Baseline current
+        return 1e-9
 
     mock_device.measure.side_effect = measure_side_effect
 
@@ -348,8 +299,7 @@ def test_charge_sensor_csd_readout_restores_device_after_exception():
             session=mock_session,
         )
 
-    # Verify device.jump was called to restore voltages in finally block
-    assert mock_device.jump.call_count >= 2  # Initial setup + cleanup
+    assert mock_device.jump.call_count >= 2
 
 
 def test_charge_sensor_csd_readout_session_metadata():
@@ -377,7 +327,6 @@ def test_charge_sensor_csd_readout_session_metadata():
         session=mock_session,
     )
 
-    # Verify result contains expected metadata
     assert result["compensation_enabled"] is True
     assert result["feedback_enabled"] is True
     assert "park_point_current" in result
@@ -411,21 +360,12 @@ def test_charge_sensor_csd_readout_result_lengths_match():
         session=mock_session,
     )
 
-    # Verify array lengths match
     assert len(result["compensation_applied"]) == expected_points
     assert len(result["current_measurements"]) == expected_points
     assert len(result["voltage_measurements"]) == expected_points
 
-    # Verify differential currents calculation
-    # In adaptive mode or with feedback, differential is computed differently
-    # Just verify it exists and has correct length
     if "differential_currents" in result:
         assert len(result["differential_currents"]) == expected_points
-
-
-# =============================================================================
-# Adaptive Gradient Tests
-# =============================================================================
 
 
 def test_charge_sensor_csd_readout_validates_gamma_factors():
@@ -616,9 +556,7 @@ def test_gradient_history_logs_all_updates():
         session=mock_session,
     )
 
-    # Check that gradient_history exists
     assert "gradient_history" in result
-    # If there are updates, verify structure
     if result["gradient_history"]:
         entry = result["gradient_history"][0]
         required_fields = [
@@ -632,11 +570,6 @@ def test_gradient_history_logs_all_updates():
         ]
         for field in required_fields:
             assert field in entry, f"Missing field: {field}"
-
-
-# =============================================================================
-# Dynamic Feedback Correction Limiting Tests
-# =============================================================================
 
 
 def test_feedback_correction_never_exceeds_voltage_range():
@@ -657,34 +590,14 @@ def test_feedback_correction_never_exceeds_voltage_range():
         measure_electrode="OUT",
         bias_gate="BIAS",
         bias_voltage=1e-4,
-        compensation_gradients={
-            "G4": 0.01,
-            "G5": 0.01,
-        },  # Enable compensation to track sensor voltage
-        beta=-1e10,  # Extreme beta
+        compensation_gradients={"G4": 0.01, "G5": 0.01},
+        beta=-1e10,
         sweep_resolution=3,
         session=mock_session,
     )
 
-    # Feedback corrections should exist and be limited
     assert len(result["feedback_corrections"]) == 9
-    # All corrections should be finite (not inf or nan)
     assert all(np.isfinite(fc) for fc in result["feedback_corrections"])
-
-
-# =============================================================================
-# Physical Effects Compensation Tests
-# =============================================================================
-
-
-# =============================================================================
-# Voltage Clipping Safety Tests
-# =============================================================================
-
-
-# =============================================================================
-# Compensation Mode Selection Tests
-# =============================================================================
 
 
 def test_compensation_disabled_holds_sensor_constant():
