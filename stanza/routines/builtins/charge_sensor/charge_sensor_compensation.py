@@ -85,20 +85,22 @@ from stanza.exceptions import RoutineError
 from stanza.logger.session import LoggerSession
 from stanza.models import GateType
 from stanza.routines import RoutineContext, routine
-from stanza.routines.builtins.charge_sensor.charge_sensor_find_sensor_peak import (
-    PeakWindowSweepOutput,
-    build_sensor_sweep_voltage_list,
-    calculate_quality_scores,
-)
-from stanza.routines.builtins.charge_sensor.constants import (
+from stanza.routines.builtins.charge_sensor.utils.constants import (
     DEFAULT_SETTLING_TIME_S,
     MULTIPLER_OF_PEAK_SPACING,
     NUM_OF_SAMPLES_FOR_AVERAGING,
     PERTURBATION_DIVISOR,
 )
+from stanza.routines.builtins.charge_sensor.utils.sweeps import (
+    build_sensor_sweep_voltage_list,
+)
+from stanza.routines.builtins.charge_sensor.utils.types import (
+    PeakWindowSweepOutput,
+)
 from stanza.routines.builtins.utils.group_handling import filter_gates_by_group
 from stanza.routines.builtins.utils.peak_fitting import (
     FittedPeak,
+    calculate_quality_scores,
     fit_peak_multi_model,
 )
 from stanza.routines.builtins.utils.ransac_fitting import (

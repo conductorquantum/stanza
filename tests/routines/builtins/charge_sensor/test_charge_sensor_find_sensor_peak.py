@@ -7,25 +7,31 @@ import pytest
 
 from stanza.exceptions import RoutineError
 from stanza.routines.builtins.charge_sensor.charge_sensor_find_sensor_peak import (
-    SensorDotPlungerSweepOutput,
-    StablePeakCandidate,
-    _calculate_combined_scores,
-    _calculate_local_slope,
-    _calculate_voltage_noise,
-    _normalize_sensitivity_scores,
-    build_sensor_sweep_voltage_list,
-    calculate_peak_window_bounds,
-    calculate_quality_scores,
     find_sensor_peak,
 )
-from stanza.routines.builtins.charge_sensor.constants import (
+from stanza.routines.builtins.charge_sensor.utils.constants import (
     DEFAULT_WINDOW_HALF_WIDTH,
     WINDOW_FRACTION,
 )
+from stanza.routines.builtins.charge_sensor.utils.peak_stability import (
+    calculate_combined_scores,
+    calculate_local_slope,
+    calculate_voltage_noise,
+)
+from stanza.routines.builtins.charge_sensor.utils.sweeps import (
+    build_sensor_sweep_voltage_list,
+)
+from stanza.routines.builtins.charge_sensor.utils.types import (
+    SensorDotPlungerSweepOutput,
+    StablePeakCandidate,
+)
 from stanza.routines.builtins.utils.peak_fitting import (
+    calculate_peak_window_bounds,
     calculate_quality_score,
+    calculate_quality_scores,
     fit_peak_multi_model,
     lorentzian,
+    normalize_sensitivity_scores,
 )
 
 
@@ -90,7 +96,7 @@ def test_calculate_peak_window_bounds_handles_edge_peaks():
 
 
 def test_normalize_sensitivity_scores_constant_inputs(fitted_peak_factory):
-    """Confirm _normalize_sensitivity_scores assigns score 1.0 when all sensitivities are equal."""
+    """Confirm normalize_sensitivity_scores assigns score 1.0 when all sensitivities are equal."""
     peaks = [
         fitted_peak_factory(
             sensitivity=1e-6,
@@ -101,7 +107,7 @@ def test_normalize_sensitivity_scores_constant_inputs(fitted_peak_factory):
         for i in range(5)
     ]
 
-    _normalize_sensitivity_scores(peaks)
+    normalize_sensitivity_scores(peaks)
 
     for peak in peaks:
         assert peak.sensitivity_score == 1.0
@@ -122,7 +128,7 @@ def testcalculate_quality_scores_requires_normalized_sensitivity(fitted_peak_fac
 
 
 def test_calculate_local_slope_window_validation():
-    """Ensure _calculate_local_slope raises when fewer than three data points surround the target voltage."""
+    """Ensure calculate_local_slope raises when fewer than three data points surround the target voltage."""
     voltages = np.array([0.0, 0.01])  # Only 2 points
     currents = np.array([0.0, 1e-9])
     target_voltage = 0.005
@@ -130,16 +136,16 @@ def test_calculate_local_slope_window_validation():
     with pytest.raises(
         RoutineError, match="Insufficient points for local slope calculation"
     ):
-        _calculate_local_slope(voltages, currents, target_voltage, window_points=5)
+        calculate_local_slope(voltages, currents, target_voltage, window_points=5)
 
 
 def test_calculate_voltage_noise_near_zero_slope():
-    """Provide tiny slopes to _calculate_voltage_noise and confirm it guards against division-by-zero."""
+    """Provide tiny slopes to calculate_voltage_noise and confirm it guards against division-by-zero."""
     current_std = 1e-10
     local_slope = 1e-15  # Very small slope
 
     with pytest.raises(RoutineError, match="Local slope magnitude too small"):
-        _calculate_voltage_noise(current_std, local_slope)
+        calculate_voltage_noise(current_std, local_slope)
 
 
 def test_peak_quality_score_weights_components():
@@ -176,7 +182,7 @@ def test_sensitivity_score_normalized_across_peaks(fitted_peak_factory):
             )
         )
 
-    _normalize_sensitivity_scores(peaks)
+    normalize_sensitivity_scores(peaks)
 
     for peak in peaks:
         assert 0 <= peak.sensitivity_score <= 1.0
@@ -234,7 +240,7 @@ def test_find_sensor_peak_returns_highest_quality():
             )
             fitted_peaks.append(peak)
 
-    _normalize_sensitivity_scores(fitted_peaks)
+    normalize_sensitivity_scores(fitted_peaks)
     calculate_quality_scores(fitted_peaks)
 
     assert len(fitted_peaks) == 3
@@ -466,7 +472,7 @@ def test_voltage_noise_calculated_from_gradient():
     current_std = 1e-11  # 10 pA std
     local_slope = 2e-6  # 2 µA/V
 
-    voltage_noise = _calculate_voltage_noise(current_std, local_slope)
+    voltage_noise = calculate_voltage_noise(current_std, local_slope)
 
     # Expected: 1e-11 / 2e-6 = 5e-6 V
     expected = current_std / abs(local_slope)
@@ -506,7 +512,7 @@ def test_stability_score_inverts_voltage_noise(
         )
 
     # Calculate combined scores
-    _calculate_combined_scores(candidates, original_weight=0.3, stability_weight=0.7)
+    calculate_combined_scores(candidates, original_weight=0.3, stability_weight=0.7)
 
     # Verify stability scores are set and normalized
     for candidate in candidates:
@@ -560,7 +566,7 @@ def test_stable_peak_returns_highest_combined_score(
         )
 
     # Calculate combined scores (70% stability, 30% original)
-    _calculate_combined_scores(candidates, original_weight=0.3, stability_weight=0.7)
+    calculate_combined_scores(candidates, original_weight=0.3, stability_weight=0.7)
 
     # Find peak with highest combined score
     best_candidate = max(candidates, key=lambda c: c.combined_score)

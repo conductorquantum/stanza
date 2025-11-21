@@ -6,7 +6,7 @@ import pytest
 from stanza.models import DeviceGroup, Gate, GateType
 from stanza.registry import ResultsRegistry
 from stanza.routines import RoutineContext
-from stanza.routines.builtins.charge_sensor.charge_sensor_find_sensor_peak import (
+from stanza.routines.builtins.charge_sensor.utils.types import (
     StabilityMeasurement,
 )
 from stanza.routines.builtins.utils.peak_fitting import FittedPeak, ModelFitResult

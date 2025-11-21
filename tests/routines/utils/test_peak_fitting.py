@@ -87,11 +87,13 @@ def test_calculate_aicc_returns_inf_for_invalid_inputs():
 
 
 def test_measure_peak_stability_combines_quality_and_noise():
-    """Verify _calculate_combined_scores weights stability 70% and original quality 30%."""
-    from stanza.routines.builtins.charge_sensor.charge_sensor_find_sensor_peak import (
+    """Verify calculate_combined_scores weights stability 70% and original quality 30%."""
+    from stanza.routines.builtins.charge_sensor.utils.peak_stability import (
+        calculate_combined_scores,
+    )
+    from stanza.routines.builtins.charge_sensor.utils.types import (
         StabilityMeasurement,
         StablePeakCandidate,
-        _calculate_combined_scores,
     )
     from stanza.routines.builtins.utils.peak_fitting import ModelFitResult
 
@@ -175,7 +177,7 @@ def test_measure_peak_stability_combines_quality_and_noise():
     candidates = [candidate1, candidate2]
 
     # Calculate combined scores with 30% original, 70% stability
-    _calculate_combined_scores(candidates, original_weight=0.3, stability_weight=0.7)
+    calculate_combined_scores(candidates, original_weight=0.3, stability_weight=0.7)
 
     # Verify combined scores were calculated
     assert candidate1.combined_score is not None

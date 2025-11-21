@@ -14,7 +14,7 @@ from stanza.routines.builtins.charge_sensor.charge_sensor_compensation import (
     fit_compensation_gradient_ransac,
     run_compensation,
 )
-from stanza.routines.builtins.charge_sensor.charge_sensor_find_sensor_peak import (
+from stanza.routines.builtins.charge_sensor.utils.types import (
     PeakWindowSweepOutput,
 )
 from stanza.routines.builtins.utils.peak_fitting import (
