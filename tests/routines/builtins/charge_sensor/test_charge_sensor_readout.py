@@ -1,100 +1,15 @@
 """Tests for charge sensor readout routines and utilities."""
 
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
 import numpy as np
 import pytest
 
 from stanza.exceptions import RoutineError
-from stanza.models import DeviceGroup, Gate, GateType
-from stanza.registry import ResultsRegistry
 from stanza.routines.builtins.charge_sensor.charge_sensor_readout import (
     _calculate_compensated_voltages,
     charge_sensor_csd_readout,
 )
-from stanza.routines.core import RoutineContext
-
-
-def create_mock_device_with_groups():
-    """Create a mock device with sensor and control groups."""
-    mock_device = Mock()
-
-    sensor_group = DeviceGroup(
-        name="sensor_group", gates=["G1", "G2", "G3"], description="Sensor group"
-    )
-    control_group = DeviceGroup(
-        name="control_group",
-        gates=["G4", "G5", "G6", "G7"],
-        description="Control group",
-    )
-
-    mock_device.device_config.groups = {
-        "sensor_group": sensor_group,
-        "control_group": control_group,
-    }
-
-    mock_device.control_gates = ["G1", "G2", "G3", "G4", "G5", "G6", "G7"]
-
-    mock_device.check.return_value = {
-        "G1": 0.0,
-        "G2": 0.0,
-        "G3": 0.0,
-        "G4": 0.0,
-        "G5": 0.0,
-        "G6": 0.0,
-        "G7": 0.0,
-    }
-
-    mock_device.jump = Mock()
-    mock_device.measure.return_value = 1e-9
-
-    def mock_sweep_nd(electrodes, voltages, measure_electrode):
-        return np.random.normal(1e-9, 1e-11, len(voltages))
-
-    mock_device.sweep_nd = Mock(side_effect=mock_sweep_nd)
-
-    gates_dict = {
-        f"G{i}": Gate(
-            name=f"G{i}",
-            type=GateType.PLUNGER,
-            control_channel=i,
-            v_lower_bound=-3.0,
-            v_upper_bound=0.0,
-        )
-        for i in range(1, 8)
-    }
-
-    mock_device.device_config.gates = gates_dict
-
-    mock_channel_configs = {}
-    for gate_name in gates_dict:
-        mock_channel = Mock()
-        mock_channel.voltage_range = (-3.0, 0.0)
-        mock_channel_configs[gate_name] = mock_channel
-
-    mock_device.channel_configs = mock_channel_configs
-
-    return mock_device
-
-
-def create_mock_context(mock_device):
-    """Create a mock routine context with device."""
-    resources = Mock()
-    resources.device = mock_device
-    resources.group = None
-
-    results = ResultsRegistry()
-    ctx = RoutineContext(resources=resources, results=results)
-    return ctx
-
-
-def create_mock_session():
-    """Create a mock logger session."""
-    mock_session = Mock()
-    mock_session.log_sweep = Mock()
-    mock_session.log_analysis = Mock()
-    mock_session.log_measurement = Mock()
-    return mock_session
 
 
 def test_calculate_compensated_voltages_matches_resolution():
@@ -182,11 +97,10 @@ def test_calculate_compensated_voltages_walking_state_continuity():
         assert delta < 0.2, f"Large voltage jump detected at index {i}: {delta}"
 
 
-def test_charge_sensor_csd_readout_validates_parameters():
+def test_charge_sensor_csd_readout_validates_parameters(mock_context):
     """Exercise each guard clause (resolution, repetitions, gradients, sensor gate presence)
     to ensure RoutineError fires."""
-    mock_device = create_mock_device_with_groups()
-    ctx = create_mock_context(mock_device)
+    ctx = mock_context
 
     with pytest.raises(RoutineError, match="sweep_resolution must be greater than 0"):
         charge_sensor_csd_readout(
@@ -265,12 +179,13 @@ def test_charge_sensor_csd_readout_validates_parameters():
         )
 
 
-def test_charge_sensor_csd_readout_restores_device_after_exception():
+def test_charge_sensor_csd_readout_restores_device_after_exception(
+    mock_context, mock_session, mock_device_with_groups
+):
     """Trigger an exception during the sweep and verify the routine resets gate voltages
     using the captured baseline state."""
-    mock_device = create_mock_device_with_groups()
-    ctx = create_mock_context(mock_device)
-    mock_session = create_mock_session()
+    ctx = mock_context
+    mock_device = mock_device_with_groups
 
     call_count = [0]
 
@@ -302,11 +217,12 @@ def test_charge_sensor_csd_readout_restores_device_after_exception():
     assert mock_device.jump.call_count >= 2
 
 
-def test_charge_sensor_csd_readout_session_metadata():
+def test_charge_sensor_csd_readout_session_metadata(mock_context):
     """Mock LoggerSession and ensure session.log_sweep metadata captures compensation_enabled,
     feedback_enabled, gate_electrodes, and park_point_current."""
-    mock_device = create_mock_device_with_groups()
-    ctx = create_mock_context(mock_device)
+    from unittest.mock import Mock
+
+    ctx = mock_context
     mock_session = Mock()
 
     result = charge_sensor_csd_readout(
@@ -333,12 +249,10 @@ def test_charge_sensor_csd_readout_session_metadata():
     assert "control_plunger_gates" in result
 
 
-def test_charge_sensor_csd_readout_result_lengths_match():
+def test_charge_sensor_csd_readout_result_lengths_match(mock_context, mock_session):
     """Verify compensation_applied, feedback_corrections, and current_measurements arrays
     all match the number of sweep points and that differential_currents subtract park_point_current."""
-    mock_device = create_mock_device_with_groups()
-    ctx = create_mock_context(mock_device)
-    mock_session = create_mock_session()
+    ctx = mock_context
 
     sweep_resolution = 4
     expected_points = sweep_resolution**2
@@ -368,11 +282,10 @@ def test_charge_sensor_csd_readout_result_lengths_match():
         assert len(result["differential_currents"]) == expected_points
 
 
-def test_charge_sensor_csd_readout_validates_gamma_factors():
+def test_charge_sensor_csd_readout_validates_gamma_factors(mock_context):
     """Pass gamma_factors without compensation_gradients and assert RoutineError is raised
     with message about requiring initial gradients."""
-    mock_device = create_mock_device_with_groups()
-    ctx = create_mock_context(mock_device)
+    ctx = mock_context
 
     with pytest.raises(
         RoutineError, match="gamma_factors requires compensation_gradients"
@@ -393,11 +306,10 @@ def test_charge_sensor_csd_readout_validates_gamma_factors():
         )
 
 
-def test_charge_sensor_csd_readout_gamma_requires_all_gates():
+def test_charge_sensor_csd_readout_gamma_requires_all_gates(mock_context):
     """Provide gamma_factors missing one control plunger gate and verify RoutineError
     mentions the missing gate."""
-    mock_device = create_mock_device_with_groups()
-    ctx = create_mock_context(mock_device)
+    ctx = mock_context
 
     with pytest.raises(RoutineError, match="Missing gamma factor for control plunger"):
         charge_sensor_csd_readout(
@@ -416,10 +328,9 @@ def test_charge_sensor_csd_readout_gamma_requires_all_gates():
         )
 
 
-def test_charge_sensor_csd_readout_gamma_rejects_negative_values():
+def test_charge_sensor_csd_readout_gamma_rejects_negative_values(mock_context):
     """Supply negative gamma value and assert validation raises RoutineError."""
-    mock_device = create_mock_device_with_groups()
-    ctx = create_mock_context(mock_device)
+    ctx = mock_context
 
     with pytest.raises(RoutineError, match="must be non-negative"):
         charge_sensor_csd_readout(
@@ -438,7 +349,7 @@ def test_charge_sensor_csd_readout_gamma_rejects_negative_values():
         )
 
 
-def test_clipping_events_counters_tracked_separately():
+def test_clipping_events_counters_tracked_separately(mock_context, mock_session):
     """Test both gradient and sensor clipping counters are tracked independently.
 
     Verifies:
@@ -449,9 +360,7 @@ def test_clipping_events_counters_tracked_separately():
     - Counters are independent (one can increment without affecting the other)
     - Counters are logged after sweep completion
     """
-    mock_device = create_mock_device_with_groups()
-    ctx = create_mock_context(mock_device)
-    mock_session = create_mock_session()
+    ctx = mock_context
 
     # Test 1: Gradient clipping (high gamma factors trigger adaptive gradient clips)
     result_gradient = charge_sensor_csd_readout(
@@ -532,12 +441,10 @@ def test_clipping_events_counters_tracked_separately():
         assert mock_logger.info.called
 
 
-def test_gradient_history_logs_all_updates():
+def test_gradient_history_logs_all_updates(mock_context, mock_session):
     """Enable adaptation and verify gradient_history contains entries with point_index,
     repetition, gate, delta_v, current_error_pre_feedback, gradient_update, new_gradient."""
-    mock_device = create_mock_device_with_groups()
-    ctx = create_mock_context(mock_device)
-    mock_session = create_mock_session()
+    ctx = mock_context
 
     result = charge_sensor_csd_readout(
         ctx=ctx,
@@ -572,12 +479,10 @@ def test_gradient_history_logs_all_updates():
             assert field in entry, f"Missing field: {field}"
 
 
-def test_feedback_correction_never_exceeds_voltage_range():
+def test_feedback_correction_never_exceeds_voltage_range(mock_context, mock_session):
     """Apply extreme beta values and verify sensor voltage after feedback always stays
     within [min_v, max_v] without post-feedback clipping."""
-    mock_device = create_mock_device_with_groups()
-    ctx = create_mock_context(mock_device)
-    mock_session = create_mock_session()
+    ctx = mock_context
 
     result = charge_sensor_csd_readout(
         ctx=ctx,
@@ -600,12 +505,10 @@ def test_feedback_correction_never_exceeds_voltage_range():
     assert all(np.isfinite(fc) for fc in result["feedback_corrections"])
 
 
-def test_compensation_disabled_holds_sensor_constant():
+def test_compensation_disabled_holds_sensor_constant(mock_context, mock_session):
     """With compensation_gradients=None, verify sensor plunger voltage remains
     at initial value throughout sweep."""
-    mock_device = create_mock_device_with_groups()
-    ctx = create_mock_context(mock_device)
-    mock_session = create_mock_session()
+    ctx = mock_context
 
     initial_sensor_voltage = -1.0
 
@@ -637,11 +540,12 @@ def test_compensation_disabled_holds_sensor_constant():
     assert len(result["voltage_measurements"]) == 9  # 3x3 grid
 
 
-def test_differential_current_subtracts_baseline():
+def test_differential_current_subtracts_baseline(
+    mock_context, mock_session, mock_device_with_groups
+):
     """Verify returned current_measurements are differential (measured - park_point_current)."""
-    mock_device = create_mock_device_with_groups()
-    ctx = create_mock_context(mock_device)
-    mock_session = create_mock_session()
+    ctx = mock_context
+    mock_device = mock_device_with_groups
 
     # Mock device to return specific currents
     park_current = 1e-9
@@ -667,16 +571,17 @@ def test_differential_current_subtracts_baseline():
     assert result["park_point_current"] == park_current
 
 
-def test_beta_feedback_math_correctness():
+def test_beta_feedback_math_correctness(
+    mock_context, mock_session, mock_device_with_groups
+):
     """Verify beta feedback formula: delta_V = -beta * (I_measured - I_park_point).
 
     This test verifies the mathematical correctness of the proportional feedback
     calculation. With known current error and beta, the feedback correction should
     match the expected formula exactly.
     """
-    mock_device = create_mock_device_with_groups()
-    ctx = create_mock_context(mock_device)
-    mock_session = create_mock_session()
+    ctx = mock_context
+    mock_device = mock_device_with_groups
 
     # Set up known values for mathematical verification
     park_current = 1e-9  # 1 nA baseline
@@ -745,16 +650,17 @@ def test_beta_feedback_math_correctness():
         ), f"Feedback too small: got {first_feedback}, expected ~{expected_feedback}"
 
 
-def test_gamma_gradient_adaptation_math_correctness():
+def test_gamma_gradient_adaptation_math_correctness(
+    mock_context, mock_session, mock_device_with_groups
+):
     """Verify gamma gradient update formula: A_C[x+1] = A_C[x] + (gamma/ΔV) * i_S_pre.
 
     This test verifies that adaptive gradients actually evolve based on the
     mathematical formula. With known gamma, delta_V, and current error, the
     gradient should update correctly.
     """
-    mock_device = create_mock_device_with_groups()
-    ctx = create_mock_context(mock_device)
-    mock_session = create_mock_session()
+    ctx = mock_context
+    mock_device = mock_device_with_groups
 
     # Set up known values
     initial_gradient = 0.1  # V/V
@@ -837,22 +743,23 @@ def test_gamma_gradient_adaptation_math_correctness():
         )
 
 
-def test_sensor_voltage_clipping_to_device_bounds():
+def test_sensor_voltage_clipping_to_device_bounds(
+    mock_context, mock_session, mock_device_with_groups
+):
     """Verify sensor voltage is clipped to device config bounds, preventing damage.
 
     This is a safety-critical test. If the sensor voltage exceeds device limits,
     it could damage the device. We verify that even with extreme feedback or
     compensation, the voltage never exceeds the configured bounds.
     """
-    mock_device = create_mock_device_with_groups()
-    ctx = create_mock_context(mock_device)
-    mock_session = create_mock_session()
+    ctx = mock_context
+    mock_device = mock_device_with_groups
 
     # Set tight device bounds for sensor gate
     min_voltage = -1.0
     max_voltage = 1.0
 
-    # Modify the sensor gate bounds (G3 is already in gates_dict from create_mock_device_with_groups)
+    # Modify the sensor gate bounds (G3 is already in gates_dict from mock_device_with_groups fixture)
     # The code accesses device.channel_configs[gate].voltage_range, so we need to update that
     mock_device.channel_configs["G3"].voltage_range = (min_voltage, max_voltage)
     # Also update the gate's v_lower_bound and v_upper_bound for consistency

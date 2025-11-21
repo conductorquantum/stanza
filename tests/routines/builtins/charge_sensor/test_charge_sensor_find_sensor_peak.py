@@ -6,8 +6,6 @@ import numpy as np
 import pytest
 
 from stanza.exceptions import RoutineError
-from stanza.models import DeviceGroup
-from stanza.routines import RoutineContext
 from stanza.routines.builtins.charge_sensor.charge_sensor_find_sensor_peak import (
     SensorDotPlungerSweepOutput,
     StablePeakCandidate,
@@ -29,73 +27,6 @@ from stanza.routines.builtins.utils.peak_fitting import (
     fit_peak_multi_model,
     lorentzian,
 )
-
-
-def create_mock_device_for_sensor_routines():
-    """Create a comprehensive mock device for sensor routine tests."""
-    mock_device = Mock()
-
-    sensor_group = DeviceGroup(name="sensor_group", gates=["G1", "G2", "G3"])
-    control_group = DeviceGroup(name="control_group", gates=["G4", "G5"])
-
-    mock_device.device_config = Mock()
-    mock_device.device_config.groups = {
-        "sensor_group": sensor_group,
-        "control_group": control_group,
-    }
-
-    mock_device.control_gates = ["G1", "G2", "G3", "G4", "G5"]
-    mock_device.get_gates_by_type.return_value = ["G1", "G2", "G3", "G4", "G5"]
-
-    mock_device.check.return_value = [0.0, 0.0, 0.0]
-    mock_device.jump = Mock()
-    mock_device.measure.return_value = 1e-9
-
-    voltages = np.linspace(-1.0, -0.5, 128)
-    currents = np.ones(128) * 1e-9
-    mock_device.sweep_nd.return_value = (voltages, currents)
-
-    return mock_device
-
-
-def create_mock_context_for_sensor_routines(include_prerequisites=True):
-    """Create a mock RoutineContext with required prerequisite results."""
-    mock_ctx = Mock(spec=RoutineContext)
-
-    if include_prerequisites:
-        mock_ctx.results = {
-            "global_accumulation_sensor_group": {"global_turn_on_voltage": -0.8},
-            "finger_gate_characterization_sensor_group": {
-                "G3": {
-                    "saturation_voltage": 0.5,
-                    "cutoff_voltage": -1.5,
-                    "pinch_off_voltage": -2.0,
-                }
-            },
-        }
-    else:
-        mock_ctx.results = {}
-
-    mock_device = create_mock_device_for_sensor_routines()
-
-    mock_models_client = Mock()
-    mock_models = Mock()
-    mock_execute_result = Mock()
-    mock_execute_result.output = {
-        "classification": True,
-        "score": 0.95,
-        "peak_indices": [64],
-    }
-    mock_models.execute.return_value = mock_execute_result
-    mock_models_client.models = mock_models
-
-    mock_resources = Mock()
-    mock_resources.device = mock_device
-    mock_resources.models_client = mock_models_client
-    mock_ctx.resources = mock_resources
-    mock_ctx.session_metadata = {}
-
-    return mock_ctx, mock_device
 
 
 def test_calculate_peak_window_bounds_handles_edge_peaks():
@@ -318,14 +249,16 @@ def test_find_sensor_peak_returns_highest_quality():
     )
 
 
-def test_find_sensor_peak_requires_prerequisites():
+def test_find_sensor_peak_requires_prerequisites(mock_device_for_sensor_routines):
     """Run find_sensor_peak with missing global_accumulation or
     finger_gate_characterization results and expect RoutineError."""
+    from stanza.routines import RoutineContext
+
     # Missing prerequisites
     mock_ctx = Mock(spec=RoutineContext)
     mock_ctx.results = {}
 
-    mock_device = create_mock_device_for_sensor_routines()
+    mock_device = mock_device_for_sensor_routines
     mock_resources = Mock()
     mock_resources.device = mock_device
     # Set up group mock to be a dict-like object (or None)
@@ -637,14 +570,14 @@ def test_stable_peak_returns_highest_combined_score(
     assert best_candidate == candidates[1]
 
 
-def test_peak_detector_model_output_parsing():
+def test_peak_detector_model_output_parsing(mock_context_for_sensor_routines):
     """Verify ML model peak detector output is correctly parsed and used.
 
     This test ensures the integration between the ML model and the peak finding
     routine works correctly. The model returns peak_indices which must be
     correctly interpreted as array indices for window extraction.
     """
-    mock_ctx, mock_device = create_mock_context_for_sensor_routines()
+    mock_ctx, mock_device = mock_context_for_sensor_routines
 
     # Mock the ML model to return specific peak indices
     # Simulate finding peaks at indices 100, 200, 300 in a 500-point trace

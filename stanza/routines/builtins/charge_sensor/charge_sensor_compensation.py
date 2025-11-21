@@ -430,7 +430,6 @@ def run_compensation(
 
     # Capture initial device state for cleanup in finally block
     initial_control_voltages = device.check(control_non_reservoir_gates)
-    initial_sensor_voltages = device.check(sensor_gates_list)
 
     # Determine baseline control state
     if zero_control_side:
@@ -447,319 +446,300 @@ def run_compensation(
             zip(control_non_reservoir_gates, initial_control_voltages, strict=False)
         )
 
+    # Set control side gates to baseline state
+    device.jump(baseline_control_state, wait_for_settling=True)
+    time.sleep(DEFAULT_SETTLING_TIME_S)
+    # Perform baseline sweep NUM_OF_SAMPLES_FOR_AVERAGING times and take median for robust estimate
     try:
-        # Set control side gates to baseline state
-        device.jump(baseline_control_state, wait_for_settling=True)
-        time.sleep(DEFAULT_SETTLING_TIME_S)
-        # Perform baseline sweep NUM_OF_SAMPLES_FOR_AVERAGING times and take median for robust estimate
-        try:
-            baseline_sensitivity_voltages = []
-            baseline_peak_center_voltages = []
-            total_baseline_measurements = NUM_OF_SAMPLES_FOR_AVERAGING
-            for baseline_idx in range(total_baseline_measurements):
-                logger.info(
-                    "Baseline measurement %d of %d for sensor plunger %s",
-                    baseline_idx + 1,
-                    total_baseline_measurements,
-                    sensor_gate_key,
-                )
-                baseline_sweep_output = _single_window_sensor_plunger_sweep(
-                    ctx=ctx,
-                    sensor_gates_list=sensor_gates_list,
-                    sensor_plunger_range=narrowed_sensor_plunger_range,
-                    mean_reservoir_saturation_voltage=mean_reservoir_saturation_voltage,
-                    sensor_plunger_index=sensor_plunger_index,
-                    step_size=new_step_size,
-                    measure_electrode=measure_electrode,
-                    bias_gate=bias_gate,
-                    bias_voltage=bias_voltage,
-                    session=session,
-                )
-                baseline_sensitivity_voltages.append(
-                    baseline_sweep_output.best_peak.sensitivity_voltage
-                )
-                baseline_peak_center_voltages.append(
-                    baseline_sweep_output.best_peak.peak_voltage
-                )
-                if session:
-                    session.log_analysis(
-                        name="baseline_measurement_sample",
-                        data={
-                            "sensor_plunger_gate": sensor_gate_key,
-                            "iteration": baseline_idx + 1,
-                            "total_iterations": total_baseline_measurements,
-                            "sensitivity_voltage": float(
-                                baseline_sweep_output.best_peak.sensitivity_voltage
-                            ),
-                            "peak_center_voltage": float(
-                                baseline_sweep_output.best_peak.peak_voltage
-                            ),
-                        },
-                    )
-
-            # Reference for parking (max gradient) - use median for robustness to outliers
-            # (consistent with RANSAC approach for gradient fitting)
-            reference_max_gradient_voltage = float(
-                np.median(baseline_sensitivity_voltages)
+        baseline_sensitivity_voltages = []
+        baseline_peak_center_voltages = []
+        total_baseline_measurements = NUM_OF_SAMPLES_FOR_AVERAGING
+        for baseline_idx in range(total_baseline_measurements):
+            logger.info(
+                "Baseline measurement %d of %d for sensor plunger %s",
+                baseline_idx + 1,
+                total_baseline_measurements,
+                sensor_gate_key,
             )
-            # Reference for gradient calculation (peak center) - use median for robustness
-            reference_peak_center_voltage = float(
-                np.median(baseline_peak_center_voltages)
+            baseline_sweep_output = _single_window_sensor_plunger_sweep(
+                ctx=ctx,
+                sensor_gates_list=sensor_gates_list,
+                sensor_plunger_range=narrowed_sensor_plunger_range,
+                mean_reservoir_saturation_voltage=mean_reservoir_saturation_voltage,
+                sensor_plunger_index=sensor_plunger_index,
+                step_size=new_step_size,
+                measure_electrode=measure_electrode,
+                bias_gate=bias_gate,
+                bias_voltage=bias_voltage,
+                session=session,
             )
-        except Exception as e:
-            raise RoutineError(f"Error in baseline measurement: {str(e)}") from e
-        sensor_park_point_voltages = dict.fromkeys(
-            sensor_gates_list, mean_reservoir_saturation_voltage
-        )
-        sensor_park_point_voltages[sensor_gate_key] = reference_max_gradient_voltage
-        compensation_gradients_dict = {}
-        per_gate_details = {}  # Store detailed arrays for each gate
-        for gate in control_non_reservoir_gates:
-            num_deltas = len(voltage_differences)
-            measurement_indices = np.repeat(
-                np.arange(num_deltas, dtype=int), NUM_OF_SAMPLES_FOR_AVERAGING
+            baseline_sensitivity_voltages.append(
+                baseline_sweep_output.best_peak.sensitivity_voltage
             )
-            rng.shuffle(measurement_indices)
-            per_delta_measurements: dict[int, list[float]] = {
-                idx: [] for idx in range(num_deltas)
-            }
-            measurement_voltage_sequence: list[float] = []
-            measurement_samples: list[dict[str, float]] = []
-
-            total_measurements = len(measurement_indices)
-            for counter, delta_index in enumerate(measurement_indices, start=1):
-                voltage_difference = float(voltage_differences[delta_index])
-                measurement_voltage_sequence.append(voltage_difference)
-                print(
-                    f"Measurement {counter} of {total_measurements} for gate {gate}: "
-                    f"{voltage_difference:+.6f} V"
-                )
-
-                # Apply voltage perturbation relative to baseline
-                device_state = baseline_control_state.copy()
-                device_state[gate] = baseline_control_state[gate] + voltage_difference
-                device.jump(device_state, wait_for_settling=True)
-                time.sleep(DEFAULT_SETTLING_TIME_S)
-
-                # Single sensor plunger sweep for this sample
-                iteration_sweep_output = _single_window_sensor_plunger_sweep(
-                    ctx=ctx,
-                    sensor_gates_list=sensor_gates_list,
-                    sensor_plunger_range=narrowed_sensor_plunger_range,
-                    mean_reservoir_saturation_voltage=mean_reservoir_saturation_voltage,
-                    sensor_plunger_index=sensor_plunger_index,
-                    step_size=new_step_size,
-                    measure_electrode=measure_electrode,
-                    bias_gate=bias_gate,
-                    bias_voltage=bias_voltage,
-                    session=session,
-                )
-
-                best_peak = iteration_sweep_output.best_peak
-                peak_center_voltage = float(best_peak.peak_voltage)
-                per_delta_measurements[delta_index].append(peak_center_voltage)
-                # Log per-sample deltas explicitly (with clear names + aliases)
-                peak_shift = float(peak_center_voltage - reference_peak_center_voltage)
-                sample_record = {
-                    # Plunger delta (control gate change relative to baseline)
-                    "control_delta": voltage_difference,
-                    "delta_plunger": voltage_difference,  # alias for clarity
-                    # Peak location at this sample and its delta vs baseline (using center)
-                    "peak_position": peak_center_voltage,
-                    "peak_shift": peak_shift,
-                    "delta_peak": peak_shift,  # alias for clarity
-                    "sensitivity_voltage": float(best_peak.sensitivity_voltage),
-                }
-                measurement_samples.append(sample_record)
-
-                # Emit per-sample analysis immediately so each measurement is logged in real time
-                if session:
-                    session.log_analysis(
-                        name=f"compensation_measurement_sample_{gate}",
-                        data={
-                            "gate": gate,
-                            "counter": counter,
-                            "total_measurements": total_measurements,
-                            **sample_record,
-                        },
-                    )
-
-            peak_positions = np.empty_like(voltage_differences, dtype=np.float64)
-            for idx in range(num_deltas):
-                measurements = per_delta_measurements[idx]
-                if len(measurements) != NUM_OF_SAMPLES_FOR_AVERAGING:
-                    raise RoutineError(
-                        "Incomplete measurement set: expected "
-                        f"{NUM_OF_SAMPLES_FOR_AVERAGING} samples for voltage difference "
-                        f"{voltage_differences[idx]:+.6f} V, got {len(measurements)}"
-                    )
-                peak_positions[idx] = float(np.mean(measurements))
-            peak_positions_difference = peak_positions - reference_peak_center_voltage
-            # Keep per-point gradients for diagnostics, but use RANSAC regression
-            # to robustly fit the gradient while rejecting outliers from bad measurements.
-            per_point_gradients = peak_positions_difference / voltage_differences
-
-            # Use RANSAC to robustly fit gradient through all individual measurements
-            ransac_result = fit_compensation_gradient_ransac(
-                measurement_samples=measurement_samples,
-                reference_peak_center_voltage=reference_peak_center_voltage,
-                gate_name=gate,
+            baseline_peak_center_voltages.append(
+                baseline_sweep_output.best_peak.peak_voltage
             )
-
-            # Extract results
-            least_squares_gradient = ransac_result.gradient
-            drift_intercept = ransac_result.intercept
-            inlier_mask = ransac_result.inlier_mask
-            num_inliers = ransac_result.num_inliers
-            num_outliers = ransac_result.num_outliers
-            outlier_indices = ransac_result.outlier_indices
-            outlier_voltages = ransac_result.outlier_voltages
-            outlier_peak_shifts = ransac_result.outlier_peak_shifts
-            all_control_deltas = ransac_result.all_control_deltas
-            all_peak_shifts = ransac_result.all_peak_shifts
-
-            compensation_gradients_dict[gate] = least_squares_gradient
-
-            # Mark each measurement sample with its inlier status
-            for i, sample in enumerate(measurement_samples):
-                sample["is_inlier"] = bool(inlier_mask[i])
-
-            # Calculate per-averaged-point inlier ratios
-            # For each of the 10 voltage points, count how many of its 10 samples were inliers
-            per_voltage_inlier_counts = []
-            for idx in range(num_deltas):
-                # Find which of the 100 measurements correspond to this voltage point
-                samples_for_this_voltage = [
-                    i
-                    for i, sample in enumerate(measurement_samples)
-                    if np.isclose(sample["control_delta"], voltage_differences[idx])
-                ]
-                num_inliers_for_voltage = sum(
-                    inlier_mask[i] for i in samples_for_this_voltage
-                )
-                per_voltage_inlier_counts.append(num_inliers_for_voltage)
-
-            # Store detailed arrays for this gate for later analysis/logging
-            per_gate_details[gate] = {
-                "peak_positions": peak_positions,
-                "peak_positions_difference": peak_positions_difference,
-                "per_point_gradients": per_point_gradients,
-                "least_squares_gradient": least_squares_gradient,
-                "drift_intercept": drift_intercept,
-                "mean_per_point_gradient": float(np.mean(per_point_gradients)),
-                "mean_gradient": least_squares_gradient,
-                # RANSAC-specific fields (based on 100 raw measurements)
-                "inlier_mask": inlier_mask.tolist(),
-                "num_inliers": num_inliers,
-                "num_outliers": num_outliers,
-                "outlier_indices": outlier_indices,
-                "outlier_voltages": outlier_voltages,
-                "outlier_peak_shifts": outlier_peak_shifts,
-                "all_control_deltas": all_control_deltas.tolist(),
-                "all_peak_shifts": all_peak_shifts.tolist(),
-                "peak_vs_gate_deltas": [
-                    {
-                        "control_delta": float(control_delta),
-                        "peak_position": float(peak_position),
-                        "peak_shift": float(peak_shift),
-                        "num_inliers": int(inlier_count),
-                        "inlier_fraction": float(
-                            inlier_count / NUM_OF_SAMPLES_FOR_AVERAGING
+            if session:
+                session.log_analysis(
+                    name="baseline_measurement_sample",
+                    data={
+                        "sensor_plunger_gate": sensor_gate_key,
+                        "iteration": baseline_idx + 1,
+                        "total_iterations": total_baseline_measurements,
+                        "sensitivity_voltage": float(
+                            baseline_sweep_output.best_peak.sensitivity_voltage
                         ),
-                    }
-                    for control_delta, peak_position, peak_shift, inlier_count in zip(
-                        voltage_differences,
-                        peak_positions,
-                        peak_positions_difference,
-                        per_voltage_inlier_counts,
-                        strict=False,
-                    )
-                ],
-                "measurement_voltage_sequence": list(measurement_voltage_sequence),
-                "measurement_samples": measurement_samples,
-            }
+                        "peak_center_voltage": float(
+                            baseline_sweep_output.best_peak.peak_voltage
+                        ),
+                    },
+                )
 
-            # Reset this gate back to baseline before moving to next gate
-            reset_state = {gate: baseline_control_state[gate]}
-            device.jump(reset_state, wait_for_settling=True)
+        # Reference for parking (max gradient) - use median for robustness to outliers
+        # (consistent with RANSAC approach for gradient fitting)
+        reference_max_gradient_voltage = float(np.median(baseline_sensitivity_voltages))
+        # Reference for gradient calculation (peak center) - use median for robustness
+        reference_peak_center_voltage = float(np.median(baseline_peak_center_voltages))
+    except Exception as e:
+        raise RoutineError(f"Error in baseline measurement: {str(e)}") from e
+    sensor_park_point_voltages = dict.fromkeys(
+        sensor_gates_list, mean_reservoir_saturation_voltage
+    )
+    sensor_park_point_voltages[sensor_gate_key] = reference_max_gradient_voltage
+    compensation_gradients_dict = {}
+    per_gate_details = {}  # Store detailed arrays for each gate
+    for gate in control_non_reservoir_gates:
+        num_deltas = len(voltage_differences)
+        measurement_indices = np.repeat(
+            np.arange(num_deltas, dtype=int), NUM_OF_SAMPLES_FOR_AVERAGING
+        )
+        rng.shuffle(measurement_indices)
+        per_delta_measurements: dict[int, list[float]] = {
+            idx: [] for idx in range(num_deltas)
+        }
+        measurement_voltage_sequence: list[float] = []
+        measurement_samples: list[dict[str, float]] = []
+
+        total_measurements = len(measurement_indices)
+        for counter, delta_index in enumerate(measurement_indices, start=1):
+            voltage_difference = float(voltage_differences[delta_index])
+            measurement_voltage_sequence.append(voltage_difference)
+            print(
+                f"Measurement {counter} of {total_measurements} for gate {gate}: "
+                f"{voltage_difference:+.6f} V"
+            )
+
+            # Apply voltage perturbation relative to baseline
+            device_state = baseline_control_state.copy()
+            device_state[gate] = baseline_control_state[gate] + voltage_difference
+            device.jump(device_state, wait_for_settling=True)
             time.sleep(DEFAULT_SETTLING_TIME_S)
 
-        logger.info("Compensation gradients: %s", compensation_gradients_dict)
+            # Single sensor plunger sweep for this sample
+            iteration_sweep_output = _single_window_sensor_plunger_sweep(
+                ctx=ctx,
+                sensor_gates_list=sensor_gates_list,
+                sensor_plunger_range=narrowed_sensor_plunger_range,
+                mean_reservoir_saturation_voltage=mean_reservoir_saturation_voltage,
+                sensor_plunger_index=sensor_plunger_index,
+                step_size=new_step_size,
+                measure_electrode=measure_electrode,
+                bias_gate=bias_gate,
+                bias_voltage=bias_voltage,
+                session=session,
+            )
 
-        # Save compensation gradient analysis to disk using passed session
-        # Log per-gate gradient details
-        if session:
-            for gate, details in per_gate_details.items():
+            best_peak = iteration_sweep_output.best_peak
+            peak_center_voltage = float(best_peak.peak_voltage)
+            per_delta_measurements[delta_index].append(peak_center_voltage)
+            # Log per-sample deltas explicitly (with clear names + aliases)
+            peak_shift = float(peak_center_voltage - reference_peak_center_voltage)
+            sample_record = {
+                # Plunger delta (control gate change relative to baseline)
+                "control_delta": voltage_difference,
+                "delta_plunger": voltage_difference,  # alias for clarity
+                # Peak location at this sample and its delta vs baseline (using center)
+                "peak_position": peak_center_voltage,
+                "peak_shift": peak_shift,
+                "delta_peak": peak_shift,  # alias for clarity
+                "sensitivity_voltage": float(best_peak.sensitivity_voltage),
+            }
+            measurement_samples.append(sample_record)
+
+            # Emit per-sample analysis immediately so each measurement is logged in real time
+            if session:
                 session.log_analysis(
-                    name=f"compensation_gradient_{gate}",
+                    name=f"compensation_measurement_sample_{gate}",
                     data={
                         "gate": gate,
-                        "mean_gradient": float(details["mean_gradient"]),
-                        "num_measurements": len(voltage_differences),
-                        "peak_positions": details["peak_positions"].tolist(),
-                        "peak_positions_difference": details[
-                            "peak_positions_difference"
-                        ].tolist(),
-                        "per_point_gradients": details["per_point_gradients"].tolist(),
-                        "least_squares_gradient": details["least_squares_gradient"],
-                        "drift_intercept": details["drift_intercept"],
-                        "mean_per_point_gradient": details["mean_per_point_gradient"],
-                        # RANSAC-specific fields (based on 100 raw measurements)
-                        "regression_method": "ransac",
-                        "inlier_mask": details["inlier_mask"],
-                        "num_inliers": details["num_inliers"],
-                        "num_outliers": details["num_outliers"],
-                        "outlier_indices": details["outlier_indices"],
-                        "outlier_voltages": details["outlier_voltages"],
-                        "outlier_peak_shifts": details["outlier_peak_shifts"],
-                        "all_control_deltas": details["all_control_deltas"],
-                        "all_peak_shifts": details["all_peak_shifts"],
-                        "peak_vs_gate_deltas": details["peak_vs_gate_deltas"],
-                        "measurement_voltage_sequence": details[
-                            "measurement_voltage_sequence"
-                        ],
-                        "measurement_samples": details["measurement_samples"],
-                        "voltage_differences": voltage_differences.tolist(),
-                        "num_deltas": len(voltage_differences),
-                        "samples_per_delta": NUM_OF_SAMPLES_FOR_AVERAGING,
-                        "total_samples": int(
-                            len(voltage_differences) * NUM_OF_SAMPLES_FOR_AVERAGING
-                        ),
+                        "counter": counter,
+                        "total_measurements": total_measurements,
+                        **sample_record,
                     },
                 )
 
-            # Log overall summary
+        peak_positions = np.empty_like(voltage_differences, dtype=np.float64)
+        for idx in range(num_deltas):
+            measurements = per_delta_measurements[idx]
+            if len(measurements) != NUM_OF_SAMPLES_FOR_AVERAGING:
+                raise RoutineError(
+                    "Incomplete measurement set: expected "
+                    f"{NUM_OF_SAMPLES_FOR_AVERAGING} samples for voltage difference "
+                    f"{voltage_differences[idx]:+.6f} V, got {len(measurements)}"
+                )
+            peak_positions[idx] = float(np.mean(measurements))
+        peak_positions_difference = peak_positions - reference_peak_center_voltage
+        # Keep per-point gradients for diagnostics, but use RANSAC regression
+        # to robustly fit the gradient while rejecting outliers from bad measurements.
+        per_point_gradients = peak_positions_difference / voltage_differences
+
+        # Use RANSAC to robustly fit gradient through all individual measurements
+        ransac_result = fit_compensation_gradient_ransac(
+            measurement_samples=measurement_samples,
+            reference_peak_center_voltage=reference_peak_center_voltage,
+            gate_name=gate,
+        )
+
+        # Extract results
+        least_squares_gradient = ransac_result.gradient
+        drift_intercept = ransac_result.intercept
+        inlier_mask = ransac_result.inlier_mask
+        num_inliers = ransac_result.num_inliers
+        num_outliers = ransac_result.num_outliers
+        outlier_indices = ransac_result.outlier_indices
+        outlier_voltages = ransac_result.outlier_voltages
+        outlier_peak_shifts = ransac_result.outlier_peak_shifts
+        all_control_deltas = ransac_result.all_control_deltas
+        all_peak_shifts = ransac_result.all_peak_shifts
+
+        compensation_gradients_dict[gate] = least_squares_gradient
+
+        # Mark each measurement sample with its inlier status
+        for i, sample in enumerate(measurement_samples):
+            sample["is_inlier"] = bool(inlier_mask[i])
+
+        # Calculate per-averaged-point inlier ratios
+        # For each of the 10 voltage points, count how many of its 10 samples were inliers
+        per_voltage_inlier_counts = []
+        for idx in range(num_deltas):
+            # Find which of the 100 measurements correspond to this voltage point
+            samples_for_this_voltage = [
+                i
+                for i, sample in enumerate(measurement_samples)
+                if np.isclose(sample["control_delta"], voltage_differences[idx])
+            ]
+            num_inliers_for_voltage = sum(
+                inlier_mask[i] for i in samples_for_this_voltage
+            )
+            per_voltage_inlier_counts.append(num_inliers_for_voltage)
+
+        # Store detailed arrays for this gate for later analysis/logging
+        per_gate_details[gate] = {
+            "peak_positions": peak_positions,
+            "peak_positions_difference": peak_positions_difference,
+            "per_point_gradients": per_point_gradients,
+            "least_squares_gradient": least_squares_gradient,
+            "drift_intercept": drift_intercept,
+            "mean_per_point_gradient": float(np.mean(per_point_gradients)),
+            "mean_gradient": least_squares_gradient,
+            # RANSAC-specific fields (based on 100 raw measurements)
+            "inlier_mask": inlier_mask.tolist(),
+            "num_inliers": num_inliers,
+            "num_outliers": num_outliers,
+            "outlier_indices": outlier_indices,
+            "outlier_voltages": outlier_voltages,
+            "outlier_peak_shifts": outlier_peak_shifts,
+            "all_control_deltas": all_control_deltas.tolist(),
+            "all_peak_shifts": all_peak_shifts.tolist(),
+            "peak_vs_gate_deltas": [
+                {
+                    "control_delta": float(control_delta),
+                    "peak_position": float(peak_position),
+                    "peak_shift": float(peak_shift),
+                    "num_inliers": int(inlier_count),
+                    "inlier_fraction": float(
+                        inlier_count / NUM_OF_SAMPLES_FOR_AVERAGING
+                    ),
+                }
+                for control_delta, peak_position, peak_shift, inlier_count in zip(
+                    voltage_differences,
+                    peak_positions,
+                    peak_positions_difference,
+                    per_voltage_inlier_counts,
+                    strict=False,
+                )
+            ],
+            "measurement_voltage_sequence": list(measurement_voltage_sequence),
+            "measurement_samples": measurement_samples,
+        }
+
+        # Reset this gate back to baseline before moving to next gate
+        reset_state = {gate: baseline_control_state[gate]}
+        device.jump(reset_state, wait_for_settling=True)
+        time.sleep(DEFAULT_SETTLING_TIME_S)
+
+    logger.info("Compensation gradients: %s", compensation_gradients_dict)
+
+    # Save compensation gradient analysis to disk using passed session
+    # Log per-gate gradient details
+    if session:
+        for gate, details in per_gate_details.items():
             session.log_analysis(
-                name="compensation_gradient_summary",
+                name=f"compensation_gradient_{gate}",
                 data={
-                    "gradients": {
-                        k: float(v) for k, v in compensation_gradients_dict.items()
-                    },
-                    "compensation_gradients": compensation_gradients_dict,
-                    "sensor_park_point_voltages": sensor_park_point_voltages,
-                    "sensor_plunger_key": sensor_gate_key,
-                    "sensor_plunger_ranges": narrowed_sensor_plunger_range,
+                    "gate": gate,
+                    "mean_gradient": float(details["mean_gradient"]),
+                    "num_measurements": len(voltage_differences),
+                    "peak_positions": details["peak_positions"].tolist(),
+                    "peak_positions_difference": details[
+                        "peak_positions_difference"
+                    ].tolist(),
+                    "per_point_gradients": details["per_point_gradients"].tolist(),
+                    "least_squares_gradient": details["least_squares_gradient"],
+                    "drift_intercept": details["drift_intercept"],
+                    "mean_per_point_gradient": details["mean_per_point_gradient"],
+                    # RANSAC-specific fields (based on 100 raw measurements)
+                    "regression_method": "ransac",
+                    "inlier_mask": details["inlier_mask"],
+                    "num_inliers": details["num_inliers"],
+                    "num_outliers": details["num_outliers"],
+                    "outlier_indices": details["outlier_indices"],
+                    "outlier_voltages": details["outlier_voltages"],
+                    "outlier_peak_shifts": details["outlier_peak_shifts"],
+                    "all_control_deltas": details["all_control_deltas"],
+                    "all_peak_shifts": details["all_peak_shifts"],
+                    "peak_vs_gate_deltas": details["peak_vs_gate_deltas"],
+                    "measurement_voltage_sequence": details[
+                        "measurement_voltage_sequence"
+                    ],
+                    "measurement_samples": details["measurement_samples"],
+                    "voltage_differences": voltage_differences.tolist(),
+                    "num_deltas": len(voltage_differences),
+                    "samples_per_delta": NUM_OF_SAMPLES_FOR_AVERAGING,
+                    "total_samples": int(
+                        len(voltage_differences) * NUM_OF_SAMPLES_FOR_AVERAGING
+                    ),
                 },
             )
 
-        result = {
-            "compensation_gradients": compensation_gradients_dict,
-            "sensor_park_point_voltages": sensor_park_point_voltages,
-            "sensor_plunger_key": sensor_gate_key,
-            "sensor_plunger_ranges": narrowed_sensor_plunger_range,
-        }
-        return result
+        # Log overall summary
+        session.log_analysis(
+            name="compensation_gradient_summary",
+            data={
+                "gradients": {
+                    k: float(v) for k, v in compensation_gradients_dict.items()
+                },
+                "compensation_gradients": compensation_gradients_dict,
+                "sensor_park_point_voltages": sensor_park_point_voltages,
+                "sensor_plunger_key": sensor_gate_key,
+                "sensor_plunger_ranges": narrowed_sensor_plunger_range,
+            },
+        )
 
-    finally:
-        # Restore initial device state for both control and sensor gates
-        logger.info("Restoring initial device state")
-        device.jump(
-            dict(
-                zip(control_non_reservoir_gates, initial_control_voltages, strict=False)
-            ),
-            wait_for_settling=True,
-        )
-        device.jump(
-            dict(zip(sensor_gates_list, initial_sensor_voltages, strict=False)),
-            wait_for_settling=True,
-        )
+    result = {
+        "compensation_gradients": compensation_gradients_dict,
+        "sensor_park_point_voltages": sensor_park_point_voltages,
+        "sensor_plunger_key": sensor_gate_key,
+        "sensor_plunger_ranges": narrowed_sensor_plunger_range,
+    }
+    return result
