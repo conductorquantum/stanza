@@ -5,9 +5,10 @@ from unittest.mock import Mock, patch
 import numpy as np
 import pytest
 
+from stanza.base.channels import ChannelConfig
 from stanza.exceptions import RoutineError
 from stanza.logger.session import LoggerSession
-from stanza.models import DeviceGroup
+from stanza.models import DeviceGroup, GateType
 from stanza.routines import RoutineContext
 from stanza.routines.builtins.charge_sensor.charge_sensor_compensation import (
     fit_compensation_gradient_ransac,
@@ -44,6 +45,21 @@ def test_run_compensation_validates_gates_to_compensate():
     mock_device.device_config.groups = {"control_group": control_group}
     mock_device.get_gates_by_type.return_value = ["G4", "G5"]
     mock_device.check.return_value = [-0.5, -0.6]
+    # Add channel_configs with voltage limits for safety validation
+    mock_device.channel_configs = {
+        "G4": ChannelConfig(
+            name="G4",
+            voltage_range=(-3.0, 3.0),
+            pad_type=None,  # type: ignore
+            electrode_type=GateType.PLUNGER,
+        ),
+        "G5": ChannelConfig(
+            name="G5",
+            voltage_range=(-3.0, 3.0),
+            pad_type=None,  # type: ignore
+            electrode_type=GateType.PLUNGER,
+        ),
+    }
 
     mock_resources = Mock()
     mock_resources.device = mock_device
@@ -89,6 +105,15 @@ def test_run_compensation_logs_per_sample_measurements():
     mock_device.check.return_value = [-0.5]
     mock_device.get_gates_by_type.return_value = ["G4"]
     mock_device.measure.return_value = 1e-9
+    # Add channel_configs with voltage limits for safety validation
+    mock_device.channel_configs = {
+        "G4": ChannelConfig(
+            name="G4",
+            voltage_range=(-3.0, 3.0),
+            pad_type=None,  # type: ignore
+            electrode_type=GateType.PLUNGER,
+        ),
+    }
 
     mock_resources = Mock()
     mock_resources.device = mock_device
@@ -237,6 +262,15 @@ def test_compensation_gradient_calculation_from_peak_shifts():
     mock_device.device_config.groups = {"control_group": control_group}
     mock_device.get_gates_by_type.return_value = ["G4"]
     mock_device.check.return_value = [-0.5]
+    # Add channel_configs with voltage limits for safety validation
+    mock_device.channel_configs = {
+        "G4": ChannelConfig(
+            name="G4",
+            voltage_range=(-3.0, 3.0),
+            pad_type=None,  # type: ignore
+            electrode_type=GateType.PLUNGER,
+        ),
+    }
 
     true_gradient = 0.5
     baseline_peak_voltage = -0.75
@@ -361,3 +395,98 @@ def test_compensation_gradient_calculation_from_peak_shifts():
                 f"Gradient calculation incorrect: got {calculated_gradient} V/V, "
                 f"expected {true_gradient} V/V (peak shift {peak_shift}V / control delta {control_delta}V)"
             )
+
+
+def test_run_compensation_validates_voltage_limits():
+    """Verify run_compensation raises RoutineError when voltage perturbation would exceed safety limits."""
+    mock_ctx = Mock(spec=RoutineContext)
+    mock_ctx.results = {
+        "find_sensor_peak": {
+            "narrowed_sensor_plunger_range": (-1.0, -0.5),
+            "mean_reservoir_saturation_voltage": 0.5,
+            "sensor_gates_list": ["G1", "G2", "G3"],
+            "sensor_plunger_index": 2,
+            "step_size": 0.001,
+        }
+    }
+
+    mock_device = Mock()
+    control_group = DeviceGroup(name="control_group", gates=["G4"])
+    mock_device.device_config = Mock()
+    mock_device.device_config.groups = {"control_group": control_group}
+    mock_device.get_gates_by_type.return_value = ["G4"]
+    # Set baseline voltage near the upper limit
+    mock_device.check.return_value = [2.8]  # Near upper limit of 3.0
+    # Add channel_configs with tight voltage limits
+    mock_device.channel_configs = {
+        "G4": ChannelConfig(
+            name="G4",
+            voltage_range=(-3.0, 3.0),  # Upper limit is 3.0V
+            pad_type=None,  # type: ignore
+            electrode_type=GateType.PLUNGER,
+        ),
+    }
+
+    mock_resources = Mock()
+    mock_resources.device = mock_device
+    mock_ctx.resources = mock_resources
+
+    # Create a mock peak for baseline measurements
+    mock_peak = FittedPeak(
+        peak_idx=50,
+        peak_voltage=-0.75,
+        lorentzian_fit=ModelFitResult(
+            model_name="lorentzian",
+            amplitude=1e-9,
+            center_idx=50.0,
+            width=0.01,
+            offset=0.0,
+            r_squared=0.95,
+            rmse=1e-11,
+            aicc=-100,
+            fwhm=0.02,
+            area=1e-10,
+            skew_resid=0.01,
+        ),
+        sech2_fit=None,
+        voigt_fit=None,
+        best_model="lorentzian",
+        sensitivity=1e-8,
+        sensitivity_voltage=-0.74,
+        window_currents=np.ones(10) * 1e-9,
+        window_voltages=np.linspace(-1.0, -0.5, 10),
+        quality_score=0.9,
+    )
+
+    mock_output = PeakWindowSweepOutput(
+        best_peak=mock_peak,
+        aggregated_voltages=np.linspace(-1.0, -0.5, 10),
+        aggregated_currents=np.ones(10) * 1e-9,
+        classification=True,
+        score=0.9,
+        num_peaks=1,
+    )
+
+    with patch(
+        "stanza.routines.builtins.charge_sensor.charge_sensor_compensation.filter_gates_by_group",
+        side_effect=lambda ctx, gates: gates,
+    ):
+        with patch(
+            "stanza.routines.builtins.charge_sensor.charge_sensor_compensation._single_window_sensor_plunger_sweep"
+        ) as mock_sweep:
+            mock_sweep.return_value = mock_output
+
+            # Use a very large peak_spacing that will create voltage perturbations exceeding the limit
+            # With baseline at 2.8V and voltage_range = 0.3 * 10.0 = 3.0V, perturbations
+            # will be up to ±3.0V, so max would be 2.8 + 3.0 = 5.8V which exceeds 3.0V limit
+            with pytest.raises(
+                RoutineError, match="Voltage perturbation would exceed safety limits"
+            ):
+                run_compensation(
+                    ctx=mock_ctx,
+                    peak_spacing=10.0,  # Very large spacing will create large perturbations
+                    control_group_name="control_group",
+                    measure_electrode="OUT",
+                    bias_gate="BIAS",
+                    bias_voltage=1e-4,
+                )

@@ -434,11 +434,38 @@ def run_compensation(
         measurement_samples: list[dict[str, float]] = []
 
         total_measurements = len(measurement_indices)
+        # Get voltage limits for this gate to validate perturbations
+        if gate not in device.channel_configs:
+            raise RoutineError(
+                f"Gate '{gate}' not found in device channel configurations. "
+                "Cannot validate voltage limits."
+            )
+        gate_voltage_range = device.channel_configs[gate].voltage_range
+        min_voltage, max_voltage = gate_voltage_range
+        if min_voltage is None or max_voltage is None:
+            raise RoutineError(
+                f"Voltage limits not configured for gate '{gate}'. "
+                "Cannot safely apply voltage perturbations."
+            )
+
         for counter, delta_index in enumerate(measurement_indices, start=1):
             voltage_difference = float(voltage_differences[delta_index])
             measurement_voltage_sequence.append(voltage_difference)
+
+            # Calculate resulting voltage and validate against safety limits
+            resulting_voltage = baseline_control_state[gate] + voltage_difference
+            if resulting_voltage < min_voltage or resulting_voltage > max_voltage:
+                raise RoutineError(
+                    f"Voltage perturbation would exceed safety limits for gate '{gate}'. "
+                    f"Baseline: {baseline_control_state[gate]:.6f}V, "
+                    f"Perturbation: {voltage_difference:+.6f}V, "
+                    f"Result: {resulting_voltage:.6f}V, "
+                    f"Valid range: [{min_voltage:.6f}V, {max_voltage:.6f}V]. "
+                    f"Consider reducing peak_spacing or MULTIPLIER_OF_PEAK_SPACING."
+                )
+
             device_state = baseline_control_state.copy()
-            device_state[gate] = baseline_control_state[gate] + voltage_difference
+            device_state[gate] = resulting_voltage
             device.jump(device_state, wait_for_settling=True)
             time.sleep(DEFAULT_SETTLING_TIME_S)
 
