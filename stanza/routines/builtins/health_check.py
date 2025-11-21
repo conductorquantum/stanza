@@ -569,10 +569,6 @@ def finger_gate_characterization(
 
     max_safe_voltage_bound = leakage_test_results["max_safe_voltage_bound"]
     min_safe_voltage_bound = leakage_test_results["min_safe_voltage_bound"]
-    print(
-        f"max_safe_voltage_bound: {max_safe_voltage_bound}, min_safe_voltage_bound: {min_safe_voltage_bound}"
-    )
-    print(f"charge_carrier_type: {charge_carrier_type}")
 
     voltage_left_bound = (
         min_safe_voltage_bound
@@ -586,7 +582,6 @@ def finger_gate_characterization(
     )
     voltage_bounds_range = abs(voltage_right_bound - voltage_left_bound)
     global_turn_on_voltage = global_accumulation_results["global_turn_on_voltage"]
-    print(f"global_turn_on_voltage: {global_turn_on_voltage}")
 
     finger_gate_characterization_results = {}
 
@@ -604,12 +599,10 @@ def finger_gate_characterization(
 
     for gate in finger_gates:
         other_gates = [g for g in gates_to_accumulate if g != gate]
-        print(f"Jumping to global turn-on voltage for other gates: {other_gates}")
         ctx.resources.device.jump(
             dict.fromkeys(other_gates, global_turn_on_voltage), wait_for_settling=True
         )  # Make sure the other gates are accumulated before sweeping the finger gate
         ctx.resources.device.jump({gate: voltage_left_bound}, wait_for_settling=True)
-        print(f"Jumped to voltage left bound for gate: {gate}")
         time.sleep(DEFAULT_SETTLING_TIME_S)
         num_points = max(2, int(voltage_bounds_range / step_size))
         voltages, currents = ctx.resources.device.sweep_1d(

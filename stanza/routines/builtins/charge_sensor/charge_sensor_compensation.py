@@ -277,7 +277,7 @@ def run_compensation(
         measure_electrode: Electrode to measure current from (e.g., "OUT_B")
         bias_gate: Name of the bias gate to apply bias voltage
         bias_voltage: Voltage to apply to bias gate (V)
-        zero_control_side: If True, measure gradients relative to 0V baseline (default: True)
+        zero_control_side: If True, measure gradients relative to 0V baseline (default: False)
         gates_to_compensate: Optional list of gate names to test (default: None, tests all)
         session: Logger session for measurements and analysis
 
@@ -437,11 +437,6 @@ def run_compensation(
         for counter, delta_index in enumerate(measurement_indices, start=1):
             voltage_difference = float(voltage_differences[delta_index])
             measurement_voltage_sequence.append(voltage_difference)
-            print(
-                f"Measurement {counter} of {total_measurements} for gate {gate}: "
-                f"{voltage_difference:+.6f} V"
-            )
-
             device_state = baseline_control_state.copy()
             device_state[gate] = baseline_control_state[gate] + voltage_difference
             device.jump(device_state, wait_for_settling=True)
