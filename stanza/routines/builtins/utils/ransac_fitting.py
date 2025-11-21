@@ -6,24 +6,21 @@ linear relationships in the presence of outliers, particularly for compensation
 gradient calculations in quantum dot devices.
 """
 
-# Standard library imports
 import logging
 from dataclasses import dataclass
 
-# Third-party imports
 import numpy as np
 
 try:
-    from sklearn.linear_model import RANSACRegressor
+    from sklearn.linear_model import RANSACRegressor  # type: ignore[import-untyped]
 
     HAS_SKLEARN = True
 except ImportError:
     HAS_SKLEARN = False
 
-# First-party imports
+
 from stanza.exceptions import RoutineError
 
-# Configure logger
 logger = logging.getLogger(__name__)
 
 

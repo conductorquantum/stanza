@@ -10,15 +10,12 @@ peak shifts using multi-model peak fitting, and (4) using RANSAC regression to
 robustly fit gradients while rejecting outliers.
 """
 
-# Standard library imports
 import logging
 import time
 from typing import Any
 
-# Third-party imports
 import numpy as np
 
-# First-party imports
 from stanza.exceptions import RoutineError
 from stanza.logger.session import LoggerSession
 from stanza.models import GateType
@@ -45,7 +42,6 @@ from stanza.routines.builtins.utils.ransac_fitting import (
     fit_compensation_gradient_ransac,
 )
 
-# Configure logger
 logger = logging.getLogger(__name__)
 
 

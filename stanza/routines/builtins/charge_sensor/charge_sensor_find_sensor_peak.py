@@ -13,12 +13,9 @@ top N peaks by holding at max-gradient points and selecting based on combined
 quality and noise stability scores.
 """
 
-# Standard library imports
 import logging
 from typing import Any
 
-# Third-party imports
-# First-party imports
 from stanza.exceptions import RoutineError
 from stanza.logger.session import LoggerSession
 from stanza.routines import RoutineContext, routine
@@ -44,7 +41,6 @@ from stanza.routines.builtins.utils.peak_fitting import (
     analyze_find_first_peak_voltages,
 )
 
-# Configure logger
 logger = logging.getLogger(__name__)
 
 
