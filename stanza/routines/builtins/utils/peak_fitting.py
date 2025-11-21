@@ -373,6 +373,188 @@ def calculate_quality_score(
     return float(quality)
 
 
+def _fit_single_model(
+    model_func: Callable[..., np.ndarray],
+    model_name: str,
+    window_indices: np.ndarray,
+    window_currents: np.ndarray,
+    initial_guess: list[float],
+    peak_idx_in_window: int,
+    bounds: tuple[list[float], list[float]] | None = None,
+    num_params: int = 4,
+) -> ModelFitResult:
+    """
+    Fit a single peak model and calculate all metrics.
+
+    Args:
+        model_func: The model function to fit (lorentzian, sech_squared, pseudo_voigt)
+        model_name: Name of the model ("Lorentzian", "sech2", "Voigt")
+        window_indices: Index array for the fitting window
+        window_currents: Current values in the fitting window
+        initial_guess: Initial parameter guess for the fit
+        peak_idx_in_window: Peak position within the window (for fallback)
+        bounds: Optional parameter bounds for constrained fitting
+        num_params: Number of parameters in the model (4 for Lorentzian/sech², 5 for Voigt)
+
+    Returns:
+        ModelFitResult with all calculated metrics
+    """
+    try:
+        if bounds is not None:
+            popt, _ = curve_fit(
+                model_func,
+                window_indices,
+                window_currents,
+                p0=initial_guess,
+                bounds=bounds,
+                maxfev=20000,
+            )
+        else:
+            popt, _ = curve_fit(
+                model_func,
+                window_indices,
+                window_currents,
+                p0=initial_guess,
+                maxfev=20000,
+            )
+
+        # Calculate fitted curve and residuals
+        fitted_curve = model_func(window_indices, *popt)
+        residuals = window_currents - fitted_curve
+
+        # Calculate metrics
+        ss_res = np.sum(residuals**2)
+        ss_tot = np.sum((window_currents - np.mean(window_currents)) ** 2)
+        r_squared = 1 - (ss_res / ss_tot) if ss_tot > 0 else 0
+        rmse = calculate_rmse(residuals)
+        aicc = calculate_aicc(len(window_currents), num_params, residuals)
+        skew = calculate_skew_residuals(residuals)
+
+        # Calculate physical parameters
+        fwhm = calculate_fwhm(model_func, tuple(popt), model_name, window_indices)
+        x_spacing = 1.0  # Indices are unit-spaced
+        area = calculate_area(fitted_curve, x_spacing)
+
+        # Extract parameters based on model type
+        amplitude = float(popt[0])
+        center_idx = float(popt[1])
+        width = float(popt[2])
+        offset = float(popt[3])
+        eta = float(popt[4]) if len(popt) > 4 else None
+
+        return ModelFitResult(
+            model_name=model_name,
+            amplitude=amplitude,
+            center_idx=center_idx,
+            width=width,
+            offset=offset,
+            eta=eta,
+            r_squared=float(r_squared),
+            rmse=float(rmse),
+            aicc=float(aicc),
+            fwhm=float(fwhm),
+            area=float(area),
+            skew_resid=float(skew),
+        )
+    except Exception as e:
+        logger.warning("%s fit failed: %s", model_name, e)
+        # Create a dummy ModelFitResult with infinite AICc
+        return ModelFitResult(
+            model_name=model_name,
+            amplitude=0.0,
+            center_idx=float(peak_idx_in_window),
+            width=1.0,
+            offset=0.0,
+            eta=0.5 if model_name == "Voigt" else None,
+            r_squared=0.0,
+            rmse=np.inf,
+            aicc=np.inf,
+            fwhm=0.0,
+            area=0.0,
+            skew_resid=0.0,
+        )
+
+
+def _select_best_model(
+    model_fits: dict[str, ModelFitResult], peak_idx_aggregated: int
+) -> tuple[str, ModelFitResult]:
+    """
+    Select the best model from multiple fits based on AICc.
+
+    Args:
+        model_fits: Dictionary mapping model names to ModelFitResult objects
+        peak_idx_aggregated: Peak index in aggregated trace (for logging)
+
+    Returns:
+        Tuple of (best_model_name, best_model_result)
+    """
+    best_model_key = min(model_fits.keys(), key=lambda k: model_fits[k].aicc)
+    best_model_result = model_fits[best_model_key]
+
+    logger.info(
+        "Peak at idx %d: Best model = %s (AICc: L=%.2f, S=%.2f, V=%.2f)",
+        peak_idx_aggregated,
+        best_model_key,
+        model_fits["Lorentzian"].aicc,
+        model_fits["sech2"].aicc,
+        model_fits["Voigt"].aicc,
+    )
+
+    return best_model_key, best_model_result
+
+
+def _calculate_peak_metrics(
+    best_model_result: ModelFitResult,
+    window_currents: np.ndarray,
+    window_voltages: np.ndarray,
+    aggregated_voltages: np.ndarray,
+    window_start_idx: int,
+) -> tuple[float, float]:
+    """
+    Calculate sensitivity (max gradient) and peak voltage from fitted model.
+
+    Args:
+        best_model_result: The best fitted model result
+        window_currents: Current values in the fitting window
+        window_voltages: Voltage values in the fitting window
+        aggregated_voltages: Full voltage array (for voltage lookup)
+        window_start_idx: Start index of window in aggregated trace
+
+    Returns:
+        Tuple of (max_gradient, max_gradient_voltage, peak_voltage)
+    """
+    # Calculate gradient of actual measured current with respect to voltage
+    gradient = np.gradient(window_currents, window_voltages)
+
+    # Find maximum positive gradient (steepest slope for charge sensing)
+    max_gradient_idx_in_window = int(np.argmax(gradient))
+    max_gradient = gradient[max_gradient_idx_in_window]
+
+    # Convert to absolute index and voltage
+    max_gradient_absolute_idx = window_start_idx + max_gradient_idx_in_window
+    max_gradient_absolute_idx = min(
+        max(0, max_gradient_absolute_idx), int(len(aggregated_voltages) - 1)
+    )
+    max_gradient_voltage = aggregated_voltages[max_gradient_absolute_idx]
+
+    # Convert the fitted center index (which is continuous within the window) into
+    # an accurate voltage using interpolation so we are not limited by the sweep grid.
+    window_length = len(window_voltages)
+    window_index_axis = np.arange(window_length, dtype=float)
+    fitted_center_idx = float(
+        np.clip(best_model_result.center_idx, 0, window_length - 1)
+    )
+    peak_voltage = float(
+        np.interp(
+            fitted_center_idx,
+            window_index_axis,
+            window_voltages,
+        )
+    )
+
+    return float(max_gradient), float(max_gradient_voltage), peak_voltage
+
+
 def fit_peak_multi_model(
     window_currents: np.ndarray,
     window_indices: np.ndarray,
@@ -412,252 +594,58 @@ def fit_peak_multi_model(
     center_guess = float(peak_idx_in_window)
     width_guess = 10.0
 
-    # Storage for model fits
-    model_fits = {}
+    # Fit all three models
+    initial_guess_4param = [amplitude_guess, center_guess, width_guess, offset_guess]
 
-    # ===== FIT LORENTZIAN MODEL =====
-    try:
-        initial_guess_lorentzian = [
-            amplitude_guess,
-            center_guess,
-            width_guess,
-            offset_guess,
-        ]
-        popt_lorentz, _ = curve_fit(
-            lorentzian,
-            window_indices,
-            window_currents,
-            p0=initial_guess_lorentzian,
-            maxfev=20000,
-        )
-
-        # Calculate fitted curve and residuals
-        fitted_lorentz = lorentzian(window_indices, *popt_lorentz)
-        residuals_lorentz = window_currents - fitted_lorentz
-
-        # Calculate metrics
-        ss_res = np.sum(residuals_lorentz**2)
-        ss_tot = np.sum((window_currents - np.mean(window_currents)) ** 2)
-        r2_lorentz = 1 - (ss_res / ss_tot) if ss_tot > 0 else 0
-        rmse_lorentz = calculate_rmse(residuals_lorentz)
-        aicc_lorentz = calculate_aicc(len(window_currents), 4, residuals_lorentz)
-        skew_lorentz = calculate_skew_residuals(residuals_lorentz)
-
-        # Calculate physical parameters
-        fwhm_lorentz = calculate_fwhm(
-            lorentzian, popt_lorentz, "Lorentzian", window_indices
-        )
-        x_spacing = 1.0  # Indices are unit-spaced
-        area_lorentz = calculate_area(fitted_lorentz, x_spacing)
-
-        model_fits["Lorentzian"] = ModelFitResult(
+    model_fits = {
+        "Lorentzian": _fit_single_model(
+            model_func=lorentzian,
             model_name="Lorentzian",
-            amplitude=float(popt_lorentz[0]),
-            center_idx=float(popt_lorentz[1]),
-            width=float(popt_lorentz[2]),
-            offset=float(popt_lorentz[3]),
-            eta=None,
-            r_squared=float(r2_lorentz),
-            rmse=float(rmse_lorentz),
-            aicc=float(aicc_lorentz),
-            fwhm=float(fwhm_lorentz),
-            area=float(area_lorentz),
-            skew_resid=float(skew_lorentz),
-        )
-    except Exception as e:
-        logger.warning("Lorentzian fit failed: %s", e)
-        # Create a dummy ModelFitResult with infinite AICc
-        model_fits["Lorentzian"] = ModelFitResult(
-            model_name="Lorentzian",
-            amplitude=0.0,
-            center_idx=float(peak_idx_in_window),
-            width=1.0,
-            offset=0.0,
-            eta=None,
-            r_squared=0.0,
-            rmse=np.inf,
-            aicc=np.inf,
-            fwhm=0.0,
-            area=0.0,
-            skew_resid=0.0,
-        )
-
-    # ===== FIT SECH² MODEL =====
-    try:
-        initial_guess_sech2 = [amplitude_guess, center_guess, width_guess, offset_guess]
-        popt_sech2, _ = curve_fit(
-            sech_squared,
-            window_indices,
-            window_currents,
-            p0=initial_guess_sech2,
-            maxfev=20000,
-        )
-
-        # Calculate fitted curve and residuals
-        fitted_sech2 = sech_squared(window_indices, *popt_sech2)
-        residuals_sech2 = window_currents - fitted_sech2
-
-        # Calculate metrics
-        ss_res = np.sum(residuals_sech2**2)
-        ss_tot = np.sum((window_currents - np.mean(window_currents)) ** 2)
-        r2_sech2 = 1 - (ss_res / ss_tot) if ss_tot > 0 else 0
-        rmse_sech2 = calculate_rmse(residuals_sech2)
-        aicc_sech2 = calculate_aicc(len(window_currents), 4, residuals_sech2)
-        skew_sech2 = calculate_skew_residuals(residuals_sech2)
-
-        # Calculate physical parameters
-        fwhm_sech2 = calculate_fwhm(sech_squared, popt_sech2, "sech2", window_indices)
-        area_sech2 = calculate_area(fitted_sech2, x_spacing)
-
-        model_fits["sech2"] = ModelFitResult(
+            window_indices=window_indices,
+            window_currents=window_currents,
+            initial_guess=initial_guess_4param,
+            peak_idx_in_window=peak_idx_in_window,
+            bounds=None,
+            num_params=4,
+        ),
+        "sech2": _fit_single_model(
+            model_func=sech_squared,
             model_name="sech2",
-            amplitude=float(popt_sech2[0]),
-            center_idx=float(popt_sech2[1]),
-            width=float(popt_sech2[2]),
-            offset=float(popt_sech2[3]),
-            eta=None,
-            r_squared=float(r2_sech2),
-            rmse=float(rmse_sech2),
-            aicc=float(aicc_sech2),
-            fwhm=float(fwhm_sech2),
-            area=float(area_sech2),
-            skew_resid=float(skew_sech2),
-        )
-    except Exception as e:
-        logger.warning("sech² fit failed: %s", e)
-        model_fits["sech2"] = ModelFitResult(
-            model_name="sech2",
-            amplitude=0.0,
-            center_idx=float(peak_idx_in_window),
-            width=1.0,
-            offset=0.0,
-            eta=None,
-            r_squared=0.0,
-            rmse=np.inf,
-            aicc=np.inf,
-            fwhm=0.0,
-            area=0.0,
-            skew_resid=0.0,
-        )
-
-    # ===== FIT PSEUDO-VOIGT MODEL =====
-    try:
-        eta_guess = 0.5  # Start with equal mix
-        initial_guess_voigt = [
-            amplitude_guess,
-            center_guess,
-            width_guess,
-            offset_guess,
-            eta_guess,
-        ]
-        # Constrain eta to [0, 1] for physical validity
-        bounds = (
-            [-np.inf, -np.inf, 0, -np.inf, 0],  # lower bounds
-            [np.inf, np.inf, np.inf, np.inf, 1],  # upper bounds
-        )
-        popt_voigt, _ = curve_fit(
-            pseudo_voigt,
-            window_indices,
-            window_currents,
-            p0=initial_guess_voigt,
-            bounds=bounds,
-            maxfev=20000,
-        )
-
-        # Calculate fitted curve and residuals
-        fitted_voigt = pseudo_voigt(window_indices, *popt_voigt)
-        residuals_voigt = window_currents - fitted_voigt
-
-        # Calculate metrics
-        ss_res = np.sum(residuals_voigt**2)
-        ss_tot = np.sum((window_currents - np.mean(window_currents)) ** 2)
-        r2_voigt = 1 - (ss_res / ss_tot) if ss_tot > 0 else 0
-        rmse_voigt = calculate_rmse(residuals_voigt)
-        aicc_voigt = calculate_aicc(
-            len(window_currents), 5, residuals_voigt
-        )  # 5 params
-        skew_voigt = calculate_skew_residuals(residuals_voigt)
-
-        # Calculate physical parameters
-        fwhm_voigt = calculate_fwhm(pseudo_voigt, popt_voigt, "Voigt", window_indices)
-        area_voigt = calculate_area(fitted_voigt, x_spacing)
-
-        model_fits["Voigt"] = ModelFitResult(
+            window_indices=window_indices,
+            window_currents=window_currents,
+            initial_guess=initial_guess_4param,
+            peak_idx_in_window=peak_idx_in_window,
+            bounds=None,
+            num_params=4,
+        ),
+        "Voigt": _fit_single_model(
+            model_func=pseudo_voigt,
             model_name="Voigt",
-            amplitude=float(popt_voigt[0]),
-            center_idx=float(popt_voigt[1]),
-            width=float(popt_voigt[2]),
-            offset=float(popt_voigt[3]),
-            eta=float(popt_voigt[4]),
-            r_squared=float(r2_voigt),
-            rmse=float(rmse_voigt),
-            aicc=float(aicc_voigt),
-            fwhm=float(fwhm_voigt),
-            area=float(area_voigt),
-            skew_resid=float(skew_voigt),
-        )
-    except Exception as e:
-        logger.warning("Voigt fit failed: %s", e)
-        model_fits["Voigt"] = ModelFitResult(
-            model_name="Voigt",
-            amplitude=0.0,
-            center_idx=float(peak_idx_in_window),
-            width=1.0,
-            offset=0.0,
-            eta=0.5,
-            r_squared=0.0,
-            rmse=np.inf,
-            aicc=np.inf,
-            fwhm=0.0,
-            area=0.0,
-            skew_resid=0.0,
-        )
+            window_indices=window_indices,
+            window_currents=window_currents,
+            initial_guess=initial_guess_4param + [0.5],  # Add eta_guess
+            peak_idx_in_window=peak_idx_in_window,
+            bounds=(
+                [-np.inf, -np.inf, 0, -np.inf, 0],  # lower bounds
+                [np.inf, np.inf, np.inf, np.inf, 1],  # upper bounds
+            ),
+            num_params=5,
+        ),
+    }
 
-    # ===== SELECT BEST MODEL BY AICc =====
-    best_model_key = min(model_fits.keys(), key=lambda k: model_fits[k].aicc)
-    best_model_result = model_fits[best_model_key]
-
-    logger.info(
-        "Peak at idx %d: Best model = %s (AICc: L=%.2f, S=%.2f, V=%.2f)",
-        peak_idx_aggregated,
-        best_model_key,
-        model_fits["Lorentzian"].aicc,
-        model_fits["sech2"].aicc,
-        model_fits["Voigt"].aicc,
+    # Select best model by AICc
+    best_model_key, best_model_result = _select_best_model(
+        model_fits, peak_idx_aggregated
     )
 
-    # ===== CALCULATE SENSITIVITY (MAX GRADIENT) FROM ACTUAL DATA =====
-    # Extract voltage values corresponding to the window
+    # Calculate sensitivity and peak voltage
     window_voltages = aggregated_voltages[window_start_idx:window_end_idx]
-
-    # Calculate gradient of actual measured current with respect to voltage
-    # np.gradient handles the voltage spacing automatically for proper A/V units
-    gradient = np.gradient(window_currents, window_voltages)
-
-    # Find maximum positive gradient (steepest slope for charge sensing)
-    max_gradient_idx_in_window = int(np.argmax(gradient))
-    max_gradient = gradient[max_gradient_idx_in_window]
-
-    # Convert to absolute index and voltage
-    max_gradient_absolute_idx = window_start_idx + max_gradient_idx_in_window
-    max_gradient_absolute_idx = min(
-        max(0, max_gradient_absolute_idx), int(len(aggregated_voltages) - 1)
-    )
-    max_gradient_voltage = aggregated_voltages[max_gradient_absolute_idx]
-
-    # Convert the fitted center index (which is continuous within the window) into
-    # an accurate voltage using interpolation so we are not limited by the sweep grid.
-    window_length = len(window_voltages)
-    window_index_axis = np.arange(window_length, dtype=float)
-    fitted_center_idx = float(
-        np.clip(best_model_result.center_idx, 0, window_length - 1)
-    )
-    peak_voltage = float(
-        np.interp(
-            fitted_center_idx,
-            window_index_axis,
-            window_voltages,
-        )
+    max_gradient, max_gradient_voltage, peak_voltage = _calculate_peak_metrics(
+        best_model_result=best_model_result,
+        window_currents=window_currents,
+        window_voltages=window_voltages,
+        aggregated_voltages=aggregated_voltages,
+        window_start_idx=window_start_idx,
     )
 
     # ===== CREATE FITTEDPEAK OBJECT =====
