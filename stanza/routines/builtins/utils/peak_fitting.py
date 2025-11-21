@@ -1,3 +1,11 @@
+"""Peak fitting utilities for quantum dot charge sensor routines.
+
+This module provides multi-model peak fitting functions for analyzing Coulomb
+blockade peaks, including Lorentzian, sech², and pseudo-Voigt models. It also
+includes quality scoring, sensitivity analysis, and peak window calculation
+utilities.
+"""
+
 from collections.abc import Callable
 from logging import getLogger
 

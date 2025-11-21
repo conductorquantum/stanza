@@ -1,4 +1,8 @@
-"""Utility functions for built-in routines."""
+"""Group handling utilities for built-in routines.
+
+This module provides functions for filtering and managing device gates based on
+group membership, enabling routines to work with specific gate subsets.
+"""
 
 from typing import Any
 
