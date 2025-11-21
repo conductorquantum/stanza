@@ -1,63 +1,12 @@
-"""
-Charge sensor readout routines for quantum dot devices.
+"""Charge sensor readout routines for quantum dot devices.
 
-This module provides compensated charge sensor readout functionality for quantum
-dot devices, enabling measurement of control gate effects while maintaining a
-constant sensor operating point through real-time compensation. The routines
-perform 2D sweeps of control plunger gates while dynamically adjusting the sensor
-plunger voltage to maintain optimal charge sensing fidelity.
+This module performs compensated 2D sweeps of control gates while maintaining
+a constant sensor operating point through real-time compensation. The sensor
+plunger voltage is adjusted using feedforward (gradient-based) and optional
+feedback (current-based) correction to cancel capacitive cross-talk.
 
-Physical Context:
------------------
-In quantum dot devices, a charge sensor is a quantum dot configured to operate
-near a Coulomb blockade peak, where conductance changes rapidly with electron
-number. This sensor can detect charge state changes in nearby control quantum
-dots. However, changing control gate voltages also shifts the sensor's operating
-point through capacitive cross-talk, degrading charge sensing performance.
-
-This routine sweeps control gates in a 2D grid pattern while dynamically
-compensating the sensor plunger voltage to maintain optimal charge sensing
-fidelity throughout the measurement. The compensation uses both feedforward
-(gradient-based) and feedback (current-based) correction mechanisms.
-
-Compensation Formula:
----------------------
-The sensor voltage is adjusted using a combination of feedforward compensation
-and proportional feedback:
-
-    V_sensor_compensated = V_sensor_initial + sum(gradient_i * delta_V_control_i) - beta * I_error
-
-where:
-    - gradient_i = dV_sensor/dV_control_i: Compensation gradient from run_compensation routine (V/V)
-    - beta: Proportional feedback gain (V/A), typically negative for negative feedback
-    - I_error = I_measured - I_park_point: Current error from baseline park point (A)
-    - delta_V_control_i: Change in control gate voltage from previous point (V)
-
-The feedforward term (gradient compensation) predicts the sensor shift based on
-known capacitive coupling. The feedback term (beta correction) corrects for
-residual errors and drift by measuring the actual current deviation from the
-park point.
-
-Adaptive Gradient Learning:
----------------------------
-When gamma_factors are provided, the routine enables adaptive gradient learning
-that continuously updates compensation gradients throughout the measurement:
-
-    gradient_update = (gamma / delta_V) * I_error_pre_feedback
-
-where:
-    - gamma: Learning rate factor for gradient adaptation (V²/A)
-    - delta_V: Voltage change in control gate (V)
-    - I_error_pre_feedback: Current error before feedback correction (A)
-
-This allows the routine to adapt to changing device conditions and improve
-compensation accuracy over time, particularly useful for long measurements
-where device characteristics may drift.
-
-Sweep Pattern:
---------------
-The routine uses a serpentine (boustrophedon) scan pattern that alternates
-sweep direction on each row to minimize voltage jumps at row boundaries.
+Compensation formula: V_sensor = V_initial + sum(gradient_i * delta_V_i) - beta * I_error
+Optional adaptive learning updates gradients: gradient += (gamma / delta_V) * I_error
 """
 
 # Standard library imports
@@ -90,8 +39,7 @@ def _calculate_compensated_voltages(
     charge_sensor_plunger_gate: str,
     sweep_resolution: int,
 ) -> tuple[list[list[float]], list[float], list[str]]:
-    """
-    Pre-compute compensated sensor voltages for all 2D sweep points.
+    """Pre-compute compensated sensor voltages for all 2D sweep points.
 
     Args:
         control_plunger_gates: List of 2 control plunger gate names
@@ -103,10 +51,7 @@ def _calculate_compensated_voltages(
         sweep_resolution: Number of points per dimension
 
     Returns:
-        Tuple of (voltages_with_compensation, compensation_applied, gate_electrodes):
-        - voltages_with_compensation: List of [G1, G2, sensor] or [G1, G2] voltage arrays
-        - compensation_applied: List of compensation deltas applied at each point (V)
-        - gate_electrodes: List of gate names in order [G1, G2, sensor] or [G1, G2]
+        Tuple of (voltages_with_compensation, compensation_applied, gate_electrodes)
     """
     if len(control_plunger_gates) != 2:
         raise RoutineError(
@@ -183,166 +128,38 @@ def charge_sensor_csd_readout(  # pylint: disable=too-many-locals,too-many-state
     session: LoggerSession | None = None,
     **kwargs: Any,  # pylint: disable=unused-argument
 ) -> dict[str, Any]:
-    """
-    Perform charge sensor CSD readout sweep with optional compensation.
+    """Perform charge sensor CSD readout sweep with optional compensation.
 
-    This routine sweeps control group plunger gates while measuring current through
-    the charge sensor. The charge sensor plunger voltage can be optionally compensated
-    to maintain a constant sensor operating point as control voltages change.
-
-    Physical context:
-    - Charge sensor group: Acts as sensor, measures current changes
-    - Control group: Gates being swept to modify quantum dot states
-    - Compensation (optional): Adjusts sensor plunger to cancel cross-talk from control gates
+    Sweeps control group plunger gates while measuring current through the charge sensor.
+    Optionally compensates sensor plunger voltage to maintain constant operating point.
 
     Args:
         ctx: Routine context containing device resources
         charge_sensor_group_name: Name of charge sensor group (e.g., "side_A")
         control_group_name: Name of control group being swept (e.g., "side_B")
-        sensor_park_point_voltages: Voltages for all charge sensor gates (V).
-            Typically obtained from run_compensation routine results.
+        sensor_park_point_voltages: Voltages for all charge sensor gates (V)
         charge_sensor_plunger_gate: Name of sensor plunger gate to compensate (e.g., "G3")
-        initial_control_voltages: Initial voltages for ALL control group gates (V).
-            This includes barriers, reservoirs, and plungers. Plungers will be
-            overridden to start of sweep range.
-        control_plunger_ranges: Voltage ranges for exactly 2 control plunger gates
-            to sweep. Format: {gate_name: (start_V, end_V)}
+        initial_control_voltages: Initial voltages for ALL control group gates (V)
+        control_plunger_ranges: Voltage ranges for exactly 2 control plunger gates {gate: (start, end)}
         measure_electrode: Electrode to measure current from (e.g., "OUT_A")
-        bias_gate: Name of the bias gate (contact) to apply bias voltage (e.g., "IN_A_B")
-        bias_voltage: Voltage to apply to bias gate during measurements (V)
-        compensation_gradients: Optional gradients {gate: dV_sensor/dV_control} from
-            run_compensation routine. If None, no compensation is applied (sensor
-            plunger held constant). (default: None)
-        sweep_resolution: Number of points per dimension for 2D sweep (default: 48)
-        num_sweep_repetitions: Number of times to repeat sweep for averaging (default: 10)
-        beta: Optional proportional feedback gain (V/A) for current-based sensor voltage
-            correction. If None, no feedback is applied. When provided, sensor plunger
-            voltage is adjusted at each measurement point to maintain current near park
-            point: delta_V = -beta * (I_measured - I_park_point). Feedback corrections
-            are automatically limited to available voltage headroom at each point to
-            guarantee the sensor voltage stays within device limits. (default: None)
-        gamma_factors: Optional per-gate adaptation gains {gate: gamma} for dynamic gradient
-            updates (default: None). When provided, compensation gradients are updated at each
-            measurement point using: A_C[x+1] = A_C[x] + (gamma/ΔV) * i_S[x], where i_S is the
-            current error (I_measured - I_park_point) and ΔV is the voltage step change. Units:
-            [V/A] (related to inverse transconductance × learning rate). Requires compensation_gradients
-            to be provided (cannot adapt from zero). Default 0.0 disables adaptation. Must include
-            all control plunger gates. Gradients only updated when |ΔV| > 1e-9 V to avoid division
-            by zero.
-        max_adaptive_gradient: Maximum allowed magnitude for adaptive gradients (V/V). Adaptive
-            gradients are clipped to [-max, +max] after each update to prevent unbounded growth
-            that could drive sensor voltage out of hardware limits. Only applies when gamma_factors
-            is enabled. (default: 2.0)
+        bias_gate: Name of the bias gate to apply bias voltage
+        bias_voltage: Voltage to apply to bias gate (V)
+        compensation_gradients: Optional gradients {gate: dV_sensor/dV_control} (default: None)
+        sweep_resolution: Number of points per dimension (default: 48)
+        num_sweep_repetitions: Number of times to repeat sweep (default: 10)
+        beta: Optional proportional feedback gain (V/A) for current-based correction (default: None)
+        max_feedback_correction: Maximum feedback correction (default: 1.0)
+        gamma_factors: Optional per-gate adaptation gains {gate: gamma} (default: None)
+        max_adaptive_gradient: Maximum allowed magnitude for adaptive gradients (V/V) (default: 2.0)
         session: Logger session for measurements and analysis
-        **kwargs: Additional keyword arguments (for config compatibility)
 
     Returns:
-        dict: Contains:
-            - voltage_measurements: List of [G1_voltage, G2_voltage] pairs
-            - current_measurements: List of measured differential currents (A)
-            - compensation_applied: List of compensation voltages applied to sensor (V)
-            - control_plunger_gates: List of control plunger gate names
-            - control_plunger_ranges: Dict mapping gate names to (start, end) tuples
-            - sweep_resolution: Number of points per dimension
-            - measure_electrode: Name of measurement electrode
-            - initial_sensor_plunger_voltage: Initial charge sensor plunger voltage (V)
-            - sensor_park_point_voltages: Dict of sensor gate voltages used
-            - initial_control_voltages: Dict of initial control gate voltages used
-            - compensation_gradients: Dict of compensation gradients used (or None)
-            - compensation_enabled: Boolean indicating if compensation was applied
-            - park_point_current: Baseline current before sweep (A)
-            - num_repetitions: Number of sweep repetitions performed
-            - beta: Proportional feedback gain used (V/A) or None
-            - feedback_enabled: Boolean indicating if current feedback was applied
-            - feedback_corrections: List of feedback corrections applied at each point (V)
-            - sensor_clipping_events_pre_feedback: Count of sensor voltage clipping events
-                before feedback correction (indicates compensation driving voltage out of bounds)
-            - gradient_clipping_events: Count of adaptive gradient clipping events
-                (indicates gamma too large or gradients growing unbounded)
-            - gamma_factors: Dict of gamma adaptation gains used (or None)
-            - gradient_adaptation_enabled: Boolean indicating if gradient adaptation was used
-            - initial_gradients: Dict of initial gradient values before adaptation (or None)
-            - final_gradients: Dict of final adapted gradient values (or None)
-            - gradient_history: List of dicts tracking all gradient updates with fields:
-                point_index, repetition, gate, delta_v, current_error_pre_feedback,
-                gradient_update, new_gradient (or None if adaptation disabled). Note:
-                gradient updates use pre-feedback current error to learn compensation
-                independent of beta feedback corrections.
+        dict: Contains voltage_measurements, current_measurements, compensation_applied,
+              control_plunger_gates, compensation_gradients, beta, gamma_factors, and
+              related metadata
 
     Raises:
         RoutineError: If validation fails or sweep encounters errors
-
-    Notes:
-        - Control plungers swept from start to end of specified ranges
-        - If compensation_gradients provided: sensor plunger compensated at each sweep point
-        - If compensation_gradients is None: sensor plunger held constant
-        - If beta provided: additional per-point feedback applied based on current error
-        - If gamma_factors provided: compensation gradients adapt during sweep
-
-        Compensation and feedback formulas:
-        - Sensor voltage update: V_PS[x+1] = V_PS[x] + ΔV_1·A_C1[x] + ΔV_2·A_C2[x] - β·i_S[x]
-        - Gradient adaptation: A_C[x+1] = A_C[x] + (γ/ΔV)·i_S_pre[x]
-        where i_S_pre = I_measured - I_park_point (pre-feedback current error)
-
-        Feedback safety:
-        - Feedback corrections are dynamically limited at each point based on available
-          voltage headroom: correction is clipped to [-V_current + V_min, V_max - V_current]
-        - This guarantees sensor voltage never exceeds device voltage_range limits
-        - No post-feedback clipping is needed with this approach
-
-        - Gradient updates use PRE-feedback error to learn compensation independently
-        - Beta feedback is applied after gradient update, then current is re-measured
-        - Gradient updates only occur when |ΔV| > 1e-9 V
-        - Adaptive gradients persist across all repetitions (continuous learning)
-        - For shared gates (e.g., reservoirs): initial_control_voltages takes precedence
-        - Returns differential current (measured - baseline) for better signal quality
-        - With adaptation: gradients evolve throughout all sweeps to minimize current errors
-
-    Example:
-        ```python
-        # Get compensation data from previous routine
-        comp_results = ctx.results.get("run_compensation")
-        sensor_park_voltages = comp_results["sensor_park_point_voltages"]
-        comp_gradients = comp_results["compensation_gradients"]
-
-        # Run compensated readout (static gradients)
-        result = charge_sensor_csd_readout(
-            ctx=ctx,
-            charge_sensor_group_name="side_A",
-            control_group_name="side_B",
-            sensor_park_point_voltages=sensor_park_voltages,
-            charge_sensor_plunger_gate="G3",
-            initial_control_voltages={"G7": -2.55, "G8": -2.0, "G9": -2.75, "G10": -1.74, "G11": -2.55},
-            control_plunger_ranges={"G8": (-2.0, -1.90), "G10": (-1.74, -1.70)},
-            measure_electrode="OUT_A",
-            bias_gate="IN_A_B",
-            bias_voltage=1e-4,
-            compensation_gradients=comp_gradients,
-            sweep_resolution=48,
-        )
-
-        # Run with adaptive gradients (gamma_factors enables real-time gradient updates)
-        result_adaptive = charge_sensor_csd_readout(
-            ctx=ctx,
-            charge_sensor_group_name="side_A",
-            control_group_name="side_B",
-            sensor_park_point_voltages=sensor_park_voltages,
-            charge_sensor_plunger_gate="G3",
-            initial_control_voltages={"G7": -2.55, "G8": -2.0, "G9": -2.75, "G10": -1.74, "G11": -2.55},
-            control_plunger_ranges={"G8": (-2.0, -1.90), "G10": (-1.74, -1.70)},
-            measure_electrode="OUT_A",
-            bias_gate="IN_A_B",
-            bias_voltage=1e-4,
-            compensation_gradients=comp_gradients,
-            gamma_factors={"G8": 1e-6, "G10": 1e-6},  # Enable adaptation with learning rate
-            beta=-1e5,  # Optional: add proportional feedback
-            sweep_resolution=48,
-        )
-
-        # Access adapted gradients
-        print(f"Initial gradients: {result_adaptive['initial_gradients']}")
-        print(f"Final gradients: {result_adaptive['final_gradients']}")
-        ```
     """
     # Validate inputs
     if sweep_resolution <= 0:

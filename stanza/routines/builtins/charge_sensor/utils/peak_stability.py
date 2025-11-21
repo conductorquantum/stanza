@@ -1,4 +1,9 @@
-"""Stability analysis utilities for charge sensor peak selection."""
+"""Stability analysis utilities for charge sensor peak selection.
+
+This module provides functions for measuring and analyzing peak stability,
+including local slope calculation, voltage noise estimation, and combined
+scoring of peak candidates based on quality and stability metrics.
+"""
 
 import logging
 import time

@@ -1,4 +1,8 @@
-"""Type definitions for charge sensor routines."""
+"""Type definitions and data classes for charge sensor routines.
+
+This module defines dataclasses used to represent measurement results, peak
+candidates, and sweep outputs across the charge sensor workflow.
+"""
 
 from dataclasses import dataclass
 

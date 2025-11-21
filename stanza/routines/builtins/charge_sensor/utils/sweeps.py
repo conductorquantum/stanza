@@ -1,4 +1,9 @@
-"""Sweep utilities for charge sensor measurements."""
+"""Sweep utilities for charge sensor measurements.
+
+This module provides functions for performing voltage sweeps on charge sensor
+devices, including building voltage lists for sensor plunger sweeps and
+executing multi-window barrier sweeps with ML-based peak detection.
+"""
 
 import logging
 

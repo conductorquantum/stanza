@@ -1,75 +1,13 @@
-"""
-Charge sensor compensation routines for quantum dot devices.
+"""Charge sensor compensation routines for quantum dot devices.
 
-This module provides automated charge sensor compensation gradient calculation
-for quantum dot devices using peak fitting and ML-based Coulomb blockade
-detection. The routines measure how control gate voltages affect the sensor's
-operating point and calculate compensation gradients for real-time cross-talk
-correction.
+This module calculates compensation gradients that quantify how control gate
+voltages affect the sensor's operating point through capacitive cross-talk.
+Gradients enable real-time correction to maintain optimal charge sensing.
 
-Physical Context:
------------------
-In quantum dot devices, gate electrodes control the electrostatic potential
-landscape. The "charge sensor" is a quantum dot configured to operate near
-a Coulomb blockade peak, where conductance changes rapidly with electron
-number. This high sensitivity makes it ideal for detecting charge state changes
-in nearby control quantum dots.
-
-However, control gates can unintentionally shift the sensor's operating point
-through capacitive coupling (cross-talk). When control gates change voltage,
-the sensor peak position shifts, degrading charge sensing performance.
-
-Compensation gradients quantify this capacitive coupling between gates:
-    gradient = dV_sensor_peak / dV_control_gate
-
-These gradients enable real-time correction of sensor gate voltages when
-control gates change, maintaining optimal charge sensing fidelity throughout
-device operation.
-
-Measurement Methodology:
--------------------------
-The run_compensation routine uses a systematic approach to measure gradients:
-
-1. Baseline Measurement: Performs multiple sensor plunger sweeps at the initial
-   control gate configuration to establish a reference peak position using median
-   averaging for robustness to outliers.
-
-2. Perturbation Sweeps: For each control gate to compensate:
-   - Applies voltage perturbations relative to baseline
-   - Performs sensor plunger sweeps at each perturbation
-   - Measures peak position shifts using multi-model peak fitting
-
-3. Gradient Calculation: Uses RANSAC (RANdom SAmple Consensus) regression to
-   robustly fit gradients while rejecting outlier measurements caused by:
-   - Measurement noise
-   - Device instabilities
-   - Poor peak fits
-   - Environmental fluctuations
-
-4. Quality Assessment: Each measurement sample is marked as inlier or outlier
-   based on the RANSAC fit, providing diagnostic information about measurement
-   quality.
-
-The routine collects multiple samples per voltage point (typically 10) and
-randomizes the measurement sequence to average out temporal drift effects.
-
-Integration with Charge Sensor Workflow:
-----------------------------------------
-This module is part of a three-stage charge sensor workflow:
-
-1. find_sensor_peak: Locates optimal charge sensing operating point
-   - Sweeps sensor plunger to identify Coulomb blockade peaks
-   - Uses ML-based classification and multi-model peak fitting
-   - Returns peak location and narrowed voltage range for high-resolution sweeps
-
-2. run_compensation: Calculates compensation gradients for control gates
-   - Measures how each control gate voltage affects sensor peak position
-   - Returns gradient dictionary for cross-talk compensation
-
-3. charge_sensor_csd_readout: Performs compensated 2D sweeps
-   - Uses gradients from run_compensation for feedforward compensation
-   - Optionally uses adaptive gradient learning for continuous improvement
-   - Applies proportional feedback for residual error correction
+The run_compensation routine measures gradients by: (1) establishing a baseline
+peak position, (2) applying voltage perturbations to control gates, (3) measuring
+peak shifts using multi-model peak fitting, and (4) using RANSAC regression to
+robustly fit gradients while rejecting outliers.
 """
 
 # Standard library imports
@@ -87,7 +25,7 @@ from stanza.models import GateType
 from stanza.routines import RoutineContext, routine
 from stanza.routines.builtins.charge_sensor.utils.constants import (
     DEFAULT_SETTLING_TIME_S,
-    MULTIPLER_OF_PEAK_SPACING,
+    MULTIPLIER_OF_PEAK_SPACING,
     NUM_OF_SAMPLES_FOR_AVERAGING,
     PERTURBATION_DIVISOR,
 )
@@ -116,17 +54,14 @@ def analyze_single_window_barrier_sweep(
     aggregated_voltages: np.ndarray,
     analysis_session: LoggerSession | None,
 ) -> FittedPeak | None:
-    """
-    Analyze single-window barrier sweep using multi-model peak fitting.
+    """Analyze single-window barrier sweep using multi-model peak fitting.
 
-    Fits three peak models (Lorentzian, sech², pseudo-Voigt) to the entire
-    current trace, selects best model by AICc, and calculates comprehensive
-    quality metrics for charge sensor characterization.
+    Fits three peak models (Lorentzian, sech², pseudo-Voigt) and selects best by AICc.
 
     Args:
         aggregated_currents: Current trace data
         aggregated_voltages: Voltage trace data
-        analysis_session: Logging session for saving analysis results
+        analysis_session: Logging session for analysis results
 
     Returns:
         FittedPeak object with multi-model fit results and quality metrics
@@ -214,16 +149,10 @@ def _single_window_sensor_plunger_sweep(
     bias_voltage: float,
     session: LoggerSession | None = None,
 ) -> PeakWindowSweepOutput:
-    """
-    Run a single-window sensor plunger voltage sweep with multi-model peak fitting.
+    """Run a single-window sensor plunger voltage sweep with multi-model peak fitting.
 
-    Performs a refined sweep of the sensor plunger within a narrow voltage range
-    to precisely characterize Coulomb blockade peaks using three models (Lorentzian,
-    sech², pseudo-Voigt). Best model is selected by AICc, and comprehensive quality
-    metrics (R², RMSE, skew, DW, FWHM, area) are calculated for automated peak
-    ranking and charge sensor operating point selection.
-
-    Used for both baseline measurements and gate compensation sweeps.
+    Performs a refined sweep within a narrow voltage range to characterize Coulomb
+    blockade peaks using three models (Lorentzian, sech², pseudo-Voigt).
 
     Args:
         ctx: Routine context containing device resources
@@ -233,13 +162,12 @@ def _single_window_sensor_plunger_sweep(
         sensor_plunger_index: Index of sensor plunger in sensor_gates_list
         step_size: Voltage increment between points
         measure_electrode: Electrode to measure current from
-        bias_gate: Name of the bias gate (contact) to apply bias voltage
+        bias_gate: Name of the bias gate to apply bias voltage
         bias_voltage: Voltage to apply to bias gate during measurements
-        session: Logger session for logging measurements and analysis
+        session: Logger session for measurements and analysis
 
     Returns:
-        PeakWindowSweepOutput containing the best fitted peak (with all
-        three model fits and quality metrics) and trace data.
+        PeakWindowSweepOutput containing the best fitted peak and trace data
     """
     device = ctx.resources.device
 
@@ -336,29 +264,21 @@ def run_compensation(
     session: LoggerSession | None = None,
     **kwargs: Any,  # pylint: disable=unused-argument
 ) -> dict[str, float]:
-    """
-    Calculate compensation gradients for charge sensor gates.
+    """Calculate compensation gradients for control gates affecting charge sensor.
 
-    This routine measures how control gate voltages affect the sensor peak position
-    and calculates compensation gradients to maintain optimal charge sensing. It
-    performs baseline measurements with control gates at a specified state, then
-    sweeps each control gate individually while measuring peak shifts.
+    Measures how control gate voltages affect sensor peak position and calculates
+    gradients using RANSAC regression. Performs baseline measurements, then sweeps
+    each control gate while measuring peak shifts.
 
     Args:
-        ctx: Routine context containing device resources and previous results. Requires:
-             - ctx.results["find_sensor_peak"]: Results from find_sensor_peak routine
+        ctx: Routine context with device resources. Requires find_sensor_peak results.
         peak_spacing: Expected peak spacing in volts (e.g., 0.020 for 20mV)
         control_group_name: Name of control side group (e.g., "side_A")
         measure_electrode: Electrode to measure current from (e.g., "OUT_B")
-        bias_gate: Name of the bias gate (contact) to apply bias voltage (e.g., "IN_A_B")
-        bias_voltage: Voltage to apply to bias gate during measurements (V)
-        zero_control_side: If True, measure gradients relative to 0V baseline.
-            If False, measure gradients relative to current control voltages.
-            Useful for measuring compensation at non-zero operating points. (default: True)
-        gates_to_compensate: Optional list of gate names to measure compensation for.
-            If provided, only these gates will be tested. Must be valid non-reservoir
-            gates (plunger or barrier) from the control group. Applied after automatic
-            type and group filtering. If None, all eligible gates are tested. (default: None)
+        bias_gate: Name of the bias gate to apply bias voltage
+        bias_voltage: Voltage to apply to bias gate (V)
+        zero_control_side: If True, measure gradients relative to 0V baseline (default: True)
+        gates_to_compensate: Optional list of gate names to test (default: None, tests all)
         session: Logger session for measurements and analysis
 
     Returns:
@@ -366,14 +286,6 @@ def run_compensation(
 
     Raises:
         RoutineError: If find_sensor_peak results are missing or invalid
-
-    Notes:
-        - Requires find_sensor_peak to be run first
-        - Tests 10 voltage points per gate in symmetric range around baseline
-        - Voltage perturbations applied relative to baseline (0V or current voltages)
-        - Automatically resets to initial state after testing
-        - For non-linear cross-talk, use zero_control_side=False to measure at
-          actual operating point
     """
     if peak_spacing <= 0:
         raise RoutineError("peak_spacing must be greater than 0")
@@ -404,7 +316,7 @@ def run_compensation(
     sensor_gate_key = sensor_gates_list[sensor_plunger_index]
     new_step_size = find_sensor_peak_results["step_size"]
 
-    voltage_range = MULTIPLER_OF_PEAK_SPACING * peak_spacing
+    voltage_range = MULTIPLIER_OF_PEAK_SPACING * peak_spacing
     half_n = PERTURBATION_DIVISOR // 2
     voltage_differences = np.concatenate(
         [

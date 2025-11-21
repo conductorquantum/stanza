@@ -1,4 +1,9 @@
-# Configuration constants
+"""Configuration constants for charge sensor routines.
+
+This module defines configuration parameters used across charge sensor routines,
+including timing constants, ML model identifiers, window sizing parameters, and
+measurement configuration values.
+"""
 
 # Default settling time before sweeps to avoid current spikes
 DEFAULT_SETTLING_TIME_S = 3.0
@@ -11,6 +16,7 @@ ML_MODEL_INPUT_SIZE = 128
 # full peak width plus sufficient context for accurate ML classification
 INITIAL_WINDOW_MULTIPLIER = 2
 
+# Divisor for perturbation of compensation voltage range
 PERTURBATION_DIVISOR = 20
 
 # Use 80% of inter-peak distance for peak fitting windows to avoid
@@ -35,5 +41,5 @@ NUM_OF_SAMPLES_FOR_AVERAGING = 5
 COULOMB_CLASSIFIER_MODEL = "coulomb-blockade-classifier-v3"
 PEAK_DETECTOR_MODEL = "coulomb-blockade-peak-detector-v2"
 
-
-MULTIPLER_OF_PEAK_SPACING = 0.3
+# Multiplier of peak spacing to voltage difference range for compensation
+MULTIPLIER_OF_PEAK_SPACING = 0.3

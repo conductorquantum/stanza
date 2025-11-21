@@ -1,91 +1,16 @@
-"""
-Charge sensor peak finding routines for quantum dot devices.
+"""Charge sensor peak finding routines for quantum dot devices.
 
-This module provides automated charge sensor peak detection and characterization
-for quantum dot devices using ML-based classification, multi-model peak fitting,
-and stability analysis. The routines identify optimal operating points for charge
-sensing by locating Coulomb blockade peaks with high sensitivity and stability.
+This module provides automated charge sensor peak detection using ML-based
+classification and multi-model peak fitting. The routines identify optimal
+operating points by locating Coulomb blockade peaks with high sensitivity.
 
-Physical Context:
------------------
-In quantum dot devices, a charge sensor is a quantum dot configured to operate
-near a Coulomb blockade peak, where conductance changes rapidly with electron
-number. This high sensitivity makes it ideal for detecting charge state changes
-in nearby control quantum dots. The sensor's performance depends critically on
-operating at the optimal point on the Coulomb blockade peak.
+The find_sensor_peak routine: (1) performs wide-range sweeps to identify peaks,
+(2) fits multiple models (Lorentzian, Sech², Voigt) to each peak, (3) calculates
+quality scores, and (4) selects the best peak.
 
-The optimal operating point balances two competing factors:
-1. Sensitivity: Maximum current change per unit charge (steepest slope)
-2. Stability: Minimum voltage noise from current fluctuations
-
-Peak Finding Methodology:
---------------------------
-The find_sensor_peak routine uses a multi-stage approach:
-
-1. Wide-Range Sweep: Performs a coarse sweep of the sensor plunger gate across
-   a wide voltage range to identify candidate Coulomb blockade peaks using
-   ML-based peak detection.
-
-2. Peak Fitting: For each detected peak, extracts a window around the peak and
-   fits multiple models (Lorentzian, Sech², Voigt) to determine precise peak
-   parameters including:
-   - Peak center voltage
-   - Peak width (FWHM)
-   - Peak amplitude
-   - Sensitivity (maximum gradient point)
-
-3. Quality Scoring: Calculates a composite quality score for each peak based on:
-   - Fit quality (R², RMSE, skew residual): 70% weight
-   - Normalized sensitivity: 20% weight
-   - Fit statistics: 10% weight
-
-4. Peak Selection: Selects the peak with the highest quality score as the
-   optimal operating point.
-
-Stability Analysis:
---------------------
-The find_stable_sensor_peak routine extends peak finding with stability testing:
-
-1. Candidate Selection: Identifies the top N peaks (typically 3) by quality score
-
-2. Stability Measurement: For each candidate:
-   - Positions device at the peak's maximum gradient point (highest sensitivity)
-   - Performs a 2-minute hold measurement
-   - Records time-series current data
-   - Calculates voltage noise: σ_V = σ_I / |dI/dV|
-
-3. Combined Scoring: Computes a final score combining:
-   - Original quality score (30% weight)
-   - Stability score (70% weight)
-
-4. Optimal Peak Selection: Returns the peak with the highest combined score,
-   ensuring both high sensitivity and low noise.
-
-ML-Based Peak Detection:
-------------------------
-The routine uses machine learning models for robust peak detection:
-- Peak Detector Model: Identifies candidate peak locations in current traces
-- Coulomb Classifier Model: Validates that detected features are genuine
-  Coulomb blockade peaks rather than noise or artifacts
-
-This ML-based approach provides robust peak detection even in noisy measurements
-and handles various peak shapes and sizes automatically.
-
-Integration with Charge Sensor Workflow:
-----------------------------------------
-This module is the first stage in a three-stage charge sensor workflow:
-
-1. find_sensor_peak: Locates optimal charge sensing operating point
-   - Returns peak location, sensitivity voltage, and narrowed voltage range
-   - Provides quality metrics for peak assessment
-
-2. run_compensation: Calculates compensation gradients for control gates
-   - Uses the narrowed range from find_sensor_peak for high-resolution sweeps
-   - Measures how control gates affect sensor peak position
-
-3. charge_sensor_csd_readout: Performs compensated 2D sweeps
-   - Uses gradients from run_compensation for feedforward compensation
-   - Maintains sensor at optimal operating point during control gate sweeps
+The find_stable_sensor_peak routine extends this with stability testing: measures
+top N peaks by holding at max-gradient points and selecting based on combined
+quality and noise stability scores.
 """
 
 # Standard library imports
@@ -137,55 +62,32 @@ def find_sensor_peak(  # pylint: disable=too-many-locals
     session: LoggerSession | None = None,
     **kwargs: Any,  # pylint: disable=unused-argument
 ) -> dict[str, Any]:
-    """
-    Find the optimal charge sensor operating point by sweeping sensor plunger.
+    """Find the optimal charge sensor operating point by sweeping sensor plunger.
 
-    This routine performs a multi-window sweep of the sensor plunger gate to identify
-    the best Coulomb blockade peak for charge sensing. It analyzes peaks using multi-model
-    fitting (Lorentzian, sech², pseudo-Voigt) and selects the peak with the highest quality
-    score. The routine also calculates a narrowed voltage range around the best peak for
-    subsequent high-resolution measurements.
+    Performs a multi-window sweep to identify the best Coulomb blockade peak using
+    ML-based detection and multi-model fitting. Selects peak with highest quality score.
 
     Args:
-        ctx: Routine context containing device resources and previous results. Requires:
-             - ctx.results["global_accumulation"]["global_turn_on_voltage"]
-             - ctx.results["finger_gate_characterization"][sensor_plunger_gate]
+        ctx: Routine context with device resources. Requires global_accumulation and
+             finger_gate_characterization results.
         peak_spacing: Expected peak spacing in volts (e.g., 0.020 for 20mV)
         sensor_group_name: Name of sensor side group (e.g., "side_B")
-        sensor_plunger_gate: Name of the sensor plunger gate on sensor side
+        sensor_plunger_gate: Name of the sensor plunger gate
         measure_electrode: Electrode to measure current from (e.g., "OUT_B")
-        bias_gate: Name of the bias gate (contact) to apply bias voltage (e.g., "IN_A_B")
-        bias_voltage: Voltage to apply to bias gate during measurements (V)
-        zero_control_side: If True, set control group gates to 0V before sweep.
-            If False, maintain current control voltages. Shared reservoirs always
-            set to sensor group's global turn-on voltage unless overridden. (default: True)
-        gate_voltage_overrides: Optional dict of {gate_name: voltage} to override
-                                specific sensor group gates (e.g., shared reservoirs)
-                                instead of using global_turn_on_voltage (default: None)
+        bias_gate: Name of the bias gate to apply bias voltage
+        bias_voltage: Voltage to apply to bias gate (V)
+        zero_control_side: If True, set control gates to 0V before sweep (default: False)
+        gate_voltage_overrides: Optional dict to override specific sensor gates (default: None)
         session: Logger session for measurements and analysis
 
     Returns:
-        dict: Contains:
-            - best_peak_voltage: Voltage at the center of the best peak (V)
-            - best_peak_max_gradient_voltage: Voltage at maximum gradient (optimal sensing point) (V)
-            - narrowed_sensor_plunger_range: (min, max) narrowed voltage range for high-res sweeps (V)
-            - prev_peak_voltage: Voltage of previous peak or fallback value (V)
-            - next_peak_voltage: Voltage of next peak or fallback value (V)
-            - mean_reservoir_saturation_voltage: Saturation voltage used for sensor gates (V)
-            - sensor_gates_list: List of sensor gate names
-            - sensor_plunger_index: Index of sensor plunger in sensor_gates_list
-            - step_size: Calculated step size for narrowed sweeps (V)
-            - sensor_park_point: Dict of all sensor gate voltages at park point {gate: voltage}
+        dict: Contains best_peak_voltage, best_peak_max_gradient_voltage,
+              narrowed_sensor_plunger_range, prev_peak_voltage, next_peak_voltage,
+              mean_reservoir_saturation_voltage, sensor_gates_list, sensor_plunger_index,
+              step_size, and sensor_park_point
 
     Raises:
         RoutineError: If required previous results are missing or peak finding fails
-
-    Notes:
-        - Uses 2x peak_spacing for initial window size
-        - Automatically sets device to optimal sensing point after finding peak
-        - Calculates narrowed range based on neighboring peaks or fallback spacing
-        - Control group handling: specific gates zeroed or maintained, reservoirs
-          always set to sensor's global turn-on
     """
     if peak_spacing <= 0:
         raise RoutineError("peak_spacing must be greater than 0")
@@ -423,55 +325,32 @@ def find_stable_sensor_peak(  # pylint: disable=too-many-locals,too-many-stateme
     session: LoggerSession | None = None,
     **kwargs: Any,  # pylint: disable=unused-argument
 ) -> dict[str, Any]:
-    """
-    Find the most stable charge sensor operating point with 2-minute stability testing.
+    """Find the most stable charge sensor operating point with stability testing.
 
-    This routine extends find_sensor_peak by measuring peak stability. After identifying
-    Coulomb blockade peaks, it tests the top N peaks by holding at each peak's
-    max-gradient point for 2 minutes while recording current vs. time. Peak position
-    stability is quantified as voltage noise (σᵥ = σᵢ / |dI/dV|), and the final peak
-    is selected by combining original quality score (50%) with stability score (50%).
+    Extends find_sensor_peak by testing top N peaks: holds at each peak's max-gradient
+    point for 2 minutes and quantifies stability as voltage noise. Selects peak using
+    combined score: 50% original quality + 50% stability.
 
     Args:
-        ctx: Routine context containing device resources and previous results. Requires:
-             - ctx.results["global_accumulation"]["global_turn_on_voltage"]
-             - ctx.results["finger_gate_characterization"][sensor_plunger_gate]
+        ctx: Routine context with device resources. Requires global_accumulation and
+             finger_gate_characterization results.
         peak_spacing: Expected peak spacing in volts (e.g., 0.020 for 20mV)
         sensor_group_name: Name of sensor side group (e.g., "side_B")
-        sensor_plunger_gate: Name of the sensor plunger gate on sensor side
+        sensor_plunger_gate: Name of the sensor plunger gate
         measure_electrode: Electrode to measure current from (e.g., "OUT_B")
-        bias_gate: Name of the bias gate (contact) to apply bias voltage (e.g., "IN_A_B")
-        bias_voltage: Voltage to apply to bias gate during measurements (V)
-        zero_control_side: If True, set control group gates to 0V before sweep.
-            If False, maintain current control voltages. (default: False)
-        gate_voltage_overrides: Optional dict of {gate_name: voltage} to override
-                                specific sensor group gates (default: None)
-        top_n_peaks: Number of top-scoring peaks to test for stability (default: 3)
-        hold_time_seconds: Duration to hold at each peak for stability measurement (default: 120.0)
+        bias_gate: Name of the bias gate to apply bias voltage
+        bias_voltage: Voltage to apply to bias gate (V)
+        zero_control_side: If True, set control gates to 0V before sweep (default: False)
+        gate_voltage_overrides: Optional dict to override specific sensor gates (default: None)
+        top_n_peaks: Number of top peaks to test for stability (default: 3)
+        hold_time_seconds: Duration to hold at each peak (default: 120.0)
         session: Logger session for measurements and analysis
 
     Returns:
-        dict: Same format as find_sensor_peak, containing:
-            - best_peak_voltage: Voltage at center of most stable peak (V)
-            - best_peak_max_gradient_voltage: Voltage at maximum gradient (V)
-            - narrowed_sensor_plunger_range: (min, max) voltage range (V)
-            - prev_peak_voltage: Previous peak voltage or fallback (V)
-            - next_peak_voltage: Next peak voltage or fallback (V)
-            - mean_reservoir_saturation_voltage: Saturation voltage (V)
-            - sensor_gates_list: List of sensor gate names
-            - sensor_plunger_index: Index of plunger in sensor_gates_list
-            - step_size: Refined step size for narrowed sweeps (V)
-            - sensor_park_point: Gate voltages at optimal point {gate: voltage}
+        dict: Same format as find_sensor_peak with best stable peak information
 
     Raises:
         RoutineError: If required previous results are missing or peak finding fails
-
-    Notes:
-        - Uses same peak detection as find_sensor_peak (ML-based with multi-model fitting)
-        - Tests top N peaks (by original quality score) for stability
-        - Selects best peak using combined score: 50% original + 50% stability
-        - Total runtime: ~(top_n_peaks * hold_time_seconds) longer than find_sensor_peak
-        - For top_n_peaks=3 and hold_time_seconds=120: adds ~6 minutes to routine
     """
     if peak_spacing <= 0:
         raise RoutineError("peak_spacing must be greater than 0")
