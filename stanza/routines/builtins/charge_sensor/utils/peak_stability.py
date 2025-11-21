@@ -7,7 +7,6 @@ scoring of peak candidates based on quality and stability metrics.
 
 import logging
 import time
-from typing import TYPE_CHECKING
 
 import numpy as np
 
@@ -17,13 +16,11 @@ from stanza.logger.session import LoggerSession
 from stanza.routines.builtins.charge_sensor.utils.constants import (
     DEFAULT_SETTLING_TIME_S,
 )
+from stanza.routines.builtins.charge_sensor.utils.types import (
+    StabilityMeasurement,
+    StablePeakCandidate,
+)
 from stanza.routines.builtins.utils.peak_fitting import FittedPeak
-
-if TYPE_CHECKING:
-    from stanza.routines.builtins.charge_sensor.utils.types import (
-        StabilityMeasurement,
-        StablePeakCandidate,
-    )
 
 logger = logging.getLogger(__name__)
 
@@ -217,9 +214,6 @@ def measure_peak_stability(
     Raises:
         RoutineError: If measurement fails or noise calculation fails
     """
-    from stanza.routines.builtins.charge_sensor.utils.types import (
-        StabilityMeasurement,
-    )
 
     logger.info(
         "Starting stability measurement for peak %d at max-gradient voltage %.6fV",
