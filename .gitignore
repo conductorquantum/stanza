@@ -36,3 +36,6 @@ uv.lock
 
 # conductor_dev
 conductor_dev*
+
+# Animation outputs
+*_animation.gif
