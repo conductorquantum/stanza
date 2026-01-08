@@ -231,7 +231,9 @@ def test_charge_sensor_compensated_readout_session_metadata(mock_context):
     assert "control_plunger_gates" in result
 
 
-def test_charge_sensor_compensated_readout_result_lengths_match(mock_context, mock_session):
+def test_charge_sensor_compensated_readout_result_lengths_match(
+    mock_context, mock_session
+):
     """Verify compensation_applied, feedback_corrections, and current_measurements arrays
     all match the number of sweep points and that differential_currents subtract park_point_current."""
     ctx = mock_context

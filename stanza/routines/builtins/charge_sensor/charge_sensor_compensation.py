@@ -362,6 +362,9 @@ def run_compensation(
 
     device.jump(baseline_control_state, wait_for_settling=True)
     time.sleep(DEFAULT_SETTLING_TIME_S)
+
+    # Baseline is measured once, not after each gate, prioritizing measurement time
+    # over accuracy. This assumes drift is not substantial over the measurement duration.
     try:
         baseline_sensitivity_voltages = []
         baseline_peak_center_voltages = []
