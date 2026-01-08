@@ -8,7 +8,7 @@ import pytest
 from stanza.exceptions import RoutineError
 from stanza.routines.builtins.charge_sensor.charge_sensor_readout import (
     _calculate_compensated_voltages,
-    charge_sensor_csd_readout,
+    charge_sensor_compensated_readout,
 )
 
 
@@ -118,13 +118,13 @@ def test_calculate_compensated_voltages_walking_state_continuity():
         assert delta < 0.2, f"Large voltage jump detected at index {i}: {delta}"
 
 
-def test_charge_sensor_csd_readout_validates_parameters(mock_context):
+def test_charge_sensor_compensated_readout_validates_parameters(mock_context):
     """Exercise each guard clause (resolution, repetitions, gradients, sensor gate presence)
     to ensure RoutineError fires."""
     ctx = mock_context
 
     with pytest.raises(RoutineError, match="sweep_resolution must be greater than 0"):
-        charge_sensor_csd_readout(
+        charge_sensor_compensated_readout(
             ctx=ctx,
             charge_sensor_group_name="sensor_group",
             control_group_name="control_group",
@@ -141,7 +141,7 @@ def test_charge_sensor_csd_readout_validates_parameters(mock_context):
     with pytest.raises(
         RoutineError, match="num_sweep_repetitions must be greater than 0"
     ):
-        charge_sensor_csd_readout(
+        charge_sensor_compensated_readout(
             ctx=ctx,
             charge_sensor_group_name="sensor_group",
             control_group_name="control_group",
@@ -158,7 +158,7 @@ def test_charge_sensor_csd_readout_validates_parameters(mock_context):
     with pytest.raises(
         RoutineError, match="sensor_park_point_voltages cannot be empty"
     ):
-        charge_sensor_csd_readout(
+        charge_sensor_compensated_readout(
             ctx=ctx,
             charge_sensor_group_name="sensor_group",
             control_group_name="control_group",
@@ -172,7 +172,7 @@ def test_charge_sensor_csd_readout_validates_parameters(mock_context):
         )
 
     with pytest.raises(RoutineError, match="not found in sensor_park_point_voltages"):
-        charge_sensor_csd_readout(
+        charge_sensor_compensated_readout(
             ctx=ctx,
             charge_sensor_group_name="sensor_group",
             control_group_name="control_group",
@@ -186,7 +186,7 @@ def test_charge_sensor_csd_readout_validates_parameters(mock_context):
         )
 
     with pytest.raises(RoutineError, match="must contain exactly 2 gates"):
-        charge_sensor_csd_readout(
+        charge_sensor_compensated_readout(
             ctx=ctx,
             charge_sensor_group_name="sensor_group",
             control_group_name="control_group",
@@ -200,14 +200,14 @@ def test_charge_sensor_csd_readout_validates_parameters(mock_context):
         )
 
 
-def test_charge_sensor_csd_readout_session_metadata(mock_context):
+def test_charge_sensor_compensated_readout_session_metadata(mock_context):
     """Mock LoggerSession and ensure session.log_sweep metadata captures compensation_enabled,
     feedback_enabled, gate_electrodes, and park_point_current."""
 
     ctx = mock_context
     mock_session = Mock()
 
-    result = charge_sensor_csd_readout(
+    result = charge_sensor_compensated_readout(
         ctx=ctx,
         charge_sensor_group_name="sensor_group",
         control_group_name="control_group",
@@ -231,7 +231,7 @@ def test_charge_sensor_csd_readout_session_metadata(mock_context):
     assert "control_plunger_gates" in result
 
 
-def test_charge_sensor_csd_readout_result_lengths_match(mock_context, mock_session):
+def test_charge_sensor_compensated_readout_result_lengths_match(mock_context, mock_session):
     """Verify compensation_applied, feedback_corrections, and current_measurements arrays
     all match the number of sweep points and that differential_currents subtract park_point_current."""
     ctx = mock_context
@@ -239,7 +239,7 @@ def test_charge_sensor_csd_readout_result_lengths_match(mock_context, mock_sessi
     sweep_resolution = 4
     expected_points = sweep_resolution**2
 
-    result = charge_sensor_csd_readout(
+    result = charge_sensor_compensated_readout(
         ctx=ctx,
         charge_sensor_group_name="sensor_group",
         control_group_name="control_group",
@@ -264,7 +264,7 @@ def test_charge_sensor_csd_readout_result_lengths_match(mock_context, mock_sessi
         assert len(result["differential_currents"]) == expected_points
 
 
-def test_charge_sensor_csd_readout_validates_gamma_factors(mock_context):
+def test_charge_sensor_compensated_readout_validates_gamma_factors(mock_context):
     """Pass gamma_factors without compensation_gradients and assert RoutineError is raised
     with message about requiring initial gradients."""
     ctx = mock_context
@@ -272,7 +272,7 @@ def test_charge_sensor_csd_readout_validates_gamma_factors(mock_context):
     with pytest.raises(
         RoutineError, match="gamma_factors requires compensation_gradients"
     ):
-        charge_sensor_csd_readout(
+        charge_sensor_compensated_readout(
             ctx=ctx,
             charge_sensor_group_name="sensor_group",
             control_group_name="control_group",
@@ -288,13 +288,13 @@ def test_charge_sensor_csd_readout_validates_gamma_factors(mock_context):
         )
 
 
-def test_charge_sensor_csd_readout_gamma_requires_all_gates(mock_context):
+def test_charge_sensor_compensated_readout_gamma_requires_all_gates(mock_context):
     """Provide gamma_factors missing one control plunger gate and verify RoutineError
     mentions the missing gate."""
     ctx = mock_context
 
     with pytest.raises(RoutineError, match="Missing gamma factor for control plunger"):
-        charge_sensor_csd_readout(
+        charge_sensor_compensated_readout(
             ctx=ctx,
             charge_sensor_group_name="sensor_group",
             control_group_name="control_group",
@@ -310,12 +310,12 @@ def test_charge_sensor_csd_readout_gamma_requires_all_gates(mock_context):
         )
 
 
-def test_charge_sensor_csd_readout_gamma_rejects_negative_values(mock_context):
+def test_charge_sensor_compensated_readout_gamma_rejects_negative_values(mock_context):
     """Supply negative gamma value and assert validation raises RoutineError."""
     ctx = mock_context
 
     with pytest.raises(RoutineError, match="must be non-negative"):
-        charge_sensor_csd_readout(
+        charge_sensor_compensated_readout(
             ctx=ctx,
             charge_sensor_group_name="sensor_group",
             control_group_name="control_group",
@@ -345,7 +345,7 @@ def test_clipping_events_counters_tracked_separately(mock_context, mock_session)
     ctx = mock_context
 
     # Test 1: Gradient clipping (high gamma factors trigger adaptive gradient clips)
-    result_gradient = charge_sensor_csd_readout(
+    result_gradient = charge_sensor_compensated_readout(
         ctx=ctx,
         charge_sensor_group_name="sensor_group",
         control_group_name="control_group",
@@ -369,7 +369,7 @@ def test_clipping_events_counters_tracked_separately(mock_context, mock_session)
     assert result_gradient["gradient_clipping_events"] >= 0
 
     # Test 2: Sensor clipping (large compensation gradients drive sensor out of bounds)
-    result_sensor = charge_sensor_csd_readout(
+    result_sensor = charge_sensor_compensated_readout(
         ctx=ctx,
         charge_sensor_group_name="sensor_group",
         control_group_name="control_group",
@@ -394,7 +394,7 @@ def test_clipping_events_counters_tracked_separately(mock_context, mock_session)
     with patch(
         "stanza.routines.builtins.charge_sensor.charge_sensor_readout.logger"
     ) as mock_logger:
-        result_both = charge_sensor_csd_readout(
+        result_both = charge_sensor_compensated_readout(
             ctx=ctx,
             charge_sensor_group_name="sensor_group",
             control_group_name="control_group",
@@ -428,7 +428,7 @@ def test_gradient_history_logs_all_updates(mock_context, mock_session):
     repetition, gate, delta_v, current_error_pre_feedback, gradient_update, new_gradient."""
     ctx = mock_context
 
-    result = charge_sensor_csd_readout(
+    result = charge_sensor_compensated_readout(
         ctx=ctx,
         charge_sensor_group_name="sensor_group",
         control_group_name="control_group",
@@ -466,7 +466,7 @@ def test_feedback_correction_never_exceeds_voltage_range(mock_context, mock_sess
     within [min_v, max_v] without post-feedback clipping."""
     ctx = mock_context
 
-    result = charge_sensor_csd_readout(
+    result = charge_sensor_compensated_readout(
         ctx=ctx,
         charge_sensor_group_name="sensor_group",
         control_group_name="control_group",
@@ -494,7 +494,7 @@ def test_compensation_disabled_holds_sensor_constant(mock_context, mock_session)
 
     initial_sensor_voltage = -1.0
 
-    result = charge_sensor_csd_readout(
+    result = charge_sensor_compensated_readout(
         ctx=ctx,
         charge_sensor_group_name="sensor_group",
         control_group_name="control_group",
@@ -533,7 +533,7 @@ def test_differential_current_subtracts_baseline(
     park_current = 1e-9
     mock_device.measure.return_value = park_current
 
-    result = charge_sensor_csd_readout(
+    result = charge_sensor_compensated_readout(
         ctx=ctx,
         charge_sensor_group_name="sensor_group",
         control_group_name="control_group",
@@ -584,7 +584,7 @@ def test_beta_feedback_math_correctness(
 
     mock_device.measure.side_effect = measure_side_effect
 
-    result = charge_sensor_csd_readout(
+    result = charge_sensor_compensated_readout(
         ctx=ctx,
         charge_sensor_group_name="sensor_group",
         control_group_name="control_group",
@@ -665,7 +665,7 @@ def test_gamma_gradient_adaptation_math_correctness(
 
     mock_device.measure.side_effect = measure_side_effect
 
-    result = charge_sensor_csd_readout(
+    result = charge_sensor_compensated_readout(
         ctx=ctx,
         charge_sensor_group_name="sensor_group",
         control_group_name="control_group",
@@ -764,7 +764,7 @@ def test_sensor_voltage_clipping_to_device_bounds(
 
     mock_device.measure.side_effect = measure_side_effect
 
-    result = charge_sensor_csd_readout(
+    result = charge_sensor_compensated_readout(
         ctx=ctx,
         charge_sensor_group_name="sensor_group",
         control_group_name="control_group",

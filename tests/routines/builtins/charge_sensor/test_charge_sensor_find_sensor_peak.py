@@ -444,7 +444,7 @@ def test_find_sensor_peak_uses_narrowed_range_for_park_point(
 
 
 def test_charge_sensor_workflow_consumes_compensation_results():
-    """Chain find_sensor_peak → run_compensation → charge_sensor_csd_readout
+    """Chain find_sensor_peak → run_compensation → charge_sensor_compensated_readout
     with mocks to ensure outputs from one step feed the next."""
     peak_result = {
         "best_peak_voltage": -0.7,

@@ -103,7 +103,7 @@ def _calculate_compensated_voltages(
 
 
 @routine
-def charge_sensor_csd_readout(  # pylint: disable=too-many-locals,too-many-statements
+def charge_sensor_compensated_readout(  # pylint: disable=too-many-locals,too-many-statements
     ctx: RoutineContext,
     charge_sensor_group_name: str,
     control_group_name: str,
@@ -628,7 +628,7 @@ def charge_sensor_csd_readout(  # pylint: disable=too-many-locals,too-many-state
 
         if session is not None:
             session.log_sweep(
-                name="charge_sensor_csd_readout",
+                name="charge_sensor_compensated_readout",
                 x_data=voltage_measurements,
                 y_data=current_measurements,
                 x_label=", ".join(control_plunger_gates),
@@ -702,7 +702,7 @@ def charge_sensor_csd_readout(  # pylint: disable=too-many-locals,too-many-state
     # Log sweep data
     if session:
         session.log_sweep(
-            name="charge_sensor_csd_readout",
+            name="charge_sensor_compensated_readout",
             x_data=voltage_measurements_2d,
             y_data=differential_currents.tolist(),
             x_label=", ".join(control_plunger_gates),
@@ -720,7 +720,7 @@ def charge_sensor_csd_readout(  # pylint: disable=too-many-locals,too-many-state
         )
 
         session.log_analysis(
-            name="charge_sensor_csd_readout_summary",
+            name="charge_sensor_compensated_readout_summary",
             data={
                 "control_plunger_gates": control_plunger_gates,
                 "sweep_resolution": sweep_resolution,

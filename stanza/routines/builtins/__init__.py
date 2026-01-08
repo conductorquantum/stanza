@@ -1,7 +1,7 @@
 """Built-in routines for common health check and measurement tasks."""
 
 from stanza.routines.builtins.charge_sensor import (
-    charge_sensor_csd_readout,
+    charge_sensor_compensated_readout,
     find_sensor_peak,
     find_stable_sensor_peak,
     run_compensation,
@@ -30,7 +30,7 @@ __all__ = [
     "run_compensation",
     "find_sensor_peak",
     "find_stable_sensor_peak",
-    "charge_sensor_csd_readout",
+    "charge_sensor_compensated_readout",
     "compute_peak_spacing",
     "run_dqd_search_fixed_barriers",
     "run_dqd_search",
