@@ -436,13 +436,7 @@ def run_compensation(
                 f"Gate '{gate}' not found in device channel configurations. "
                 "Cannot validate voltage limits."
             )
-        gate_voltage_range = device.channel_configs[gate].voltage_range
-        min_voltage, max_voltage = gate_voltage_range
-        if min_voltage is None or max_voltage is None:
-            raise RoutineError(
-                f"Voltage limits not configured for gate '{gate}'. "
-                "Cannot safely apply voltage perturbations."
-            )
+        min_voltage, max_voltage = device.channel_configs[gate].voltage_range
 
         for counter, delta_index in enumerate(measurement_indices, start=1):
             voltage_difference = float(voltage_differences[delta_index])
