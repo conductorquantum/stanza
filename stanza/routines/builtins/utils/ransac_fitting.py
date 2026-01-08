@@ -59,6 +59,18 @@ def fit_compensation_gradient_ransac(
     10 samples each) while automatically detecting and rejecting outliers from
     occasional bad measurements.
 
+    Note:
+        The linear model is justified by capacitive crosstalk physics. When a control
+        gate voltage changes, the sensor peak shifts according to:
+
+            V_sensor_shift = (C_ij / C_total) * V_control_change
+
+        where C_ij is the cross-capacitance between the control gate and the sensor,
+        and C_total is the total capacitance to ground. While capacitances can drift
+        over longer timescales in an open quantum system, they remain approximately
+        constant during a single measurement sweep, yielding a linear relationship
+        between control voltage changes and sensor peak shifts.
+
     Args:
         measurement_samples: List of measurement records, each containing:
             - "control_delta": Control gate voltage change from baseline (V)
