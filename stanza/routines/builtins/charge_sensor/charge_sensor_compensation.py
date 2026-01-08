@@ -235,7 +235,7 @@ def _single_window_sensor_plunger_sweep(
         )
 
     # Create PeakWindowSweepOutput with the best peak's data
-    result = PeakWindowSweepOutput(
+    return PeakWindowSweepOutput(
         best_peak=fitted_peak,
         aggregated_voltages=aggregated_voltages,
         aggregated_currents=aggregated_currents,
@@ -243,8 +243,6 @@ def _single_window_sensor_plunger_sweep(
         score=float(fitted_peak.quality_score),  # Use quality_score for consistency
         num_peaks=1,
     )
-
-    return result
 
 
 @routine
