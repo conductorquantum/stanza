@@ -49,6 +49,7 @@ def fit_compensation_gradient_ransac(
     measurement_samples: list[dict[str, float]],
     reference_peak_center_voltage: float,
     gate_name: str,
+    seed: int = 42,
 ) -> RANSACFitResult:
     """
     Fit compensation gradient using RANSAC regression on raw measurement samples.
@@ -64,6 +65,7 @@ def fit_compensation_gradient_ransac(
             - "peak_position": Measured sensor peak center voltage (V)
         reference_peak_center_voltage: Baseline sensor peak voltage (V)
         gate_name: Name of gate being measured (for logging)
+        seed: Random seed for RANSAC reproducibility (default: 42)
 
     Returns:
         RANSACFitResult containing fitted gradient, intercept, and outlier details
@@ -101,7 +103,7 @@ def fit_compensation_gradient_ransac(
             min_samples=2,  # Minimum points to fit a line (slope + intercept)
             residual_threshold=None,  # Auto-detect based on MAD
             max_trials=1000,  # Sufficient for 100-point dataset
-            random_state=42,  # For reproducibility
+            random_state=seed,  # For reproducibility
         )
         ransac.fit(X, y)
 
