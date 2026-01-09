@@ -54,7 +54,10 @@ from stanza.exceptions import RoutineError
 from stanza.logger.session import LoggerSession
 from stanza.models import GateType
 from stanza.routines import RoutineContext, routine
-from stanza.routines.builtins.utils import filter_gates_by_group
+from stanza.routines.builtins.utils.group_handling import (
+    filter_gates_by_group,
+    get_routine_result,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -190,7 +193,10 @@ def leakage_test(
         control_gate_configs.values(), key=lambda x: x.voltage_range[0]
     ).voltage_range[0]
 
-    noise_floor_measurement_results = ctx.results.get("noise_floor_measurement", {})
+    # Get noise floor measurement results for the current group
+    noise_floor_measurement_results = get_routine_result(
+        ctx, "noise_floor_measurement", session
+    )
     min_current_threshold = noise_floor_measurement_results.get("current_std", 1e-10)
     leakage_test_results = {}
 
@@ -308,12 +314,16 @@ def global_accumulation(
     if step_size <= 0:
         raise RoutineError("Step size must be greater than 0")
 
-    leakage_test_results = ctx.results.get("leakage_test", {})
-    voltage_bound = leakage_test_results[
+    # Get leakage_test results for the current group
+    leakage_test_results = get_routine_result(ctx, "leakage_test", session)
+
+    voltage_bound_key = (
         "max_safe_voltage_bound"
         if charge_carrier_type == "electron"
         else "min_safe_voltage_bound"
-    ]
+    )
+
+    voltage_bound = leakage_test_results[voltage_bound_key]
 
     ctx.resources.device.jump({bias_gate: bias_voltage}, wait_for_settling=True)
     # Filter control gates by group if group is available in ctx.resources
@@ -329,10 +339,13 @@ def global_accumulation(
         measure_electrode=measure_electrode,
         session=session,
     )
+    # Subtract noise floor offset to correct for DC measurement offset
+    current_mean_offset = get_routine_result(
+        ctx, "noise_floor_measurement", session
+    ).get("current_mean", 0.0)
+    currents = np.array(currents) - current_mean_offset
     try:
-        turn_on_analysis = analyze_single_gate_heuristic(
-            sweep_voltages, np.array(currents)
-        )
+        turn_on_analysis = analyze_single_gate_heuristic(sweep_voltages, currents)
     except Exception as e:
         raise RoutineError(f"Error in global_accumulation: {str(e)}") from e
 
@@ -411,8 +424,11 @@ def reservoir_characterization(
 
     ctx.resources.device.jump({bias_gate: bias_voltage}, wait_for_settling=True)
 
-    leakage_test_results = ctx.results.get("leakage_test", {})
-    global_accumulation_results = ctx.results.get("global_accumulation", {})
+    # Get routine results for the current group
+    leakage_test_results = get_routine_result(ctx, "leakage_test", session)
+    global_accumulation_results = get_routine_result(
+        ctx, "global_accumulation", session
+    )
 
     max_safe_voltage_bound = leakage_test_results["max_safe_voltage_bound"]
     min_safe_voltage_bound = leakage_test_results["min_safe_voltage_bound"]
@@ -461,9 +477,14 @@ def reservoir_characterization(
             measure_electrode,
             session,
         )
+        # Subtract noise floor offset to correct for DC measurement offset
+        current_mean_offset = get_routine_result(
+            ctx, "noise_floor_measurement", session
+        ).get("current_mean", 0.0)
+        currents = np.array(currents) - current_mean_offset
         try:
             reservoir_analysis = analyze_single_gate_heuristic(
-                np.array(voltages), np.array(currents)
+                np.array(voltages), currents
             )
         except Exception as e:
             raise RoutineError(f"Error in reservoir_characterization: {str(e)}") from e
@@ -540,15 +561,14 @@ def finger_gate_characterization(
 
     ctx.resources.device.jump({bias_gate: bias_voltage}, wait_for_settling=True)
 
-    leakage_test_results = ctx.results.get("leakage_test", {})
-    global_accumulation_results = ctx.results.get("global_accumulation", {})
+    # Get routine results for the current group
+    leakage_test_results = get_routine_result(ctx, "leakage_test", session)
+    global_accumulation_results = get_routine_result(
+        ctx, "global_accumulation", session
+    )
 
     max_safe_voltage_bound = leakage_test_results["max_safe_voltage_bound"]
     min_safe_voltage_bound = leakage_test_results["min_safe_voltage_bound"]
-    print(
-        f"max_safe_voltage_bound: {max_safe_voltage_bound}, min_safe_voltage_bound: {min_safe_voltage_bound}"
-    )
-    print(f"charge_carrier_type: {charge_carrier_type}")
 
     voltage_left_bound = (
         min_safe_voltage_bound
@@ -562,7 +582,6 @@ def finger_gate_characterization(
     )
     voltage_bounds_range = abs(voltage_right_bound - voltage_left_bound)
     global_turn_on_voltage = global_accumulation_results["global_turn_on_voltage"]
-    print(f"global_turn_on_voltage: {global_turn_on_voltage}")
 
     finger_gate_characterization_results = {}
 
@@ -580,12 +599,10 @@ def finger_gate_characterization(
 
     for gate in finger_gates:
         other_gates = [g for g in gates_to_accumulate if g != gate]
-        print(f"Jumping to global turn-on voltage for other gates: {other_gates}")
         ctx.resources.device.jump(
             dict.fromkeys(other_gates, global_turn_on_voltage), wait_for_settling=True
         )  # Make sure the other gates are accumulated before sweeping the finger gate
         ctx.resources.device.jump({gate: voltage_left_bound}, wait_for_settling=True)
-        print(f"Jumped to voltage left bound for gate: {gate}")
         time.sleep(DEFAULT_SETTLING_TIME_S)
         num_points = max(2, int(voltage_bounds_range / step_size))
         voltages, currents = ctx.resources.device.sweep_1d(
@@ -594,9 +611,14 @@ def finger_gate_characterization(
             measure_electrode,
             session,
         )
+        # Subtract noise floor offset to correct for DC measurement offset
+        current_mean_offset = get_routine_result(
+            ctx, "noise_floor_measurement", session
+        ).get("current_mean", 0.0)
+        currents = np.array(currents) - current_mean_offset
         try:
             finger_gate_analysis = analyze_single_gate_heuristic(
-                np.array(voltages), np.array(currents)
+                np.array(voltages), currents
             )
         except Exception as e:
             raise RoutineError(f"Error in finger_gate_characterization: {e}") from e
@@ -614,7 +636,7 @@ def finger_gate_characterization(
     }
 
 
-def _calculate_leakage_matrix(delta_V: float, current_diff: np.ndarray) -> np.ndarray:
+def calculate_leakage_matrix(delta_V: float, current_diff: np.ndarray) -> np.ndarray:
     """Calculate leakage resistance matrix from voltage change and current differences.
 
     Args:
@@ -631,7 +653,7 @@ def _calculate_leakage_matrix(delta_V: float, current_diff: np.ndarray) -> np.nd
     return leakage_matrix
 
 
-def _check_leakage_threshold(
+def check_leakage_threshold(
     leakage_matrix: np.ndarray,
     leakage_threshold_resistance: int,
     leakage_threshold_count: int,
@@ -744,7 +766,7 @@ def _test_single_voltage_bound(
             continue
 
         currents_diff = np.array(currents_matrix) - initial_currents_array
-        leakage_matrix = _calculate_leakage_matrix(delta_V, currents_diff)
+        leakage_matrix = calculate_leakage_matrix(delta_V, currents_diff)
 
         if session:
             session.log_measurement(
@@ -758,7 +780,7 @@ def _test_single_voltage_bound(
             )
 
         # Check if leakage threshold exceeded
-        if _check_leakage_threshold(
+        if check_leakage_threshold(
             leakage_matrix,
             leakage_threshold_resistance,
             leakage_threshold_count,

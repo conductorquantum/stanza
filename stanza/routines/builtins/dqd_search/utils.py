@@ -175,10 +175,13 @@ def compute_peak_spacings(
     start_position = sweep_voltages[0]
 
     # Compute Euclidean distances from start point
-    distances = np.linalg.norm(peak_positions - start_position, axis=1)
+    distances: NDArray[np.float64] = np.linalg.norm(
+        peak_positions - start_position, axis=1
+    )
 
     # Inter-peak spacings
-    return np.diff(distances)
+    spacings: NDArray[np.float64] = np.diff(distances)
+    return spacings
 
 
 def get_global_turn_on_voltage(results: ResultsRegistry) -> float:

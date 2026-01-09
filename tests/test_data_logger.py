@@ -479,7 +479,7 @@ class TestDataLogger:
             assert len(logger.active_sessions) == 0
 
     def test_creates_session_with_group_name(self):
-        """Test that creating a session with a group_name appends the group name to the session ID and stores it in metadata."""
+        """Test that creating a session with a group_name stores it in metadata but does NOT affect session ID."""
         with tempfile.TemporaryDirectory() as tmpdir:
             logger = DataLogger(
                 routine_name="test_routine",
@@ -489,8 +489,10 @@ class TestDataLogger:
             session = logger.create_session(
                 session_id="my_routine", group_name="control"
             )
-            assert session.session_id == "my_routine_control"
-            assert session.metadata.group_name == "control"
+            assert (
+                session.session_id == "my_routine"
+            )  # group_name no longer appended to path
+            assert session.metadata.group_name == "control"  # but still in metadata
 
             logger.close_session(session.session_id)
 
@@ -508,8 +510,8 @@ class TestDataLogger:
 
             logger.close_session(session.session_id)
 
-    def test_group_name_included_in_directory_path(self):
-        """Test that when a group_name is provided, the session directory path includes the group name as a suffix."""
+    def test_group_name_not_included_in_directory_path(self):
+        """Test that when a group_name is provided, it does NOT affect the session directory path."""
         with tempfile.TemporaryDirectory() as tmpdir:
             logger = DataLogger(
                 routine_name="test_routine",
@@ -520,18 +522,21 @@ class TestDataLogger:
                 session_id="my_routine", group_name="sensor"
             )
 
-            # Verify directory exists with group suffix
-            session_dir = logger.base_directory / "my_routine_sensor"
+            # Verify directory exists WITHOUT group suffix
+            session_dir = logger.base_directory / "my_routine"
             assert session_dir.exists()
 
-            # Verify metadata file exists in group-suffixed directory
+            # Verify metadata file exists in session directory
             metadata_file = session_dir / "session_metadata.json"
             assert metadata_file.exists()
+
+            # Verify group_name is in metadata but not in path
+            assert session.metadata.group_name == "sensor"
 
             logger.close_session(session.session_id)
 
     def test_group_name_persisted_in_session_metadata(self):
-        """Test that the group_name is correctly persisted in the session metadata JSON file after closing the session."""
+        """Test that the group_name is correctly persisted in the session metadata JSON file but does not affect path."""
         with tempfile.TemporaryDirectory() as tmpdir:
             logger = DataLogger(
                 routine_name="test_routine",
@@ -543,41 +548,45 @@ class TestDataLogger:
             )
             logger.close_session(session.session_id)
 
-            # Read metadata file
+            # Read metadata file (path does NOT include group_name)
             metadata_file = (
-                logger.base_directory / "my_routine_control" / "session_metadata.json"
+                logger.base_directory / "my_routine" / "session_metadata.json"
             )
             with open(metadata_file) as f:
                 metadata = json.load(f)
 
-            assert metadata["group_name"] == "control"
-            assert metadata["session_id"] == "my_routine_control"
+            assert metadata["group_name"] == "control"  # Stored in metadata
+            assert metadata["session_id"] == "my_routine"  # Path does NOT include group
 
-    def test_multiple_sessions_with_different_groups(self):
-        """Test that multiple sessions with the same session_id but different group_names create separate directories and data files."""
+    def test_multiple_sessions_require_different_session_ids(self):
+        """Test that multiple sessions require different session_ids since group_name no longer affects path."""
         with tempfile.TemporaryDirectory() as tmpdir:
             logger = DataLogger(
                 routine_name="test_routine",
                 base_dir=tmpdir,
             )
 
-            # Create session for control group
-            session1 = logger.create_session(session_id="routine", group_name="control")
+            # Create first session
+            session1 = logger.create_session(
+                session_id="routine_v1", group_name="control"
+            )
             session1.log_measurement("test", {"value": 1})
             logger.close_session(session1.session_id)
 
-            # Create session for sensor group
-            session2 = logger.create_session(session_id="routine", group_name="sensor")
+            # Create second session with different session_id (not just different group)
+            session2 = logger.create_session(
+                session_id="routine_v2", group_name="sensor"
+            )
             session2.log_measurement("test", {"value": 2})
             logger.close_session(session2.session_id)
 
-            # Verify both directories exist
-            control_dir = logger.base_directory / "routine_control"
-            sensor_dir = logger.base_directory / "routine_sensor"
+            # Verify both directories exist with different session_ids
+            dir1 = logger.base_directory / "routine_v1"
+            dir2 = logger.base_directory / "routine_v2"
 
-            assert control_dir.exists()
-            assert sensor_dir.exists()
+            assert dir1.exists()
+            assert dir2.exists()
 
             # Verify separate data files
-            assert (control_dir / "measurement.jsonl").exists()
-            assert (sensor_dir / "measurement.jsonl").exists()
+            assert (dir1 / "measurement.jsonl").exists()
+            assert (dir2 / "measurement.jsonl").exists()

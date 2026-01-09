@@ -295,10 +295,10 @@ class TestGroupFilteringInstrumentSharing:
 class TestGroupFilteringWithLogger:
     """Tests for group filtering integration with data logger."""
 
-    def test_group_name_included_in_logger_session_path(
+    def test_group_name_not_in_logger_session_path(
         self, registry_fixture, routine_runner_with_grouped_device, tmp_path
     ):
-        """Test that group name is included in logger session directory path."""
+        """Test that group name is NOT included in logger session directory path."""
         import tempfile
 
         from stanza.logger.data_logger import DataLogger
@@ -315,22 +315,22 @@ class TestGroupFilteringWithLogger:
 
             @routine(name="test_routine")
             def test_routine(ctx: RoutineContext, session=None) -> dict:
-                # Session should have group in its ID
+                # Session should NOT have group in its ID (path), but should in metadata
                 if session:
-                    assert session.session_id == "test_routine_control"
-                    assert session.metadata.group_name == "control"
+                    assert session.session_id == "test_routine"  # No group suffix
+                    assert session.metadata.group_name == "control"  # But in metadata
                 return {}
 
             runner.run("test_routine", group="control")
 
-            # Verify directory with group suffix was created
-            session_dir = logger.base_directory / "test_routine_control"
+            # Verify directory WITHOUT group suffix was created
+            session_dir = logger.base_directory / "test_routine"
             assert session_dir.exists()
 
-    def test_different_groups_create_separate_directories(
+    def test_session_suffix_creates_separate_directories(
         self, registry_fixture, routine_runner_with_grouped_device
     ):
-        """Test that different groups create separate output directories."""
+        """Test that session_suffix creates separate output directories (not group)."""
         import tempfile
 
         from stanza.logger.data_logger import DataLogger
@@ -350,22 +350,22 @@ class TestGroupFilteringWithLogger:
                     session.log_measurement("value", {"data": 1})
                 return {}
 
-            # Run for control group
-            runner.run("test_routine", group="control")
+            # Run with session_suffix "run1"
+            runner.run("test_routine", session_suffix="run1", group="control")
 
-            # Run for sensor group
-            runner.run("test_routine", group="sensor")
+            # Run with session_suffix "run2"
+            runner.run("test_routine", session_suffix="run2", group="sensor")
 
-            # Verify separate directories exist
-            control_dir = logger.base_directory / "test_routine_control"
-            sensor_dir = logger.base_directory / "test_routine_sensor"
+            # Verify separate directories exist based on session_suffix (not group)
+            run1_dir = logger.base_directory / "test_routine_run1"
+            run2_dir = logger.base_directory / "test_routine_run2"
 
-            assert control_dir.exists()
-            assert sensor_dir.exists()
+            assert run1_dir.exists()
+            assert run2_dir.exists()
 
             # Verify both have their own data files
-            assert (control_dir / "measurement.jsonl").exists()
-            assert (sensor_dir / "measurement.jsonl").exists()
+            assert (run1_dir / "measurement.jsonl").exists()
+            assert (run2_dir / "measurement.jsonl").exists()
 
     def test_routine_without_group_creates_path_without_suffix(
         self, registry_fixture, routine_runner_with_grouped_device
@@ -402,3 +402,88 @@ class TestGroupFilteringWithLogger:
             # Verify no group-suffixed directory was created
             assert not (logger.base_directory / "test_routine_control").exists()
             assert not (logger.base_directory / "test_routine_sensor").exists()
+
+
+def test_routine_runner_stores_results_with_group_suffix():
+    """Run a routine twice with different groups and assert ResultsRegistry
+    stores routine_side_X keys instead of overwriting the base key."""
+    from stanza.device import Device
+    from stanza.models import (
+        ControlInstrumentConfig,
+        DeviceConfig,
+        DeviceGroup,
+        GateType,
+        MeasurementInstrumentConfig,
+    )
+    from stanza.routines import RoutineContext, RoutineRunner, routine
+    from stanza.utils import generate_channel_configs
+    from tests.conftest import MockControlInstrument, MockMeasurementInstrument
+
+    # Create a simple test routine
+    @routine(name="test_group_suffix_routine")
+    def test_routine(ctx: RoutineContext) -> dict:
+        return {"value": "test_data"}
+
+    # Create device with two groups
+    config = DeviceConfig(
+        name="test_device",
+        groups={
+            "group_A": DeviceGroup(name="group_A", gates=["G1", "G2"]),
+            "group_B": DeviceGroup(name="group_B", gates=["G3", "G4"]),
+        },
+        gates={
+            "G1": make_gate(GateType.PLUNGER, control_channel=1),
+            "G2": make_gate(GateType.PLUNGER, control_channel=2),
+            "G3": make_gate(GateType.PLUNGER, control_channel=3),
+            "G4": make_gate(GateType.PLUNGER, control_channel=4),
+        },
+        contacts={},
+        gpios={},
+        instruments=[
+            ControlInstrumentConfig(
+                name="ctrl",
+                ip_addr="127.0.0.1",
+                slew_rate=1.0,
+                driver=None,
+            ),
+            MeasurementInstrumentConfig(
+                name="meas",
+                ip_addr="127.0.0.1",
+                measurement_duration=1.0,
+                sample_time=0.01,
+                driver=None,
+            ),
+        ],
+    )
+
+    # Create Device properly with channel configs and mock instruments
+    channel_configs = generate_channel_configs(config)
+    device = Device(
+        name=config.name,
+        device_config=config,
+        channel_configs=channel_configs,
+        control_instrument=MockControlInstrument(),
+        measurement_instrument=MockMeasurementInstrument(),
+    )
+
+    # Create RoutineRunner with the device
+    runner = RoutineRunner(resources=[device])
+
+    # Run routine with group_A
+    result_a = runner.run("test_group_suffix_routine", group="group_A")
+
+    # Run routine with group_B
+    result_b = runner.run("test_group_suffix_routine", group="group_B")
+
+    # Check that results are stored with group suffixes in the runner's results registry
+    results_keys = runner.results.list_results()
+
+    # Verify both group-specific results exist (not overwritten)
+    assert "test_group_suffix_routine_group_A" in results_keys
+    assert "test_group_suffix_routine_group_B" in results_keys
+
+    # Verify both results contain the expected data
+    assert result_a is not None
+    assert result_b is not None
+    assert result_a["value"] == "test_data"
+    assert result_b["value"] == "test_data"
