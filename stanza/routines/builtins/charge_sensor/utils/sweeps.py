@@ -85,6 +85,7 @@ def many_window_barrier_sweep(  # pylint: disable=too-many-locals,too-many-state
     measure_electrode: str,
     bias_gate: str,
     bias_voltage: float,
+    settling_time_s: float = DEFAULT_SETTLING_TIME_S,
     session: LoggerSession | None = None,
     gate_voltage_overrides: dict[str, float] | None = None,
 ) -> SensorDotPlungerSweepOutput:
@@ -106,6 +107,7 @@ def many_window_barrier_sweep(  # pylint: disable=too-many-locals,too-many-state
         measure_electrode: Electrode to measure current from
         bias_gate: Name of the bias gate (contact) to apply bias voltage
         bias_voltage: Voltage to apply to bias gate during measurements
+        settling_time_s: Time to wait for device settling (default: 3.0s)
         session: Logger session for measurements and analysis
         gate_voltage_overrides: Optional dict of {gate_name: voltage} to override
                                 specific gates instead of using mean_reservoir_saturation_voltage
@@ -119,7 +121,7 @@ def many_window_barrier_sweep(  # pylint: disable=too-many-locals,too-many-state
     device: Device = ctx.resources.device
 
     device.jump({bias_gate: bias_voltage}, wait_for_settling=True)
-    time.sleep(DEFAULT_SETTLING_TIME_S)
+    time.sleep(settling_time_s)
     min_v, max_v = sensor_plunger_range
 
     sensor_plunger_start_voltages = np.arange(min_v, max_v, window_size)
@@ -155,7 +157,7 @@ def many_window_barrier_sweep(  # pylint: disable=too-many-locals,too-many-state
             zip(sensor_gates_list, voltage_list[0], strict=False)
         )
         device.jump(first_voltage_point, wait_for_settling=True)
-        time.sleep(DEFAULT_SETTLING_TIME_S)
+        time.sleep(settling_time_s)
 
         _, current_trace = device.sweep_nd(
             gate_electrodes=sensor_gates_list,

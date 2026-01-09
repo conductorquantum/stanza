@@ -34,8 +34,8 @@ DEFAULT_WINDOW_HALF_WIDTH = 128
 REFINED_STEP_MULTIPLIER = 0.5
 
 
-# Number of samples to average for each gate compensation measurement
-NUM_OF_SAMPLES_FOR_AVERAGING = 5
+# Default number of samples to average for each gate compensation measurement
+DEFAULT_NUM_SAMPLES_FOR_AVERAGING = 5
 
 # ML model constants
 COULOMB_CLASSIFIER_MODEL = "coulomb-blockade-classifier-v3"

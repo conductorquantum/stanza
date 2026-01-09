@@ -184,6 +184,7 @@ def measure_peak_stability(
     aggregated_voltages: np.ndarray,
     aggregated_currents: np.ndarray,
     hold_time_seconds: float = 120.0,
+    settling_time_s: float = DEFAULT_SETTLING_TIME_S,
     session: LoggerSession | None = None,
 ) -> "StabilityMeasurement":
     """
@@ -206,6 +207,7 @@ def measure_peak_stability(
         aggregated_voltages: Voltage array from original sweep (for local slope calc)
         aggregated_currents: Current array from original sweep (for local slope calc)
         hold_time_seconds: Duration to hold and measure (default: 120.0 seconds)
+        settling_time_s: Time to wait for device settling (default: 3.0s)
         session: Logger session for saving measurements
 
     Returns:
@@ -222,13 +224,13 @@ def measure_peak_stability(
     )
 
     device.jump({bias_gate: bias_voltage}, wait_for_settling=True)
-    time.sleep(DEFAULT_SETTLING_TIME_S)
+    time.sleep(settling_time_s)
 
     device_state = dict.fromkeys(sensor_gates_list, mean_reservoir_saturation_voltage)
     device_state[sensor_plunger_gate] = peak.sensitivity_voltage
 
     device.jump(device_state, wait_for_settling=True)
-    time.sleep(DEFAULT_SETTLING_TIME_S)
+    time.sleep(settling_time_s)
 
     logger.info(
         "Holding at max-gradient point for %.1f seconds, recording current...",

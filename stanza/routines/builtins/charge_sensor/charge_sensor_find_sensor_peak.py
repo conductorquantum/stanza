@@ -20,6 +20,7 @@ from stanza.exceptions import RoutineError
 from stanza.logger.session import LoggerSession
 from stanza.routines import RoutineContext, routine
 from stanza.routines.builtins.charge_sensor.utils.constants import (
+    DEFAULT_SETTLING_TIME_S,
     DEFAULT_WINDOW_HALF_WIDTH,
     INITIAL_WINDOW_MULTIPLIER,
     ML_MODEL_INPUT_SIZE,
@@ -55,6 +56,7 @@ def find_sensor_peak(  # pylint: disable=too-many-locals
     bias_voltage: float,
     zero_control_side: bool = False,
     gate_voltage_overrides: dict[str, float] | None = None,
+    settling_time_s: float = DEFAULT_SETTLING_TIME_S,
     session: LoggerSession | None = None,
     **kwargs: Any,  # pylint: disable=unused-argument
 ) -> dict[str, Any]:
@@ -74,6 +76,7 @@ def find_sensor_peak(  # pylint: disable=too-many-locals
         bias_voltage: Voltage to apply to bias gate (V)
         zero_control_side: If True, set control gates to 0V before sweep (default: False)
         gate_voltage_overrides: Optional dict to override specific sensor gates (default: None)
+        settling_time_s: Time to wait for device settling before measurements (default: 3.0s)
         session: Logger session for measurements and analysis
 
     Returns:
@@ -192,6 +195,7 @@ def find_sensor_peak(  # pylint: disable=too-many-locals
         measure_electrode=measure_electrode,
         bias_gate=bias_gate,
         bias_voltage=bias_voltage,
+        settling_time_s=settling_time_s,
         session=session,
         gate_voltage_overrides=gate_voltage_overrides,
     )
@@ -318,6 +322,7 @@ def find_stable_sensor_peak(  # pylint: disable=too-many-locals,too-many-stateme
     gate_voltage_overrides: dict[str, float] | None = None,
     top_n_peaks: int = 3,
     hold_time_seconds: float = 120.0,
+    settling_time_s: float = DEFAULT_SETTLING_TIME_S,
     session: LoggerSession | None = None,
     **kwargs: Any,  # pylint: disable=unused-argument
 ) -> dict[str, Any]:
@@ -340,6 +345,7 @@ def find_stable_sensor_peak(  # pylint: disable=too-many-locals,too-many-stateme
         gate_voltage_overrides: Optional dict to override specific sensor gates (default: None)
         top_n_peaks: Number of top peaks to test for stability (default: 3)
         hold_time_seconds: Duration to hold at each peak (default: 120.0)
+        settling_time_s: Time to wait for device settling before measurements (default: 3.0s)
         session: Logger session for measurements and analysis
 
     Returns:
@@ -458,6 +464,7 @@ def find_stable_sensor_peak(  # pylint: disable=too-many-locals,too-many-stateme
         measure_electrode=measure_electrode,
         bias_gate=bias_gate,
         bias_voltage=bias_voltage,
+        settling_time_s=settling_time_s,
         session=session,
         gate_voltage_overrides=gate_voltage_overrides,
     )
@@ -531,6 +538,7 @@ def find_stable_sensor_peak(  # pylint: disable=too-many-locals,too-many-stateme
             aggregated_voltages=aggregated_voltages,
             aggregated_currents=aggregated_currents,
             hold_time_seconds=hold_time_seconds,
+            settling_time_s=settling_time_s,
             session=session,
         )
 

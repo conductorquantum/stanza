@@ -21,9 +21,9 @@ from stanza.logger.session import LoggerSession
 from stanza.models import GateType
 from stanza.routines import RoutineContext, routine
 from stanza.routines.builtins.charge_sensor.utils.constants import (
+    DEFAULT_NUM_SAMPLES_FOR_AVERAGING,
     DEFAULT_SETTLING_TIME_S,
     MULTIPLIER_OF_PEAK_SPACING,
-    NUM_OF_SAMPLES_FOR_AVERAGING,
     PERTURBATION_DIVISOR,
 )
 from stanza.routines.builtins.charge_sensor.utils.sweeps import (
@@ -143,6 +143,7 @@ def _single_window_sensor_plunger_sweep(
     measure_electrode: str,
     bias_gate: str,
     bias_voltage: float,
+    settling_time_s: float = DEFAULT_SETTLING_TIME_S,
     session: LoggerSession | None = None,
 ) -> PeakWindowSweepOutput:
     """Run a single-window sensor plunger voltage sweep with multi-model peak fitting.
@@ -160,6 +161,7 @@ def _single_window_sensor_plunger_sweep(
         measure_electrode: Electrode to measure current from
         bias_gate: Name of the bias gate to apply bias voltage
         bias_voltage: Voltage to apply to bias gate during measurements
+        settling_time_s: Time to wait for device settling (default: 3.0s)
         session: Logger session for measurements and analysis
 
     Returns:
@@ -168,7 +170,7 @@ def _single_window_sensor_plunger_sweep(
     device = ctx.resources.device
 
     device.jump({bias_gate: bias_voltage}, wait_for_settling=True)
-    time.sleep(DEFAULT_SETTLING_TIME_S)
+    time.sleep(settling_time_s)
 
     min_v, max_v = sensor_plunger_range
 
@@ -205,7 +207,7 @@ def _single_window_sensor_plunger_sweep(
         first_voltage_point[sensor_plunger_gate] = float(sp_sweep_voltages[0])
 
     device.jump(first_voltage_point, wait_for_settling=True)
-    time.sleep(DEFAULT_SETTLING_TIME_S)
+    time.sleep(settling_time_s)
 
     try:
         _, current_trace = device.sweep_nd(
@@ -255,6 +257,8 @@ def run_compensation(
     bias_voltage: float,
     zero_control_side: bool = False,
     gates_to_compensate: list[str] | None = None,
+    settling_time_s: float = DEFAULT_SETTLING_TIME_S,
+    num_samples_for_averaging: int = DEFAULT_NUM_SAMPLES_FOR_AVERAGING,
     session: LoggerSession | None = None,
     seed: int | None = None,
     **kwargs: Any,  # pylint: disable=unused-argument
@@ -274,6 +278,8 @@ def run_compensation(
         bias_voltage: Voltage to apply to bias gate (V)
         zero_control_side: If True, measure gradients relative to 0V baseline (default: False)
         gates_to_compensate: Optional list of gate names to test (default: None, tests all)
+        settling_time_s: Time to wait for device settling before measurements (default: 3.0s)
+        num_samples_for_averaging: Number of samples to average per voltage delta (default: 5)
         session: Logger session for measurements and analysis
         seed: Random seed for reproducible measurement ordering (default: None, non-deterministic)
 
@@ -361,14 +367,14 @@ def run_compensation(
         )
 
     device.jump(baseline_control_state, wait_for_settling=True)
-    time.sleep(DEFAULT_SETTLING_TIME_S)
+    time.sleep(settling_time_s)
 
     # Baseline is measured once, not after each gate, prioritizing measurement time
     # over accuracy. This assumes drift is not substantial over the measurement duration.
     try:
         baseline_sensitivity_voltages = []
         baseline_peak_center_voltages = []
-        total_baseline_measurements = NUM_OF_SAMPLES_FOR_AVERAGING
+        total_baseline_measurements = num_samples_for_averaging
         for baseline_idx in range(total_baseline_measurements):
             logger.info(
                 "Baseline measurement %d of %d for sensor plunger %s",
@@ -386,6 +392,7 @@ def run_compensation(
                 measure_electrode=measure_electrode,
                 bias_gate=bias_gate,
                 bias_voltage=bias_voltage,
+                settling_time_s=settling_time_s,
                 session=session,
             )
             baseline_sensitivity_voltages.append(
@@ -423,7 +430,7 @@ def run_compensation(
     for gate in control_non_reservoir_gates:
         num_deltas = len(voltage_differences)
         measurement_indices = np.repeat(
-            np.arange(num_deltas, dtype=int), NUM_OF_SAMPLES_FOR_AVERAGING
+            np.arange(num_deltas, dtype=int), num_samples_for_averaging
         )
         rng.shuffle(measurement_indices)
         per_delta_measurements: dict[int, list[float]] = {
@@ -460,7 +467,7 @@ def run_compensation(
             device_state = baseline_control_state.copy()
             device_state[gate] = resulting_voltage
             device.jump(device_state, wait_for_settling=True)
-            time.sleep(DEFAULT_SETTLING_TIME_S)
+            time.sleep(settling_time_s)
 
             iteration_sweep_output = _single_window_sensor_plunger_sweep(
                 ctx=ctx,
@@ -472,6 +479,7 @@ def run_compensation(
                 measure_electrode=measure_electrode,
                 bias_gate=bias_gate,
                 bias_voltage=bias_voltage,
+                settling_time_s=settling_time_s,
                 session=session,
             )
 
@@ -503,10 +511,10 @@ def run_compensation(
         peak_positions = np.empty_like(voltage_differences, dtype=np.float64)
         for idx in range(num_deltas):
             measurements = per_delta_measurements[idx]
-            if len(measurements) != NUM_OF_SAMPLES_FOR_AVERAGING:
+            if len(measurements) != num_samples_for_averaging:
                 raise RoutineError(
                     "Incomplete measurement set: expected "
-                    f"{NUM_OF_SAMPLES_FOR_AVERAGING} samples for voltage difference "
+                    f"{num_samples_for_averaging} samples for voltage difference "
                     f"{voltage_differences[idx]:+.6f} V, got {len(measurements)}"
                 )
             peak_positions[idx] = float(np.mean(measurements))
@@ -570,9 +578,7 @@ def run_compensation(
                     "peak_position": float(peak_position),
                     "peak_shift": float(peak_shift),
                     "num_inliers": int(inlier_count),
-                    "inlier_fraction": float(
-                        inlier_count / NUM_OF_SAMPLES_FOR_AVERAGING
-                    ),
+                    "inlier_fraction": float(inlier_count / num_samples_for_averaging),
                 }
                 for control_delta, peak_position, peak_shift, inlier_count in zip(
                     voltage_differences,
@@ -588,7 +594,7 @@ def run_compensation(
 
         reset_state = {gate: baseline_control_state[gate]}
         device.jump(reset_state, wait_for_settling=True)
-        time.sleep(DEFAULT_SETTLING_TIME_S)
+        time.sleep(settling_time_s)
 
     logger.info("Compensation gradients: %s", compensation_gradients_dict)
 
@@ -624,9 +630,9 @@ def run_compensation(
                     "measurement_samples": details["measurement_samples"],
                     "voltage_differences": voltage_differences.tolist(),
                     "num_deltas": len(voltage_differences),
-                    "samples_per_delta": NUM_OF_SAMPLES_FOR_AVERAGING,
+                    "samples_per_delta": num_samples_for_averaging,
                     "total_samples": int(
-                        len(voltage_differences) * NUM_OF_SAMPLES_FOR_AVERAGING
+                        len(voltage_differences) * num_samples_for_averaging
                     ),
                 },
             )
