@@ -332,7 +332,7 @@ def calculate_area(fitted_curve: np.ndarray, x_spacing: float) -> float:
     Returns:
         Integrated area
     """
-    return float(np.trapz(fitted_curve, dx=x_spacing))
+    return float(np.trapezoid(fitted_curve, dx=x_spacing))
 
 
 def calculate_quality_score(

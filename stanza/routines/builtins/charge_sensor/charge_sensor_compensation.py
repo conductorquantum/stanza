@@ -485,7 +485,7 @@ def run_compensation(
 
             best_peak = iteration_sweep_output.best_peak
             peak_center_voltage = float(best_peak.peak_voltage)
-            per_delta_measurements[delta_index].append(peak_center_voltage)
+            per_delta_measurements[int(delta_index)].append(peak_center_voltage)
             peak_shift = float(peak_center_voltage - reference_peak_center_voltage)
             sample_record = {
                 "control_delta": voltage_difference,
