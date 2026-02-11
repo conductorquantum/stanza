@@ -83,6 +83,12 @@ class GPIOType(str, Enum):
     OUTPUT = "OUTPUT"
 
 
+class TriggerEdge(str, Enum):
+    RISING = "RISING"
+    FALLING = "FALLING"
+    BOTH = "BOTH"
+
+
 class InstrumentType(str, Enum):
     CONTROL = "CONTROL"
     MEASUREMENT = "MEASUREMENT"

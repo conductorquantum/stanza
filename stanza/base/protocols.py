@@ -1,5 +1,7 @@
 from typing import Protocol, overload, runtime_checkable
 
+from stanza.models import TriggerEdge
+
 
 @runtime_checkable
 class BreakoutBoxInstrument(Protocol):
@@ -155,6 +157,61 @@ class MeasurementInstrument(Protocol):
 
     def measure(self, channel_name: str | list[str]) -> float | list[float]:
         """Measure the current on a specific channel(s)."""
+        ...
+
+
+@runtime_checkable
+class TriggerSequencer(Protocol):
+    """Instrument that can load sequences and respond to hardware triggers."""
+
+    name: str
+
+    def load_sequence(self, pad: str, values: list[float], trigger_port: str) -> None:
+        """Load a sequence of values to output on trigger events.
+
+        Args:
+            pad: Channel/pad to sequence
+            values: List of values to step through
+            trigger_port: Physical trigger input (e.g., "ext1", "trig_in_2")
+        """
+        ...
+
+    def arm_triggers(self) -> None:
+        """Enable trigger listening mode."""
+        ...
+
+
+@runtime_checkable
+class TriggerCoordinator(Protocol):
+    """Instrument that can generate trigger pulses and coordinate timing."""
+
+    name: str
+
+    def configure_trigger_output(
+        self, channel: str, edge: TriggerEdge = TriggerEdge.RISING
+    ) -> None:
+        """Configure a channel to output trigger pulses.
+
+        Args:
+            channel: Physical trigger output (e.g., "sync_out", "marker1")
+            edge: Which edge to use for triggering
+        """
+        ...
+
+    def triggered_acquisition(
+        self, pad: str, num_points: int, trigger_output: str, trigger_period_us: float
+    ) -> list[float]:
+        """Run acquisition while sending trigger pulses.
+
+        Args:
+            pad: Channel/pad to measure from
+            num_points: Number of measurements (and triggers) to perform
+            trigger_output: Which output channel sends the triggers
+            trigger_period_us: Time between trigger pulses in microseconds
+
+        Returns:
+            List of measured values, one per trigger
+        """
         ...
 
 
