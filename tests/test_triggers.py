@@ -129,7 +129,7 @@ def test_trigger_link_default_duration():
         sink_channel="gate1",
         sink_trigger_port="ext1",
     )
-    assert link.trigger_duration_cycles == 25
+    assert link.trigger_duration_ns == 100
 
 
 def test_trigger_link_custom_duration():
@@ -139,9 +139,9 @@ def test_trigger_link_custom_duration():
         sink_instrument="qdac",
         sink_channel="gate1",
         sink_trigger_port="ext2",
-        trigger_duration_cycles=50,
+        trigger_duration_ns=200,
     )
-    assert link.trigger_duration_cycles == 50
+    assert link.trigger_duration_ns == 200
 
 
 def test_trigger_link_accepts_arbitrary_trigger_port():
@@ -169,12 +169,12 @@ def test_trigger_link_generic_source_port():
 
 
 def test_trigger_link_invalid_duration():
-    with pytest.raises(ValueError, match="trigger_duration_cycles must be positive"):
+    with pytest.raises(ValueError, match="trigger_duration_ns must be positive"):
         TriggerLink(
             name="trig",
             source_port=("con1", 2, 1),
             sink_instrument="qdac",
             sink_channel="gate1",
             sink_trigger_port="ext1",
-            trigger_duration_cycles=0,
+            trigger_duration_ns=0,
         )

@@ -1,7 +1,7 @@
 """Trigger configuration for instrument synchronization.
 
 Driver-agnostic. Describes when things should happen, not how a specific AWG implements it.
-All durations stored in QUA clock cycles (1 cycle = 4 ns).
+TriggerLink uses nanoseconds; TriggerConfig uses QUA clock cycles (1 cycle = 4 ns).
 """
 
 from __future__ import annotations
@@ -21,11 +21,11 @@ class TriggerLink:
 
     Attributes:
         name: Human-readable identifier (e.g., "qdac_ch1_trigger").
-        source_port: (controller, fem, port) on the source instrument.
+        source_port: Port identifier on the source instrument (format is driver-specific).
         sink_instrument: Reference name of the receiving instrument (e.g., "qdac").
         sink_channel: Channel name on the sink instrument.
         sink_trigger_port: External trigger port on sink (e.g., "ext1").
-        trigger_duration_cycles: Width of the digital pulse (default 25 = 100ns).
+        trigger_duration_ns: Width of the digital pulse in nanoseconds.
     """
 
     name: str
@@ -33,11 +33,11 @@ class TriggerLink:
     sink_instrument: str
     sink_channel: str
     sink_trigger_port: str
-    trigger_duration_cycles: int = 25
+    trigger_duration_ns: int = 100
 
     def __post_init__(self) -> None:
-        if self.trigger_duration_cycles <= 0:
-            raise ValueError("trigger_duration_cycles must be positive")
+        if self.trigger_duration_ns <= 0:
+            raise ValueError("trigger_duration_ns must be positive")
 
 
 class TriggerMode(Enum):

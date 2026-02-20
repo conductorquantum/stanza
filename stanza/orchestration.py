@@ -33,123 +33,70 @@ class SweepAxis:
     trigger_link: TriggerLink
 
 
-class SweepOrchestrator:
-    """Coordinates hardware-triggered sweeps across multiple instruments.
+def hardware_sweep(
+    axes: list[SweepAxis],
+    measure_electrode: str,
+    voltage_source: ListSweepInstrument,
+    controller: HardwareSweepController,
+    n_avg: int = 1,
+    settling_wait_ns: int = 250_000,
+) -> tuple[np.ndarray, ...]:
+    """Execute a hardware-accelerated voltage sweep.
 
-    Replaces the Python loop in Device.sweep_nd with autonomous
-    hardware execution for supported instrument combinations.
+    Pre-loads voltage lists onto the voltage source instrument, runs
+    the sweep program on the controller, and resets channels afterward.
+
+    Args:
+        axes: 1 or 2 SweepAxis definitions.
+        measure_electrode: Electrode to measure.
+        voltage_source: Instrument that pre-loads voltage lists (e.g. QDAC).
+        controller: Instrument that runs the sweep program (e.g. OPX).
+        n_avg: Number of averaging repetitions.
+        settling_wait_ns: Wait time after trigger before measurement, in nanoseconds.
+
+    Returns:
+        1D: (voltages, currents)
+        2D: (outer_voltages, inner_voltages, currents_2d)
+
+    Raises:
+        ValueError: If number of axes is not 1 or 2.
     """
+    if len(axes) not in (1, 2):
+        raise ValueError(f"hardware_sweep supports 1 or 2 axes, got {len(axes)}")
 
-    def __init__(
-        self,
-        list_sweep_instrument: ListSweepInstrument,
-        sweep_controller: HardwareSweepController,
-        trigger_links: list[TriggerLink],
-    ) -> None:
-        self.list_sweep_instrument = list_sweep_instrument
-        self.sweep_controller = sweep_controller
-        self.trigger_links = {link.name: link for link in trigger_links}
+    for axis in axes:
+        voltage_source.load_voltage_list(
+            channel_name=axis.gate,
+            voltages=axis.voltages,
+            trigger_port=axis.trigger_link.sink_trigger_port,
+        )
 
-    def _validate_axes(self, axes: list[SweepAxis]) -> None:
-        """Validate that all axes have registered trigger links."""
-        for axis in axes:
-            if axis.trigger_link.name not in self.trigger_links:
-                raise ValueError(
-                    f"Trigger link '{axis.trigger_link.name}' not registered. "
-                    f"Available: {list(self.trigger_links.keys())}"
-                )
-
-    def prepare(self, axes: list[SweepAxis]) -> None:
-        """Pre-load all voltage lists to their respective instruments."""
-        self._validate_axes(axes)
-        for axis in axes:
-            link = axis.trigger_link
-            self.list_sweep_instrument.load_voltage_list(
-                channel_name=axis.gate,
-                voltages=axis.voltages,
-                trigger_port=link.sink_trigger_port,
+    try:
+        if len(axes) == 1:
+            ax = axes[0]
+            currents = controller.execute_sweep_1d(
+                trigger_link_name=ax.trigger_link.name,
+                n_points=len(ax.voltages),
+                measure_electrode=measure_electrode,
+                n_avg=n_avg,
+                settling_wait_ns=settling_wait_ns,
             )
-
-    def teardown(self, axes: list[SweepAxis]) -> None:
-        """Reset all channels to fixed-voltage mode."""
+            return ax.voltages.copy(), currents
+        else:
+            outer, inner = axes
+            currents = controller.execute_sweep_2d(
+                outer_trigger_name=outer.trigger_link.name,
+                inner_trigger_name=inner.trigger_link.name,
+                n_outer=len(outer.voltages),
+                n_inner=len(inner.voltages),
+                measure_electrode=measure_electrode,
+                n_avg=n_avg,
+                settling_wait_ns=settling_wait_ns,
+            )
+            return outer.voltages.copy(), inner.voltages.copy(), currents
+    finally:
         for axis in axes:
             try:
-                self.list_sweep_instrument.reset_voltage_list(axis.gate)
+                voltage_source.reset_voltage_list(axis.gate)
             except Exception:
                 logger.warning(f"Failed to reset voltage list for {axis.gate}")
-
-    def sweep_1d(
-        self,
-        axis: SweepAxis,
-        measure_electrode: str,
-        n_avg: int = 1,
-        settling_wait_ns: int = 250_000,
-    ) -> tuple[np.ndarray, np.ndarray]:
-        """Execute a 1D hardware-triggered sweep.
-
-        Args:
-            axis: Sweep axis definition.
-            measure_electrode: Name of the measurement electrode.
-            n_avg: Number of averaging repetitions.
-            settling_wait_ns: Wait time after trigger in nanoseconds.
-
-        Returns:
-            (voltages, currents) arrays.
-        """
-        axes = [axis]
-        self._validate_axes(axes)
-
-        try:
-            self.prepare(axes)
-            currents = self.sweep_controller.execute_sweep_1d(
-                trigger_link_name=axis.trigger_link.name,
-                n_points=len(axis.voltages),
-                measure_electrode=measure_electrode,
-                n_avg=n_avg,
-                settling_wait_ns=settling_wait_ns,
-            )
-            return axis.voltages.copy(), currents
-        finally:
-            self.teardown(axes)
-
-    def sweep_2d(
-        self,
-        outer_axis: SweepAxis,
-        inner_axis: SweepAxis,
-        measure_electrode: str,
-        n_avg: int = 1,
-        settling_wait_ns: int = 250_000,
-    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        """Execute a 2D hardware-triggered sweep.
-
-        Args:
-            outer_axis: Outer sweep axis.
-            inner_axis: Inner sweep axis.
-            measure_electrode: Name of the measurement electrode.
-            n_avg: Number of averaging repetitions.
-            settling_wait_ns: Wait time after trigger in nanoseconds.
-
-        Returns:
-            (outer_voltages, inner_voltages, currents_2d) arrays.
-        """
-        axes = [outer_axis, inner_axis]
-        self._validate_axes(axes)
-
-        try:
-            self.prepare(axes)
-            currents = self.sweep_controller.execute_sweep_2d(
-                outer_trigger_name=outer_axis.trigger_link.name,
-                inner_trigger_name=inner_axis.trigger_link.name,
-                n_outer=len(outer_axis.voltages),
-                n_inner=len(inner_axis.voltages),
-                measure_electrode=measure_electrode,
-                n_avg=n_avg,
-                settling_wait_ns=settling_wait_ns,
-            )
-            return (
-                outer_axis.voltages.copy(),
-                inner_axis.voltages.copy(),
-                currents,
-            )
-        finally:
-            self.teardown(axes)

@@ -422,7 +422,7 @@ class OPXPulseController:
 
             # Register a short digital trigger pulse
             trig_pulse_name = f"__trigger_{link.name}"
-            duration_ns = link.trigger_duration_cycles * 4  # cycles to ns
+            duration_ns = link.trigger_duration_ns
             trig_marker_name = f"__marker_{link.name}"
 
             if trig_pulse_name not in builder._pulses:
