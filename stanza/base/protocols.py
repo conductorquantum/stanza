@@ -1,4 +1,6 @@
-from typing import Protocol, overload, runtime_checkable
+from typing import Any, Protocol, overload, runtime_checkable
+
+import numpy as np
 
 
 @runtime_checkable
@@ -162,3 +164,43 @@ class NamedResource(Protocol):
     """Protocol for resources that have a name attribute."""
 
     name: str
+
+
+@runtime_checkable
+class ListSweepInstrument(Protocol):
+    """Instrument that supports pre-loaded voltage list sweeps."""
+
+    def load_voltage_list(
+        self,
+        channel_name: str,
+        voltages: list[float] | np.ndarray,
+        trigger_port: str,
+        **kwargs: Any,
+    ) -> None: ...
+
+    def reset_voltage_list(self, channel_name: str) -> None: ...
+
+
+@runtime_checkable
+class HardwareSweepController(Protocol):
+    """Controller that executes hardware-triggered sweep programs."""
+
+    def execute_sweep_1d(
+        self,
+        trigger_link_name: str,
+        n_points: int,
+        measure_electrode: str,
+        n_avg: int = 1,
+        settling_wait_ns: int = 250_000,
+    ) -> np.ndarray: ...
+
+    def execute_sweep_2d(
+        self,
+        outer_trigger_name: str,
+        inner_trigger_name: str,
+        n_outer: int,
+        n_inner: int,
+        measure_electrode: str,
+        n_avg: int = 1,
+        settling_wait_ns: int = 250_000,
+    ) -> np.ndarray: ...

@@ -9,11 +9,15 @@ from stanza.base.instruments import BaseControlInstrument, BaseMeasurementInstru
 from stanza.base.protocols import (
     BreakoutBoxInstrument,
     ControlInstrument,
+    HardwareSweepController,
+    ListSweepInstrument,
     MeasurementInstrument,
 )
 from stanza.exceptions import DeviceError
 from stanza.logger.session import LoggerSession
 from stanza.models import ContactType, DeviceConfig, DeviceGroup, GateType, PadType
+from stanza.orchestration import SweepAxis, SweepOrchestrator
+from stanza.triggers import TriggerLink
 
 
 class Device:
@@ -701,6 +705,62 @@ class Device:
                 },
             )
         return voltage_measurements, current_measurements
+
+    def sweep_nd_hardware(
+        self,
+        axes: list[SweepAxis],
+        measure_electrode: str,
+        list_sweep_instrument: ListSweepInstrument,
+        sweep_controller: HardwareSweepController,
+        trigger_links: list[TriggerLink],
+        n_avg: int = 1,
+        settling_wait_ns: int = 250_000,
+    ) -> tuple[np.ndarray, ...]:
+        """Hardware-accelerated N-D sweep using instrument triggering.
+
+        Delegates to SweepOrchestrator. Supports 1D and 2D sweeps.
+
+        Args:
+            axes: List of SweepAxis definitions (1 or 2 axes).
+            measure_electrode: Name of the measurement electrode.
+            list_sweep_instrument: Instrument implementing ListSweepInstrument protocol.
+            sweep_controller: Controller implementing HardwareSweepController protocol.
+            trigger_links: List of TriggerLink objects for this sweep.
+            n_avg: Number of averaging repetitions.
+            settling_wait_ns: Wait time after trigger in nanoseconds.
+
+        Returns:
+            For 1D: (voltages, currents) arrays.
+            For 2D: (outer_voltages, inner_voltages, currents_2d) arrays.
+
+        Raises:
+            DeviceError: If number of axes is not 1 or 2.
+        """
+        orchestrator = SweepOrchestrator(
+            list_sweep_instrument=list_sweep_instrument,
+            sweep_controller=sweep_controller,
+            trigger_links=trigger_links,
+        )
+
+        if len(axes) == 1:
+            return orchestrator.sweep_1d(
+                axis=axes[0],
+                measure_electrode=measure_electrode,
+                n_avg=n_avg,
+                settling_wait_ns=settling_wait_ns,
+            )
+        elif len(axes) == 2:
+            return orchestrator.sweep_2d(
+                outer_axis=axes[0],
+                inner_axis=axes[1],
+                measure_electrode=measure_electrode,
+                n_avg=n_avg,
+                settling_wait_ns=settling_wait_ns,
+            )
+        else:
+            raise DeviceError(
+                f"sweep_nd_hardware supports 1 or 2 axes, got {len(axes)}"
+            )
 
     def zero(self, type: str | PadType = PadType.ALL) -> None:
         """Set all controllable gates and/or controllable contacts to 0V.

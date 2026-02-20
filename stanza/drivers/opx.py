@@ -7,6 +7,8 @@ from functools import cached_property
 # mypy: disable-error-code="union-attr,attr-defined"
 from typing import Any
 
+import numpy as np
+
 from stanza.base.channels import ChannelConfig, MeasurementChannel
 from stanza.base.instruments import BaseMeasurementInstrument
 from stanza.drivers.opx_config_builder import OPXConfigBuilder
@@ -15,7 +17,7 @@ from stanza.exceptions import InstrumentError
 from stanza.models import MeasurementInstrumentConfig
 from stanza.pulses import PulseDefinition, PulseRegistry
 from stanza.timing import seconds_to_ns
-from stanza.triggers import TriggerConfig, TriggerMode
+from stanza.triggers import TriggerConfig, TriggerLink, TriggerMode
 
 try:
     from qm import FullQuaConfig, Program, QuantumMachinesManager
@@ -293,6 +295,7 @@ class OPXPulseController:
         trigger_config: TriggerConfig | None = None,
         control_fem: int = 2,
         control_ports: list[int] | None = None,
+        trigger_links: list[TriggerLink] | None = None,
     ) -> None:
         if not HAS_QM:
             raise ImportError(
@@ -305,6 +308,7 @@ class OPXPulseController:
         self.trigger_config = trigger_config or TriggerConfig(mode=TriggerMode.SOFTWARE)
         self.control_fem = control_fem
         self.control_ports = control_ports or [1]
+        self.trigger_links = trigger_links or []
 
         self.host = instrument_config.ip_addr
         self.port = instrument_config.port
@@ -405,6 +409,57 @@ class OPXPulseController:
                         builder._elements[elem_name].setdefault("operations", {})[
                             pulse_name
                         ] = pulse_name
+
+        # Auto-create trigger elements from TriggerLinks
+        for link in self.trigger_links:
+            _, fem_slot, port_num = link.source_port
+            builder.add_digital_output(fem_slot=fem_slot, port=port_num)
+
+            # Ensure a matching analog output exists for the element
+            # (QUA elements require at least a singleInput even for digital-only)
+            if (fem_slot, port_num) not in builder._analog_outputs:
+                builder.add_analog_output(fem_slot=fem_slot, port=port_num)
+
+            # Register a short digital trigger pulse
+            trig_pulse_name = f"__trigger_{link.name}"
+            duration_ns = link.trigger_duration_cycles * 4  # cycles to ns
+            trig_marker_name = f"__marker_{link.name}"
+
+            if trig_pulse_name not in builder._pulses:
+                # Create zero-amplitude analog waveform for the trigger pulse
+                if "zero_wf" not in builder._waveforms:
+                    builder._waveforms["zero_wf"] = {
+                        "type": "constant",
+                        "sample": 0.0,
+                    }
+
+                # Create digital marker (high for trigger duration)
+                builder._digital_waveforms[trig_marker_name] = {
+                    "samples": [(1, duration_ns), (0, 0)],
+                }
+
+                builder._pulses[trig_pulse_name] = {
+                    "operation": "control",
+                    "length": duration_ns,
+                    "waveforms": {"single": "zero_wf"},
+                    "digital_marker": trig_marker_name,
+                }
+
+            # Create trigger-only element
+            builder.add_element(
+                name=link.name,
+                input_ports={"single": link.source_port},
+                operations={"trig": trig_pulse_name},
+            )
+
+            # Wire the digital output to the element
+            builder._elements[link.name]["digitalInputs"] = {
+                "switch": {
+                    "port": link.source_port,
+                    "delay": 0,
+                    "buffer": 0,
+                }
+            }
 
         return builder.build()
 
@@ -685,6 +740,106 @@ class OPXPulseController:
                 )
 
         return results
+
+    def execute_sweep_1d(
+        self,
+        trigger_link_name: str,
+        n_points: int,
+        measure_electrode: str,
+        n_avg: int = 1,
+        settling_wait_ns: int = 250_000,
+    ) -> np.ndarray:
+        """Build and execute a 1D triggered sweep QUA program."""
+        from stanza.timing import ns_to_cycles
+
+        settling_cycles = ns_to_cycles(settling_wait_ns)
+        measure_chan = f"measure_{measure_electrode}"
+
+        with program() as prog:
+            n = declare(int)
+            i = declare(int)
+            acc = declare(fixed, size=1)
+            out_stream = declare_stream()
+
+            with for_(n, 0, n < n_avg, n + 1):
+                with for_(i, 0, i < n_points, i + 1):
+                    play("trig", trigger_link_name)
+                    wait(settling_cycles, measure_chan)
+                    measure(
+                        "readout",
+                        measure_chan,
+                        None,
+                        integration.full("const", acc[0]),
+                    )
+                    save(acc[0], out_stream)
+
+            with stream_processing():
+                if n_avg > 1:
+                    out_stream.buffer(n_points).average().save("results")
+                else:
+                    out_stream.buffer(n_points).save("results")
+
+        self.execute(prog)
+
+        job = self._job
+        handle = job.result_handles.get("results")
+        handle.wait_for_values(1)
+        raw = handle.fetch_all()
+
+        return np.array(raw, dtype=float)
+
+    def execute_sweep_2d(
+        self,
+        outer_trigger_name: str,
+        inner_trigger_name: str,
+        n_outer: int,
+        n_inner: int,
+        measure_electrode: str,
+        n_avg: int = 1,
+        settling_wait_ns: int = 250_000,
+    ) -> np.ndarray:
+        """Build and execute a 2D triggered sweep QUA program."""
+        from stanza.timing import ns_to_cycles
+
+        settling_cycles = ns_to_cycles(settling_wait_ns)
+        measure_chan = f"measure_{measure_electrode}"
+
+        with program() as prog:
+            n = declare(int)
+            i = declare(int)
+            j = declare(int)
+            acc = declare(fixed, size=1)
+            out_stream = declare_stream()
+
+            with for_(n, 0, n < n_avg, n + 1):
+                with for_(i, 0, i < n_outer, i + 1):
+                    play("trig", outer_trigger_name)
+                    with for_(j, 0, j < n_inner, j + 1):
+                        play("trig", inner_trigger_name)
+                        wait(settling_cycles, measure_chan)
+                        measure(
+                            "readout",
+                            measure_chan,
+                            None,
+                            integration.full("const", acc[0]),
+                        )
+                        save(acc[0], out_stream)
+
+            with stream_processing():
+                total = n_outer * n_inner
+                if n_avg > 1:
+                    out_stream.buffer(total).average().save("results")
+                else:
+                    out_stream.buffer(total).save("results")
+
+        self.execute(prog)
+
+        job = self._job
+        handle = job.result_handles.get("results")
+        handle.wait_for_values(1)
+        raw = handle.fetch_all()
+
+        return np.array(raw, dtype=float).reshape(n_outer, n_inner)
 
     def teardown(self) -> None:
         """Halt all jobs and close the connection."""

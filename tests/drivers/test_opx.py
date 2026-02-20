@@ -23,6 +23,7 @@ from stanza.models import (
 )
 from stanza.pulses import PulseRegistry, make_square_pulse
 from stanza.triggers import (
+    TriggerLink,
     TriggerMode,
     hardware_in_trigger,
     hardware_out_trigger,
@@ -427,3 +428,187 @@ class TestOPXPulseController:
             channel_configs=channel_configs,
         )
         assert controller.trigger_config.mode == TriggerMode.SOFTWARE
+
+    def test_build_config_with_trigger_links_creates_elements(
+        self,
+        instrument_config: MeasurementInstrumentConfig,
+        channel_configs: dict[str, ChannelConfig],
+    ) -> None:
+        """Trigger links should create corresponding elements in the config."""
+        link = TriggerLink(
+            name="qdac_ch1_trigger",
+            source_port=("con1", 2, 5),
+            sink_instrument="qdac",
+            sink_channel="gate1",
+            sink_trigger_port="ext1",
+        )
+        controller = OPXPulseController(
+            instrument_config=instrument_config,
+            channel_configs=channel_configs,
+            trigger_links=[link],
+        )
+        config = controller._build_config()
+
+        assert "qdac_ch1_trigger" in config["elements"]
+        elem = config["elements"]["qdac_ch1_trigger"]
+        assert "trig" in elem.get("operations", {})
+
+    def test_build_config_trigger_link_digital_output_port(
+        self,
+        instrument_config: MeasurementInstrumentConfig,
+        channel_configs: dict[str, ChannelConfig],
+    ) -> None:
+        """Trigger link should register a digital output port on the FEM."""
+        link = TriggerLink(
+            name="qdac_trig",
+            source_port=("con1", 2, 7),
+            sink_instrument="qdac",
+            sink_channel="gate1",
+            sink_trigger_port="ext2",
+        )
+        controller = OPXPulseController(
+            instrument_config=instrument_config,
+            channel_configs=channel_configs,
+            trigger_links=[link],
+        )
+        config = controller._build_config()
+
+        # Check that the FEM has a digital output on port 7
+        fem = config["controllers"]["con1"]["fems"]["2"]
+        assert "digital_outputs" in fem
+        assert "7" in fem["digital_outputs"]
+
+    def test_build_config_multiple_trigger_links(
+        self,
+        instrument_config: MeasurementInstrumentConfig,
+        channel_configs: dict[str, ChannelConfig],
+    ) -> None:
+        """Multiple trigger links should each create separate elements."""
+        link1 = TriggerLink(
+            name="trig_outer",
+            source_port=("con1", 2, 5),
+            sink_instrument="qdac",
+            sink_channel="gate1",
+            sink_trigger_port="ext1",
+        )
+        link2 = TriggerLink(
+            name="trig_inner",
+            source_port=("con1", 2, 6),
+            sink_instrument="qdac",
+            sink_channel="gate2",
+            sink_trigger_port="ext2",
+        )
+        controller = OPXPulseController(
+            instrument_config=instrument_config,
+            channel_configs=channel_configs,
+            trigger_links=[link1, link2],
+        )
+        config = controller._build_config()
+
+        assert "trig_outer" in config["elements"]
+        assert "trig_inner" in config["elements"]
+        assert "trig" in config["elements"]["trig_outer"]["operations"]
+        assert "trig" in config["elements"]["trig_inner"]["operations"]
+
+
+class TestOPXPulseControllerSweepExecution:
+    """Tests for execute_sweep_1d and execute_sweep_2d methods."""
+
+    @pytest.fixture
+    def controller_with_links(
+        self,
+        instrument_config: MeasurementInstrumentConfig,
+        channel_configs: dict[str, ChannelConfig],
+    ) -> OPXPulseController:
+        link1 = TriggerLink(
+            name="trig_outer",
+            source_port=("con1", 2, 5),
+            sink_instrument="qdac",
+            sink_channel="gate1",
+            sink_trigger_port="ext1",
+        )
+        link2 = TriggerLink(
+            name="trig_inner",
+            source_port=("con1", 2, 6),
+            sink_instrument="qdac",
+            sink_channel="gate2",
+            sink_trigger_port="ext2",
+        )
+        return OPXPulseController(
+            instrument_config=instrument_config,
+            channel_configs=channel_configs,
+            trigger_links=[link1, link2],
+        )
+
+    def test_execute_sweep_1d_calls_execute(
+        self,
+        controller_with_links: OPXPulseController,
+    ) -> None:
+        """execute_sweep_1d should build a QUA program and call execute."""
+        import numpy as np
+
+        mock_handle = Mock()
+        mock_handle.fetch_all.return_value = np.array([0.1, 0.2, 0.3])
+        mock_job = Mock()
+        mock_job.result_handles.get.return_value = mock_handle
+
+        with patch.object(controller_with_links, "execute") as mock_exec:
+            controller_with_links._job = mock_job
+            result = controller_with_links.execute_sweep_1d(
+                trigger_link_name="trig_outer",
+                n_points=3,
+                measure_electrode="drain1",
+            )
+
+            mock_exec.assert_called_once()
+            assert result.shape == (3,)
+            np.testing.assert_array_almost_equal(result, [0.1, 0.2, 0.3])
+
+    def test_execute_sweep_2d_calls_execute(
+        self,
+        controller_with_links: OPXPulseController,
+    ) -> None:
+        """execute_sweep_2d should build a QUA program and call execute."""
+        import numpy as np
+
+        mock_handle = Mock()
+        mock_handle.fetch_all.return_value = np.array([0.1, 0.2, 0.3, 0.4, 0.5, 0.6])
+        mock_job = Mock()
+        mock_job.result_handles.get.return_value = mock_handle
+
+        with patch.object(controller_with_links, "execute") as mock_exec:
+            controller_with_links._job = mock_job
+            result = controller_with_links.execute_sweep_2d(
+                outer_trigger_name="trig_outer",
+                inner_trigger_name="trig_inner",
+                n_outer=2,
+                n_inner=3,
+                measure_electrode="drain1",
+            )
+
+            mock_exec.assert_called_once()
+            assert result.shape == (2, 3)
+
+    def test_execute_sweep_1d_with_averaging(
+        self,
+        controller_with_links: OPXPulseController,
+    ) -> None:
+        """execute_sweep_1d with n_avg > 1 should still return correct shape."""
+        import numpy as np
+
+        mock_handle = Mock()
+        mock_handle.fetch_all.return_value = np.array([0.15, 0.25])
+        mock_job = Mock()
+        mock_job.result_handles.get.return_value = mock_handle
+
+        with patch.object(controller_with_links, "execute"):
+            controller_with_links._job = mock_job
+            result = controller_with_links.execute_sweep_1d(
+                trigger_link_name="trig_outer",
+                n_points=2,
+                measure_electrode="drain1",
+                n_avg=5,
+                settling_wait_ns=500_000,
+            )
+
+            assert result.shape == (2,)

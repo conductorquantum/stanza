@@ -1,3 +1,6 @@
+from unittest.mock import Mock, patch
+
+import numpy as np
 import pytest
 
 from stanza.base.channels import ChannelConfig
@@ -16,6 +19,8 @@ from stanza.models import (
     MeasurementInstrumentConfig,
     PadType,
 )
+from stanza.orchestration import SweepAxis
+from stanza.triggers import TriggerLink
 from stanza.utils import generate_channel_configs
 from tests.conftest import MockBreakoutBoxInstrument
 
@@ -715,3 +720,109 @@ class TestDeviceBreakoutBox:
             DeviceError, match="instrument breakout line not configured"
         ):
             device.connect_breakout_lines()
+
+
+class TestDeviceHardwareSweep:
+    """Tests for sweep_nd_hardware convenience method."""
+
+    def _make_link(
+        self, name: str = "trig1", port: int = 5, ext: str = "ext1"
+    ) -> TriggerLink:
+        return TriggerLink(
+            name=name,
+            source_port=("con1", 2, port),
+            sink_instrument="qdac",
+            sink_channel="gate1",
+            sink_trigger_port=ext,
+        )
+
+    def test_sweep_nd_hardware_delegates_to_orchestrator(self, device):
+        """sweep_nd_hardware should delegate to SweepOrchestrator."""
+        link = self._make_link()
+        axis = SweepAxis(
+            gate="gate1",
+            voltages=np.array([0.0, 0.5, 1.0]),
+            trigger_link=link,
+        )
+        mock_lsi = Mock()
+        mock_sc = Mock()
+
+        with patch("stanza.device.SweepOrchestrator") as mock_orch_class:
+            mock_orch = Mock()
+            mock_orch.sweep_1d.return_value = (
+                np.array([0.0, 0.5, 1.0]),
+                np.array([0.001, 0.002, 0.003]),
+            )
+            mock_orch_class.return_value = mock_orch
+
+            result = device.sweep_nd_hardware(
+                axes=[axis],
+                measure_electrode="contact1",
+                list_sweep_instrument=mock_lsi,
+                sweep_controller=mock_sc,
+                trigger_links=[link],
+            )
+
+            mock_orch_class.assert_called_once_with(
+                list_sweep_instrument=mock_lsi,
+                sweep_controller=mock_sc,
+                trigger_links=[link],
+            )
+            mock_orch.sweep_1d.assert_called_once()
+            assert len(result) == 2
+
+    def test_sweep_nd_hardware_returns_correct_shapes(self, device):
+        """sweep_nd_hardware with 2 axes should return 3 arrays."""
+        link1 = self._make_link(name="trig1", port=5, ext="ext1")
+        link2 = self._make_link(name="trig2", port=6, ext="ext2")
+        axis1 = SweepAxis(
+            gate="gate1", voltages=np.array([0.0, 1.0]), trigger_link=link1
+        )
+        axis2 = SweepAxis(
+            gate="gate1", voltages=np.array([0.0, 0.5, 1.0]), trigger_link=link2
+        )
+        mock_lsi = Mock()
+        mock_sc = Mock()
+
+        with patch("stanza.device.SweepOrchestrator") as mock_orch_class:
+            mock_orch = Mock()
+            mock_orch.sweep_2d.return_value = (
+                np.array([0.0, 1.0]),
+                np.array([0.0, 0.5, 1.0]),
+                np.zeros((2, 3)),
+            )
+            mock_orch_class.return_value = mock_orch
+
+            result = device.sweep_nd_hardware(
+                axes=[axis1, axis2],
+                measure_electrode="contact1",
+                list_sweep_instrument=mock_lsi,
+                sweep_controller=mock_sc,
+                trigger_links=[link1, link2],
+            )
+
+            mock_orch.sweep_2d.assert_called_once()
+            assert len(result) == 3
+            assert result[2].shape == (2, 3)
+
+    def test_sweep_nd_hardware_rejects_3d(self, device):
+        """sweep_nd_hardware should raise DeviceError for >2 axes."""
+        links = [
+            self._make_link(name=f"trig{i}", port=5 + i, ext=f"ext{i + 1}")
+            for i in range(3)
+        ]
+        axes = [
+            SweepAxis(gate="gate1", voltages=np.array([0.0]), trigger_link=link)
+            for link in links
+        ]
+        mock_lsi = Mock()
+        mock_sc = Mock()
+
+        with pytest.raises(DeviceError, match="supports 1 or 2 axes"):
+            device.sweep_nd_hardware(
+                axes=axes,
+                measure_electrode="contact1",
+                list_sweep_instrument=mock_lsi,
+                sweep_controller=mock_sc,
+                trigger_links=links,
+            )
