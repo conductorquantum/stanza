@@ -12,12 +12,13 @@ import numpy as np
 from stanza.base.channels import ChannelConfig, MeasurementChannel
 from stanza.base.instruments import BaseMeasurementInstrument
 from stanza.drivers.opx_config_builder import OPXConfigBuilder
+from stanza.drivers.opx_triggers import TriggerConfig, TriggerMode
 from stanza.drivers.utils import demod2volts, wait_until_job_is_paused
 from stanza.exceptions import InstrumentError
 from stanza.models import MeasurementInstrumentConfig
 from stanza.pulses import PulseDefinition, PulseRegistry
-from stanza.timing import seconds_to_ns
-from stanza.triggers import TriggerConfig, TriggerLink, TriggerMode
+from stanza.timing import ns_to_cycles, seconds_to_ns
+from stanza.triggers import TriggerLink
 
 try:
     from qm import FullQuaConfig, Program, QuantumMachinesManager
@@ -103,7 +104,7 @@ class OPXMeasurementChannel(MeasurementChannel):
         self.read_len = read_len
 
     def get_current(self) -> float:
-        if getattr(self, "driver", None) is None:
+        if self.driver is None:
             raise InstrumentError("OPX driver not set")
 
         if self.job_id is None:
@@ -119,8 +120,7 @@ class OPXMeasurementChannel(MeasurementChannel):
         if h is None:
             raise InstrumentError(f"No output handle {handle_name}")
 
-        prev = getattr(self, "count", 0)
-        index = prev + 1
+        index = self.count + 1
 
         job.resume()
         wait_until_job_is_paused(job)
@@ -128,7 +128,7 @@ class OPXMeasurementChannel(MeasurementChannel):
         try:
             h.wait_for_values(index, timeout=10)
         except Exception:
-            pass
+            logger.warning("Timed out waiting for measurement values (index=%d)", index)
 
         raw = h.fetch(index)
         val = demod2volts(raw, self.read_len, single_demod=True)
@@ -137,154 +137,80 @@ class OPXMeasurementChannel(MeasurementChannel):
         return float(-val)
 
 
-class OPXInstrument(BaseMeasurementInstrument):
-    """OPX measurement instrument using OPXConfigBuilder for config generation."""
+# ---------------------------------------------------------------------------
+# Shared helpers
+# ---------------------------------------------------------------------------
 
-    def __init__(
-        self,
-        instrument_config: MeasurementInstrumentConfig,
-        channel_configs: dict[str, ChannelConfig],
-    ):
-        """Initialize OPXInstrument with the given configuration.
 
-        Expected extra fields on instrument_config (passed via Pydantic extra="allow"):
-            machine_type (str): OPX machine type (e.g. "OPX1000")
-            cluster_name (str): OPX cluster name
-            measurement_channels (list[int]): OPX measurement channels
-            connection_headers (dict[str, str]): OPX connection headers
-            octave (str | None): OPX octave configuration
-        """
-        if not HAS_QM:
-            raise ImportError(
-                "qm is not installed. Install with: pip install stanza[qm]"
-            )
-
-        super().__init__(instrument_config)
-
-        self.host = instrument_config.ip_addr
-        self.port = instrument_config.port
-        self.machine_type = getattr(instrument_config, "machine_type", None)
-        self.cluster_name = getattr(instrument_config, "cluster_name", None)
-        self.connection_headers = getattr(instrument_config, "connection_headers", None)
-        self.measurement_channels = getattr(
+def _parse_instrument_config(
+    instrument_config: MeasurementInstrumentConfig,
+) -> dict[str, Any]:
+    """Extract OPX-specific fields from a MeasurementInstrumentConfig."""
+    return {
+        "host": instrument_config.ip_addr,
+        "port": instrument_config.port,
+        "machine_type": getattr(instrument_config, "machine_type", None),
+        "cluster_name": getattr(instrument_config, "cluster_name", None),
+        "connection_headers": getattr(instrument_config, "connection_headers", None),
+        "measurement_channels": getattr(
             instrument_config, "measurement_channels", None
-        )
+        ),
+        "octave": getattr(instrument_config, "octave", None),
+        "read_len": seconds_to_ns(instrument_config.sample_time),
+        "measurement_duration": seconds_to_ns(instrument_config.measurement_duration),
+    }
 
-        self.channel_configs = channel_configs
 
-        self.read_len = seconds_to_ns(instrument_config.sample_time)
-        self.measurement_duration = seconds_to_ns(
-            instrument_config.measurement_duration
-        )
-        self.measure_number = max(1, int(self.measurement_duration / self.read_len))
-        self.octave = getattr(instrument_config, "octave", None)
-        self.qmm = QuantumMachinesManager(
-            host=self.host,
-            port=self.port,
-            connection_headers=self.connection_headers,
-            cluster_name=self.cluster_name,
-            octave=self.octave,
-        )
-        self._initialize_channels(channel_configs)
-        self.driver = self.qmm.open_qm(self.qua_config)
+def _create_measurement_channels(
+    channel_configs: dict[str, ChannelConfig],
+    measurement_channels: list[int] | None,
+) -> dict[str, OPXMeasurementChannel]:
+    """Build OPXMeasurementChannel dict from channel configs."""
+    result: dict[str, OPXMeasurementChannel] = {}
+    for cc in channel_configs.values():
+        if (
+            cc.measure_channel is not None
+            and measurement_channels is not None
+            and cc.measure_channel in measurement_channels
+        ):
+            result[cc.name] = OPXMeasurementChannel(cc.name, cc.measure_channel, cc)
+    return result
 
-    def _initialize_channels(self, channel_configs: dict[str, ChannelConfig]) -> None:
-        for channel_config in channel_configs.values():
-            if (
-                channel_config.measure_channel is not None
-                and self.measurement_channels is not None
-                and channel_config.measure_channel in self.measurement_channels
-            ):
-                self.add_channel(
-                    f"measure_{channel_config.name}",
-                    OPXMeasurementChannel(
-                        channel_config.name,
-                        channel_config.measure_channel,
-                        channel_config,
-                    ),
-                )
 
-    @cached_property
-    def qua_config(self) -> FullQuaConfig:
-        builder = OPXConfigBuilder(machine_type=self.machine_type)
-        builder.add_fem(slot=2, fem_type="LF")
-        builder.add_analog_output(fem_slot=2, port=1)
-        builder.add_analog_output(fem_slot=2, port=2)
-        builder.add_analog_input(fem_slot=2, port=1, offset=-0.0078)
-        builder.add_analog_input(fem_slot=2, port=2, offset=-0.007)
-
-        for channel_name, channel in self.channels.items():
-            builder.add_measurement_element(
-                name=channel_name,
-                port=("con1", 2, channel.channel_id),
-                read_len_ns=self.read_len,
-            )
-
-        return FullQuaConfig(**builder.build())
-
-    @property
-    def qua_program(self) -> Program:
-        chans = list(self.channels.keys())
-        n_ch = len(chans)
-        with program() as prog:
-            seg = declare(int)
-            acc = declare(fixed, size=n_ch)
-            outs = [declare_stream() for _ in range(n_ch)]
-
-            with infinite_loop_():
-                pause()
-                with for_(seg, 0, seg < self.measure_number, seg + 1):
-                    for idx, ch in enumerate(chans):
-                        measure(
-                            "readout", ch, None, integration.full("const", acc[idx])
-                        )
-                        save(acc[idx], outs[idx])
-
-            with stream_processing():
-                for idx, ch in enumerate(chans):
-                    outs[idx].buffer(self.measure_number).map(FUNCTIONS.average()).save(
-                        ch
-                    )
-
-        return prog
-
-    def prepare_measurement(self) -> None:
-        """Prepare the measurement."""
-        self.driver.compile(self.qua_program)
-        job = self.driver.execute(self.qua_program)
-
-        for channel in self.channels.values():
-            channel.set_job_id(job.id)
-            channel.set_read_len(self.read_len)
-            channel.set_driver(self.driver)
-
-    def teardown_measurement(self) -> None:
+def _halt_and_close(driver: Any) -> None:
+    """Halt all jobs on *driver* and close the connection."""
+    if driver is None:
+        return
+    try:
+        jobs = driver.get_jobs()
+        if hasattr(jobs, "__iter__"):
+            for job in jobs:
+                try:
+                    job.halt()
+                except Exception:
+                    logger.warning(f"Failed to halt job {job.id}")
+    except Exception:
+        pass
+    finally:
         try:
-            jobs = self.driver.get_jobs()
-            if hasattr(jobs, "__iter__"):
-                for job in jobs:
-                    try:
-                        job.halt()
-                    except Exception:
-                        logger.warning(f"Failed to halt job {job.id}")
+            driver.close()
         except Exception:
             pass
-        finally:
-            try:
-                self.driver.close()
-            except Exception:
-                pass
 
-    def measure(self, channel_name: str) -> float:
-        return super().measure(f"measure_{channel_name}")
+
+# ---------------------------------------------------------------------------
+# OPXPulseController — the primary OPX class
+# ---------------------------------------------------------------------------
 
 
 class OPXPulseController:
-    """OPX pulse generation + measurement + triggering.
+    """OPX pulse generation, measurement, triggering, and sweep execution.
 
-    Composes PulseRegistry, OPXConfigBuilder, and TriggerConfig into a working
-    OPX program. Not a GeneralInstrument — the ControlInstrument protocol
-    (set_voltage/get_voltage) doesn't map to pulse operations.
+    Composes PulseRegistry, OPXConfigBuilder, and TriggerConfig into working
+    QUA programs.  Satisfies the ``HardwareSweepController`` protocol via
+    ``execute_sweep_1d`` / ``execute_sweep_2d``.
+
+    Connection to the OPX is lazy — it happens on the first ``execute()`` call.
     """
 
     def __init__(
@@ -310,60 +236,47 @@ class OPXPulseController:
         self.control_ports = control_ports or [1]
         self.trigger_links = trigger_links or []
 
-        self.host = instrument_config.ip_addr
-        self.port = instrument_config.port
-        self.machine_type = getattr(instrument_config, "machine_type", None)
-        self.cluster_name = getattr(instrument_config, "cluster_name", None)
-        self.connection_headers = getattr(instrument_config, "connection_headers", None)
-        self.measurement_channels = getattr(
-            instrument_config, "measurement_channels", None
+        cfg = _parse_instrument_config(instrument_config)
+        self.host: str = cfg["host"]
+        self.port: int = cfg["port"]
+        self.machine_type = cfg["machine_type"]
+        self.cluster_name = cfg["cluster_name"]
+        self.connection_headers = cfg["connection_headers"]
+        self.measurement_channels = cfg["measurement_channels"]
+        self.octave = cfg["octave"]
+        self.read_len: int = cfg["read_len"]
+        self.measurement_duration: int = cfg["measurement_duration"]
+        self.measure_number: int = max(
+            1, int(self.measurement_duration / self.read_len)
         )
-
-        self.read_len = seconds_to_ns(instrument_config.sample_time)
-        self.measurement_duration = seconds_to_ns(
-            instrument_config.measurement_duration
-        )
-        self.measure_number = max(1, int(self.measurement_duration / self.read_len))
-        self.octave = getattr(instrument_config, "octave", None)
 
         self._qmm: Any = None
         self._driver: Any = None
         self._job: Any = None
-        self._measurement_channels: dict[str, OPXMeasurementChannel] = {}
+        self._measurement_channels = _create_measurement_channels(
+            channel_configs, self.measurement_channels
+        )
 
-        self._initialize_measurement_channels()
-
-    def _initialize_measurement_channels(self) -> None:
-        for channel_config in self.channel_configs.values():
-            if (
-                channel_config.measure_channel is not None
-                and self.measurement_channels is not None
-                and channel_config.measure_channel in self.measurement_channels
-            ):
-                ch = OPXMeasurementChannel(
-                    channel_config.name,
-                    channel_config.measure_channel,
-                    channel_config,
-                )
-                self._measurement_channels[channel_config.name] = ch
+    # -- Pulse management --------------------------------------------------
 
     def add_pulse(self, pulse: PulseDefinition) -> None:
         """Add a pulse to the registry."""
         self.pulse_registry.add_pulse(pulse)
+
+    # -- Config building ---------------------------------------------------
 
     def _build_config(self) -> dict:
         """Build QUA config dict using OPXConfigBuilder."""
         builder = OPXConfigBuilder(machine_type=self.machine_type)
         builder.add_fem(slot=self.control_fem, fem_type="LF")
 
-        # Add control output ports
+        # Control output ports
         for port_num in self.control_ports:
             builder.add_analog_output(fem_slot=self.control_fem, port=port_num)
 
-        # Add measurement elements with analog I/O
+        # Measurement elements with analog I/O
         for ch_name, ch in self._measurement_channels.items():
             builder.add_analog_input(fem_slot=self.control_fem, port=ch.channel_id)
-            # Ensure the output port for measurement element exists
             if (self.control_fem, ch.channel_id) not in builder._analog_outputs:
                 builder.add_analog_output(fem_slot=self.control_fem, port=ch.channel_id)
             builder.add_measurement_element(
@@ -372,7 +285,7 @@ class OPXPulseController:
                 read_len_ns=self.read_len,
             )
 
-        # Add digital I/O for trigger if needed
+        # Digital I/O for trigger mode
         trigger = self.trigger_config
         if trigger.digital_port is not None:
             _, fem_slot, port_num = trigger.digital_port
@@ -381,15 +294,12 @@ class OPXPulseController:
             elif trigger.mode == TriggerMode.HARDWARE_IN:
                 builder.add_digital_input(fem_slot=fem_slot, port=port_num)
 
-        # Add pulse registry contents
+        # Pulse registry contents
         if self.pulse_registry.pulse_names:
             builder.add_pulse_registry(self.pulse_registry)
-
-            # Wire pulses as operations on control elements
             for pulse_name in self.pulse_registry.pulse_names:
                 pulse = self.pulse_registry.get_pulse(pulse_name)
                 if pulse.operation == "control":
-                    # Create control element for each pulse/port combo
                     for port_num in self.control_ports:
                         elem_name = f"ctrl_{port_num}"
                         if elem_name not in builder._elements:
@@ -405,39 +315,30 @@ class OPXPulseController:
                                 operations={},
                                 iq_ports=iq_ports if pulse.is_iq else None,
                             )
-                        # Add operation to element
                         builder._elements[elem_name].setdefault("operations", {})[
                             pulse_name
                         ] = pulse_name
 
-        # Auto-create trigger elements from TriggerLinks
+        # Trigger link elements
         for link in self.trigger_links:
             _, fem_slot, port_num = link.source_port
             builder.add_digital_output(fem_slot=fem_slot, port=port_num)
-
-            # Ensure a matching analog output exists for the element
-            # (QUA elements require at least a singleInput even for digital-only)
             if (fem_slot, port_num) not in builder._analog_outputs:
                 builder.add_analog_output(fem_slot=fem_slot, port=port_num)
 
-            # Register a short digital trigger pulse
             trig_pulse_name = f"__trigger_{link.name}"
             duration_ns = link.trigger_duration_ns
             trig_marker_name = f"__marker_{link.name}"
 
             if trig_pulse_name not in builder._pulses:
-                # Create zero-amplitude analog waveform for the trigger pulse
                 if "zero_wf" not in builder._waveforms:
                     builder._waveforms["zero_wf"] = {
                         "type": "constant",
                         "sample": 0.0,
                     }
-
-                # Create digital marker (high for trigger duration)
                 builder._digital_waveforms[trig_marker_name] = {
                     "samples": [(1, duration_ns), (0, 0)],
                 }
-
                 builder._pulses[trig_pulse_name] = {
                     "operation": "control",
                     "length": duration_ns,
@@ -445,26 +346,20 @@ class OPXPulseController:
                     "digital_marker": trig_marker_name,
                 }
 
-            # Create trigger-only element
             builder.add_element(
                 name=link.name,
                 input_ports={"single": link.source_port},
                 operations={"trig": trig_pulse_name},
             )
-
-            # Wire the digital output to the element
             builder._elements[link.name]["digitalInputs"] = {
-                "switch": {
-                    "port": link.source_port,
-                    "delay": 0,
-                    "buffer": 0,
-                }
+                "switch": {"port": link.source_port, "delay": 0, "buffer": 0}
             }
 
         return builder.build()
 
+    # -- Program building --------------------------------------------------
+
     def _sequence_length_cycles(self, sequence: PulseSequence) -> int:
-        """Compute total length of a pulse sequence in QUA cycles."""
         total = 0
         for step in sequence:
             pulse = self.pulse_registry.get_pulse(step.pulse_name)
@@ -472,15 +367,8 @@ class OPXPulseController:
         return total
 
     def build_program(self, sequence: PulseSequence | None = None) -> Any:
-        """Build QUA program for the given sequence and trigger mode.
-
-        Validates:
-        - All pulse names in sequence exist in registry
-        - All elements in sequence exist in config
-        - For TIMED: interval_cycles >= total sequence length
-        """
+        """Build QUA program for the given sequence and trigger mode."""
         if sequence is not None:
-            # Validate all pulse names exist
             for step in sequence:
                 if step.pulse_name not in self.pulse_registry.pulse_names:
                     raise InstrumentError(
@@ -488,7 +376,6 @@ class OPXPulseController:
                         f"Available: {self.pulse_registry.pulse_names}"
                     )
 
-            # Validate TIMED interval
             if self.trigger_config.mode == TriggerMode.TIMED:
                 seq_len = self._sequence_length_cycles(sequence)
                 if self.trigger_config.interval_cycles < seq_len:
@@ -498,8 +385,6 @@ class OPXPulseController:
                         f"Increase interval or shorten sequence."
                     )
 
-            # Validate element existence and operation wiring.
-            # Cache the config dict to avoid a redundant build() in execute().
             self._cached_config = self._build_config()
             elem_defs = self._cached_config.get("elements", {})
             for step in sequence:
@@ -508,8 +393,6 @@ class OPXPulseController:
                         f"Element '{step.element}' not found in configuration. "
                         f"Available elements: {list(elem_defs.keys())}"
                     )
-                # QUA play() dispatches by operation key, and _build_config wires
-                # pulse_name as both key and value. Check keys (the play alias).
                 ops = elem_defs[step.element].get("operations", {})
                 if step.pulse_name not in ops:
                     raise InstrumentError(
@@ -532,7 +415,6 @@ class OPXPulseController:
             raise InstrumentError(f"Unsupported trigger mode: {mode}")
 
     def _emit_play_sequence(self, sequence: PulseSequence | None) -> None:
-        """Emit QUA play statements for a sequence (called inside program context)."""
         if sequence is None:
             return
         for step in sequence:
@@ -541,12 +423,8 @@ class OPXPulseController:
                 wait(step.wait_after_cycles, step.element)
 
     def _emit_measure_all(
-        self,
-        measure_chans: list[str],
-        acc: Any,
-        outs: list[Any],
+        self, measure_chans: list[str], acc: Any, outs: list[Any]
     ) -> None:
-        """Emit QUA measure/save statements for all measurement channels."""
         for idx, ch in enumerate(measure_chans):
             measure("readout", ch, None, integration.full("const", acc[idx]))
             save(acc[idx], outs[idx])
@@ -606,8 +484,9 @@ class OPXPulseController:
     def _build_hardware_out_program(
         self, sequence: PulseSequence | None, measure_chans: list[str]
     ) -> Any:
-        # HARDWARE_OUT: same as SOFTWARE but digital marker fires with the first pulse
-        # The digital marker is already attached to the pulse definition
+        # HARDWARE_OUT uses the same pause/resume loop as SOFTWARE; the digital
+        # output marker is emitted by the trigger-link element, not the program
+        # structure itself.
         return self._build_software_program(sequence, measure_chans)
 
     def _build_hardware_in_program(
@@ -626,18 +505,12 @@ class OPXPulseController:
 
             with infinite_loop_():
                 if has_timeout:
-                    # Placeholder trigger detection: waits for `timeout` cycles,
-                    # then reads IO1 (host-side flag). A real edge-triggered
-                    # implementation should use a digital input polling loop or
-                    # QUA's native wait_for_trigger() when available.
                     wait(timeout)
                     with if_(IO1):
                         assign(timed_out, False)
                     with else_():
                         assign(timed_out, True)
 
-                    # On timeout: skip play/measure entirely, save sentinel -1.0
-                    # so the stream always produces the same number of entries.
                     with if_(timed_out):
                         with for_(seg, 0, seg < self.measure_number, seg + 1):
                             for idx, _ch in enumerate(measure_chans):
@@ -649,8 +522,6 @@ class OPXPulseController:
                             with for_(seg, 0, seg < self.measure_number, seg + 1):
                                 self._emit_measure_all(measure_chans, acc, outs)
                 else:
-                    # No timeout — block indefinitely until trigger.
-                    # Same placeholder: host sets IO1 to signal trigger arrival.
                     pause()
                     self._emit_play_sequence(sequence)
                     if measure_chans:
@@ -665,8 +536,10 @@ class OPXPulseController:
 
         return prog
 
+    # -- Execution ---------------------------------------------------------
+
     def execute(self, prog: Any | None = None) -> None:
-        """Execute a QUA program on the OPX."""
+        """Execute a QUA program on the OPX (connects lazily on first call)."""
         if prog is None:
             raise InstrumentError("No program to execute")
 
@@ -680,7 +553,7 @@ class OPXPulseController:
                     octave=self.octave,
                 )
                 config = getattr(self, "_cached_config", None) or self._build_config()
-                self._cached_config = None  # consume; don't hold stale ref
+                self._cached_config = None
                 self._driver = self._qmm.open_qm(FullQuaConfig(**config))
 
             self._driver.compile(prog)
@@ -691,7 +564,6 @@ class OPXPulseController:
                 ch.set_read_len(self.read_len)
                 ch.set_driver(self._driver)
         except Exception:
-            # Ensure resources are cleaned up on failure
             self.teardown()
             raise
 
@@ -710,23 +582,15 @@ class OPXPulseController:
         measure_channels: list[str] | None = None,
         allow_timeouts: bool = False,
     ) -> dict[str, float]:
-        """Play a pulse sequence and return measurements.
-
-        For HARDWARE_IN with timeouts: sentinel values (-1.0) in the stream
-        indicate skipped iterations. Raises InstrumentError unless
-        allow_timeouts=True.
-        """
+        """Play a pulse sequence and return measurements."""
         prog = self.build_program(sequence)
         self.execute(prog)
 
         channels = measure_channels or list(self._measurement_channels.keys())
         results: dict[str, float] = {}
-
         for ch_name in channels:
-            val = self.measure_channel(ch_name)
-            results[ch_name] = val
+            results[ch_name] = self.measure_channel(ch_name)
 
-        # Check for timeout sentinels
         if (
             self.trigger_config.mode == TriggerMode.HARDWARE_IN
             and self.trigger_config.input_timeout_cycles is not None
@@ -741,6 +605,8 @@ class OPXPulseController:
 
         return results
 
+    # -- Hardware sweep execution (HardwareSweepController protocol) -------
+
     def execute_sweep_1d(
         self,
         trigger_link_name: str,
@@ -750,8 +616,6 @@ class OPXPulseController:
         settling_wait_ns: int = 250_000,
     ) -> np.ndarray:
         """Build and execute a 1D triggered sweep QUA program."""
-        from stanza.timing import ns_to_cycles
-
         settling_cycles = ns_to_cycles(settling_wait_ns)
         measure_chan = f"measure_{measure_electrode}"
 
@@ -780,13 +644,9 @@ class OPXPulseController:
                     out_stream.buffer(n_points).save("results")
 
         self.execute(prog)
-
-        job = self._job
-        handle = job.result_handles.get("results")
+        handle = self._job.result_handles.get("results")
         handle.wait_for_values(1)
-        raw = handle.fetch_all()
-
-        return np.array(raw, dtype=float)
+        return np.array(handle.fetch_all(), dtype=float)
 
     def execute_sweep_2d(
         self,
@@ -799,8 +659,6 @@ class OPXPulseController:
         settling_wait_ns: int = 250_000,
     ) -> np.ndarray:
         """Build and execute a 2D triggered sweep QUA program."""
-        from stanza.timing import ns_to_cycles
-
         settling_cycles = ns_to_cycles(settling_wait_ns)
         measure_chan = f"measure_{measure_electrode}"
 
@@ -833,32 +691,134 @@ class OPXPulseController:
                     out_stream.buffer(total).save("results")
 
         self.execute(prog)
-
-        job = self._job
-        handle = job.result_handles.get("results")
+        handle = self._job.result_handles.get("results")
         handle.wait_for_values(1)
-        raw = handle.fetch_all()
+        return np.array(handle.fetch_all(), dtype=float).reshape(n_outer, n_inner)
 
-        return np.array(raw, dtype=float).reshape(n_outer, n_inner)
+    # -- Teardown ----------------------------------------------------------
 
     def teardown(self) -> None:
         """Halt all jobs and close the connection."""
-        if self._driver is not None:
-            try:
-                jobs = self._driver.get_jobs()
-                if hasattr(jobs, "__iter__"):
-                    for job in jobs:
-                        try:
-                            job.halt()
-                        except Exception:
-                            logger.warning(f"Failed to halt job {job.id}")
-            except Exception:
-                pass
-            finally:
-                try:
-                    self._driver.close()
-                except Exception:
-                    pass
-
+        _halt_and_close(self._driver)
         self._driver = None
         self._job = None
+
+
+# ---------------------------------------------------------------------------
+# OPXInstrument — backwards-compatible measurement-only entry point
+# ---------------------------------------------------------------------------
+
+
+class OPXInstrument(BaseMeasurementInstrument):
+    """OPX measurement instrument (legacy).
+
+    Eagerly connects to hardware on construction.  Use ``OPXPulseController``
+    for pulse sequencing, triggering, and hardware sweep execution.
+    """
+
+    def __init__(
+        self,
+        instrument_config: MeasurementInstrumentConfig,
+        channel_configs: dict[str, ChannelConfig],
+    ):
+        if not HAS_QM:
+            raise ImportError(
+                "qm is not installed. Install with: pip install stanza[qm]"
+            )
+
+        super().__init__(instrument_config)
+
+        cfg = _parse_instrument_config(instrument_config)
+        self.host: str = cfg["host"]
+        self.port: int = cfg["port"]
+        self.machine_type = cfg["machine_type"]
+        self.cluster_name = cfg["cluster_name"]
+        self.connection_headers = cfg["connection_headers"]
+        self.measurement_channels = cfg["measurement_channels"]
+        self.octave = cfg["octave"]
+        self.read_len: int = cfg["read_len"]
+        self.measurement_duration: int = cfg["measurement_duration"]
+        self.measure_number: int = max(
+            1, int(self.measurement_duration / self.read_len)
+        )
+
+        self.channel_configs = channel_configs
+        self.qmm = QuantumMachinesManager(
+            host=self.host,
+            port=self.port,
+            connection_headers=self.connection_headers,
+            cluster_name=self.cluster_name,
+            octave=self.octave,
+        )
+        self._initialize_channels(channel_configs)
+        self.driver = self.qmm.open_qm(self.qua_config)
+
+    def _initialize_channels(self, channel_configs: dict[str, ChannelConfig]) -> None:
+        for cc in channel_configs.values():
+            if (
+                cc.measure_channel is not None
+                and self.measurement_channels is not None
+                and cc.measure_channel in self.measurement_channels
+            ):
+                self.add_channel(
+                    f"measure_{cc.name}",
+                    OPXMeasurementChannel(cc.name, cc.measure_channel, cc),
+                )
+
+    @cached_property
+    def qua_config(self) -> FullQuaConfig:
+        builder = OPXConfigBuilder(machine_type=self.machine_type)
+        builder.add_fem(slot=2, fem_type="LF")
+        builder.add_analog_output(fem_slot=2, port=1)
+        builder.add_analog_output(fem_slot=2, port=2)
+        builder.add_analog_input(fem_slot=2, port=1, offset=-0.0078)
+        builder.add_analog_input(fem_slot=2, port=2, offset=-0.007)
+
+        for channel_name, channel in self.channels.items():
+            builder.add_measurement_element(
+                name=channel_name,
+                port=("con1", 2, channel.channel_id),
+                read_len_ns=self.read_len,
+            )
+
+        return FullQuaConfig(**builder.build())
+
+    @property
+    def qua_program(self) -> Program:
+        chans = list(self.channels.keys())
+        n_ch = len(chans)
+        with program() as prog:
+            seg = declare(int)
+            acc = declare(fixed, size=n_ch)
+            outs = [declare_stream() for _ in range(n_ch)]
+
+            with infinite_loop_():
+                pause()
+                with for_(seg, 0, seg < self.measure_number, seg + 1):
+                    for idx, ch in enumerate(chans):
+                        measure(
+                            "readout", ch, None, integration.full("const", acc[idx])
+                        )
+                        save(acc[idx], outs[idx])
+
+            with stream_processing():
+                for idx, ch in enumerate(chans):
+                    outs[idx].buffer(self.measure_number).map(FUNCTIONS.average()).save(
+                        ch
+                    )
+
+        return prog
+
+    def prepare_measurement(self) -> None:
+        self.driver.compile(self.qua_program)
+        job = self.driver.execute(self.qua_program)
+        for channel in self.channels.values():
+            channel.set_job_id(job.id)
+            channel.set_read_len(self.read_len)
+            channel.set_driver(self.driver)
+
+    def teardown_measurement(self) -> None:
+        _halt_and_close(self.driver)
+
+    def measure(self, channel_name: str) -> float:
+        return super().measure(f"measure_{channel_name}")

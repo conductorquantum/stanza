@@ -1,5 +1,6 @@
 from unittest.mock import Mock, patch
 
+import numpy as np
 import pytest
 
 from stanza.base.channels import ChannelConfig
@@ -765,3 +766,151 @@ class TestQDAC2MeasurementChannel:
 
         measure_channel = qdac.channels["measure_sense1"]
         assert measure_channel.get_parameter_value("conversion_factor") == 1e-6
+
+
+@patch("stanza.drivers.qdac2.PyVisaDriver")
+class TestQDAC2VoltageList:
+    """Tests for voltage list / external trigger support."""
+
+    def _make_qdac(self, mock_driver_class, instrument_config, control_channel_config):
+        mock_driver = Mock()
+        mock_driver_class.return_value = mock_driver
+        channel_configs = {"gate1": control_channel_config}
+        qdac = QDAC2(
+            instrument_config=instrument_config,
+            current_range=QDAC2CurrentRange.LOW,
+            channel_configs=channel_configs,
+        )
+        return qdac, mock_driver
+
+    def test_load_voltage_list_sends_correct_scpi_sequence(
+        self, mock_driver_class, instrument_config, control_channel_config
+    ):
+        """Test that load_voltage_list sends the full SCPI sequence in correct order."""
+        qdac, mock_driver = self._make_qdac(
+            mock_driver_class, instrument_config, control_channel_config
+        )
+
+        voltages = [0.0, 0.5, 1.0]
+        qdac.load_voltage_list("gate1", voltages, "ext1", dwell_s=5e-6, slew_rate=500.0)
+
+        mock_driver.write_binary_values.assert_called_once_with(
+            "sour1:dc:list:volt", [0.0, 0.5, 1.0]
+        )
+
+        write_calls = [c.args[0] for c in mock_driver.write.call_args_list]
+        # Filter to only the calls after init
+        # The SCPI sequence should contain these in order:
+        expected_sequence = [
+            "sour1:dc:init:cont off",
+            "sour1:dc:list:dwell 5e-06",
+            "sour1:volt:slew 500.0",
+            "sour1:dc:list:tmode stepped",
+            "sour1:dc:trig:sour ext1",
+            "sour1:dc:init:cont on",
+            "sour1:dc:mode list",
+        ]
+        # Find the subsequence in write_calls
+        for expected_cmd in expected_sequence:
+            assert expected_cmd in write_calls, f"Missing SCPI command: {expected_cmd}"
+
+    def test_load_voltage_list_validates_dwell_minimum(
+        self, mock_driver_class, instrument_config, control_channel_config
+    ):
+        """Test that dwell_s below 2µs raises ValueError."""
+        qdac, _ = self._make_qdac(
+            mock_driver_class, instrument_config, control_channel_config
+        )
+
+        with pytest.raises(ValueError, match="dwell_s must be >= 2e-06"):
+            qdac.load_voltage_list("gate1", [0.0, 1.0], "ext1", dwell_s=1e-6)
+
+    def test_load_voltage_list_validates_trigger_port(
+        self, mock_driver_class, instrument_config, control_channel_config
+    ):
+        """Test that invalid trigger port raises ValueError."""
+        qdac, _ = self._make_qdac(
+            mock_driver_class, instrument_config, control_channel_config
+        )
+
+        with pytest.raises(ValueError, match="trigger_port must be one of"):
+            qdac.load_voltage_list("gate1", [0.0, 1.0], "ext5")
+
+    def test_load_voltage_list_validates_voltage_count_limit(
+        self, mock_driver_class, instrument_config, control_channel_config
+    ):
+        """Test that voltage list exceeding 65536 raises ValueError."""
+        qdac, _ = self._make_qdac(
+            mock_driver_class, instrument_config, control_channel_config
+        )
+
+        too_many = np.zeros(65537)
+        with pytest.raises(ValueError, match="exceeds maximum"):
+            qdac.load_voltage_list("gate1", too_many, "ext1")
+
+    def test_load_voltage_list_validates_voltage_range(
+        self, mock_driver_class, instrument_config, control_channel_config
+    ):
+        """Test that voltages outside channel range raise ValueError."""
+        qdac, _ = self._make_qdac(
+            mock_driver_class, instrument_config, control_channel_config
+        )
+        # control_channel_config has voltage_range=(-2.0, 2.0)
+        with pytest.raises(ValueError, match="within range"):
+            qdac.load_voltage_list("gate1", [0.0, 3.0], "ext1")
+
+    def test_load_voltage_list_accepts_numpy_array(
+        self, mock_driver_class, instrument_config, control_channel_config
+    ):
+        """Test that numpy arrays are accepted as voltage input."""
+        qdac, mock_driver = self._make_qdac(
+            mock_driver_class, instrument_config, control_channel_config
+        )
+
+        voltages = np.linspace(-1.0, 1.0, 5)
+        qdac.load_voltage_list("gate1", voltages, "ext2")
+
+        mock_driver.write_binary_values.assert_called_once()
+
+    def test_reset_voltage_list_returns_to_fixed_mode(
+        self, mock_driver_class, instrument_config, control_channel_config
+    ):
+        """Test that reset_voltage_list sends correct SCPI to return to fixed mode."""
+        qdac, mock_driver = self._make_qdac(
+            mock_driver_class, instrument_config, control_channel_config
+        )
+
+        qdac.reset_voltage_list("gate1")
+
+        write_calls = [c.args[0] for c in mock_driver.write.call_args_list]
+        assert "sour1:dc:init:cont off" in write_calls
+        assert "sour1:dc:mode fixed" in write_calls
+
+    def test_get_trigger_port_returns_ext_name(
+        self, mock_driver_class, instrument_config, control_channel_config
+    ):
+        """Test that get_trigger_port returns the trigger port name in list mode."""
+        qdac, mock_driver = self._make_qdac(
+            mock_driver_class, instrument_config, control_channel_config
+        )
+
+        mock_driver.query.side_effect = lambda cmd: {
+            "sour1:dc:mode?": "LIST",
+            "sour1:dc:trig:sour?": "ext1",
+        }.get(cmd, "")
+
+        result = qdac.get_trigger_port("gate1")
+        assert result == "ext1"
+
+    def test_get_trigger_port_returns_none_in_fixed_mode(
+        self, mock_driver_class, instrument_config, control_channel_config
+    ):
+        """Test that get_trigger_port returns None when channel is in FIXED mode."""
+        qdac, mock_driver = self._make_qdac(
+            mock_driver_class, instrument_config, control_channel_config
+        )
+
+        mock_driver.query.return_value = "FIXED"
+
+        result = qdac.get_trigger_port("gate1")
+        assert result is None

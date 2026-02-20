@@ -1,5 +1,6 @@
 import time
 from collections.abc import Callable
+from contextlib import nullcontext
 from typing import Any, cast, overload
 
 import numpy as np
@@ -400,18 +401,7 @@ class Device:
         """
         if isinstance(pad, str):
             return self._measure(pad)
-        else:
-            if (
-                self.measurement_instrument
-                and hasattr(self.measurement_instrument, "measure")
-                and callable(self.measurement_instrument.measure)
-            ):
-                try:
-                    return self.measurement_instrument.measure(pad)
-                except Exception as _:
-                    return [self._measure(p) for p in pad]
-            else:
-                return [self._measure(p) for p in pad]
+        return [self._measure(p) for p in pad]
 
     def _check(self, pad: str) -> float:
         """Check the current voltage of a single gate electrode."""
@@ -465,53 +455,40 @@ class Device:
         measure_electrode: str,
         session: LoggerSession | None = None,
     ) -> tuple[list[float], list[float]]:
-        """Sweep a single gate electrode and measure the current of a single contact electrode.
-
-        Performs a 1D voltage sweep by stepping through a list of voltages on a
-        specified gate electrode while measuring the current through a contact
-        electrode at each step. Optionally logs the sweep data to a session.
+        """Sweep a single gate electrode and measure current at each step.
 
         Args:
-            gate_electrode: Name of the gate electrode to sweep
-            voltages: List of voltage values to apply to the gate electrode
-            measure_electrode: Name of the contact electrode to measure current from
-            session: Optional LoggerSession to log the sweep data. If provided,
-                sweep results will be logged with metadata.
+            gate_electrode: Gate to sweep.
+            voltages: Voltage values to apply.
+            measure_electrode: Contact electrode to measure.
+            session: Optional LoggerSession for live plotting.
 
         Returns:
-            Tuple of (voltage_measurements, current_measurements) where:
-            - voltage_measurements: List of actual voltages read from the gate
-            - current_measurements: List of measured current values at each voltage
+            (actual_voltages, measured_currents) — both lists of float.
         """
-        voltage_measurements = []
-        current_measurements = []
-
-        if session is None:
-            # No logging - just collect data
+        metadata = {
+            "gate_electrodes": [gate_electrode],
+            "measure_electrode": measure_electrode,
+        }
+        ctx = (
+            session.sweep(
+                f"{gate_electrode} sweep", "Voltage", "Current", metadata=metadata
+            )
+            if session
+            else nullcontext()
+        )
+        v_out: list[float] = []
+        i_out: list[float] = []
+        with ctx as s:
             for voltage in voltages:
                 self.jump({gate_electrode: voltage}, wait_for_settling=True)
-                v_actual = self.check(gate_electrode)
-                i_measured = self.measure(measure_electrode)
-                voltage_measurements.append(v_actual)
-                current_measurements.append(i_measured)
-        else:
-            # With logging and live plotting
-            metadata = {
-                "gate_electrodes": [gate_electrode],
-                "measure_electrode": measure_electrode,
-            }
-            with session.sweep(
-                f"{gate_electrode} sweep", "Voltage", "Current", metadata=metadata
-            ) as s:
-                for voltage in voltages:
-                    self.jump({gate_electrode: voltage}, wait_for_settling=True)
-                    v_actual = self.check(gate_electrode)
-                    i_measured = self.measure(measure_electrode)
-                    voltage_measurements.append(v_actual)
-                    current_measurements.append(i_measured)
-                    s.append([v_actual], [i_measured])
-
-        return voltage_measurements, current_measurements
+                v = self.check(gate_electrode)
+                i = self.measure(measure_electrode)
+                v_out.append(v)
+                i_out.append(i)
+                if s:
+                    s.append([v], [i])
+        return v_out, i_out
 
     def sweep_2d(
         self,
@@ -522,69 +499,47 @@ class Device:
         measure_electrode: str,
         session: LoggerSession | None = None,
     ) -> tuple[list[list[float]], list[float]]:
-        """Sweep two gate electrodes and measure the current of a single contact electrode.
-
-        Performs a 2D voltage sweep by iterating through all combinations of
-        voltages on two gate electrodes while measuring current through a contact
-        electrode. The sweep iterates through gate_1 voltages in the outer loop
-        and gate_2 voltages in the inner loop.
+        """Sweep two gates (outer x inner) and measure current.
 
         Args:
-            gate_1: Name of the first gate electrode to sweep
-            voltages_1: List of voltage values for the first gate electrode
-            gate_2: Name of the second gate electrode to sweep
-            voltages_2: List of voltage values for the second gate electrode
-            measure_electrode: Name of the contact electrode to measure current from
-            session: Optional LoggerSession to log the sweep data. If provided,
-                sweep results will be logged with metadata.
+            gate_1: Outer-loop gate.
+            voltages_1: Outer-loop voltages.
+            gate_2: Inner-loop gate.
+            voltages_2: Inner-loop voltages.
+            measure_electrode: Contact electrode to measure.
+            session: Optional LoggerSession for live plotting.
 
         Returns:
-            Tuple of (voltage_measurements, current_measurements) where:
-            - voltage_measurements: List of [gate_1_voltage, gate_2_voltage] pairs
-            - current_measurements: List of measured current values at each voltage pair
+            ([v1, v2] pairs, measured_currents).
         """
-        voltage_measurements = []
-        current_measurements = []
-
-        if session is None:
-            # No logging - just collect data
-            for voltage_1 in voltages_1:
-                for voltage_2 in voltages_2:
-                    self.jump(
-                        {gate_1: voltage_1, gate_2: voltage_2},
-                        wait_for_settling=True,
-                    )
-                    v1_actual = self.check(gate_1)
-                    v2_actual = self.check(gate_2)
-                    i_measured = self.measure(measure_electrode)
-                    voltage_measurements.append([v1_actual, v2_actual])
-                    current_measurements.append(i_measured)
-        else:
-            # With logging and live plotting
-            metadata = {
-                "gate_electrodes": [gate_1, gate_2],
-                "measure_electrode": measure_electrode,
-            }
-            with session.sweep(
+        metadata = {
+            "gate_electrodes": [gate_1, gate_2],
+            "measure_electrode": measure_electrode,
+        }
+        ctx = (
+            session.sweep(
                 f"{gate_1} and {gate_2} sweep",
                 [gate_1, gate_2],
                 "Current",
                 metadata=metadata,
-            ) as s:
-                for voltage_1 in voltages_1:
-                    for voltage_2 in voltages_2:
-                        self.jump(
-                            {gate_1: voltage_1, gate_2: voltage_2},
-                            wait_for_settling=True,
-                        )
-                        v1_actual = self.check(gate_1)
-                        v2_actual = self.check(gate_2)
-                        i_measured = self.measure(measure_electrode)
-                        voltage_measurements.append([v1_actual, v2_actual])
-                        current_measurements.append(i_measured)
-                        s.append([v1_actual, v2_actual], [i_measured])
-
-        return voltage_measurements, current_measurements
+            )
+            if session
+            else nullcontext()
+        )
+        v_out: list[list[float]] = []
+        i_out: list[float] = []
+        with ctx as s:
+            for v1 in voltages_1:
+                for v2 in voltages_2:
+                    self.jump({gate_1: v1, gate_2: v2}, wait_for_settling=True)
+                    v1_actual = self.check(gate_1)
+                    v2_actual = self.check(gate_2)
+                    i = self.measure(measure_electrode)
+                    v_out.append([v1_actual, v2_actual])
+                    i_out.append(i)
+                    if s:
+                        s.append([v1_actual, v2_actual], [i])
+        return v_out, i_out
 
     def sweep_all(
         self,
@@ -592,59 +547,39 @@ class Device:
         measure_electrode: str,
         session: LoggerSession | None = None,
     ) -> tuple[list[list[float]], list[float]]:
-        """Sweep all gate electrodes and measure the current of a single contact electrode.
-
-        Performs a voltage sweep by setting all control gates to the same voltage
-        at each step, while measuring current through a contact electrode. This is
-        useful for characterizing device response to overall gate bias.
+        """Set all control gates to the same voltage at each step and measure.
 
         Args:
-            voltages: List of voltage values to apply to all control gates simultaneously
-            measure_electrode: Name of the contact electrode to measure current from
-            session: Optional LoggerSession to log the sweep data. If provided,
-                sweep results will be logged with metadata.
+            voltages: Voltage values to apply to all control gates.
+            measure_electrode: Contact electrode to measure.
+            session: Optional LoggerSession for live plotting.
 
         Returns:
-            Tuple of (voltage_measurements, current_measurements) where:
-            - voltage_measurements: List of lists, each containing voltage values for
-              all control gates at that sweep step
-            - current_measurements: List of measured current values at each voltage
+            ([[voltage]] per step, measured_currents).
         """
-        voltage_measurements = []
-        current_measurements = []
-
-        if session is None:
-            # No logging - just collect data
+        metadata = {
+            "gate_electrodes": self.control_gates,
+            "measure_electrode": measure_electrode,
+        }
+        ctx = (
+            session.sweep("all gates sweep", "Voltage", "Current", metadata=metadata)
+            if session
+            else nullcontext()
+        )
+        v_out: list[list[float]] = []
+        i_out: list[float] = []
+        with ctx as s:
             for voltage in voltages:
                 self.jump(
                     dict.fromkeys(self.control_gates, voltage),
                     wait_for_settling=True,
                 )
-
-                i_measured = self.measure(measure_electrode)
-                voltage_measurements.append([voltage])
-                current_measurements.append(i_measured)
-        else:
-            # With logging and live plotting
-            metadata = {
-                "gate_electrodes": self.control_gates,
-                "measure_electrode": measure_electrode,
-            }
-            with session.sweep(
-                "all gates sweep", "Voltage", "Current", metadata=metadata
-            ) as s:
-                for voltage in voltages:
-                    self.jump(
-                        dict.fromkeys(self.control_gates, voltage),
-                        wait_for_settling=True,
-                    )
-
-                    i_measured = self.measure(measure_electrode)
-                    voltage_measurements.append([voltage])
-                    current_measurements.append(i_measured)
-                    s.append([voltage], [i_measured])
-
-        return voltage_measurements, current_measurements
+                i = self.measure(measure_electrode)
+                v_out.append([voltage])
+                i_out.append(i)
+                if s:
+                    s.append([voltage], [i])
+        return v_out, i_out
 
     def sweep_nd(
         self,
@@ -683,12 +618,7 @@ class Device:
                 wait_for_settling=True,
             )
 
-            voltage_measurements.append(
-                [
-                    self.check(gate) or v
-                    for gate, v in zip(gate_electrodes, voltage, strict=True)
-                ]
-            )
+            voltage_measurements.append([self.check(gate) for gate in gate_electrodes])
             current_measurements.append(self.measure(measure_electrode))
 
         if session:
@@ -745,7 +675,7 @@ class Device:
         except ValueError as exc:
             raise DeviceError(str(exc)) from exc
 
-    def zero(self, type: str | PadType = PadType.ALL) -> None:
+    def zero(self, pad_type: str | PadType = PadType.ALL) -> None:
         """Set all controllable gates and/or controllable contacts to 0V.
 
         Safely brings specified electrodes to ground voltage (0V) with settling
@@ -753,7 +683,7 @@ class Device:
         or safe shutdown.
 
         Args:
-            type: Specifies which pads to zero. Options are:
+            pad_type: Specifies which pads to zero. Options are:
                 - PadType.ALL or "ALL": Zero all control gates, contacts, and gpios (default)
                 - PadType.GATE or "GATE": Zero only control gates
                 - PadType.CONTACT or "CONTACT": Zero only control contacts
@@ -765,7 +695,7 @@ class Device:
                 to reach 0V within tolerance (1e-6V) after the operation.
         """
         pads: list[str] = []
-        match str(type).upper():
+        match str(pad_type).upper():
             case PadType.ALL:
                 pads = self.control_gates + self.control_contacts + self.control_gpios
             case PadType.GATE:
@@ -775,7 +705,7 @@ class Device:
             case PadType.GPIO:
                 pads = self.control_gpios
             case _:
-                raise DeviceError(f"Invalid pad type: {type}")
+                raise DeviceError(f"Invalid pad type: {pad_type}")
 
         gate_voltages = dict.fromkeys(pads, 0.0)
         self.jump(gate_voltages, wait_for_settling=True)

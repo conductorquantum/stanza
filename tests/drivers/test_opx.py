@@ -14,6 +14,13 @@ from stanza.drivers.opx import (
     PulseStep,
 )
 from stanza.drivers.opx_config_builder import OPXConfigBuilder
+from stanza.drivers.opx_triggers import (
+    TriggerMode,
+    hardware_in_trigger,
+    hardware_out_trigger,
+    software_trigger,
+    timed_trigger,
+)
 from stanza.exceptions import InstrumentError
 from stanza.models import (
     ContactType,
@@ -22,14 +29,7 @@ from stanza.models import (
     PadType,
 )
 from stanza.pulses import PulseRegistry, make_square_pulse
-from stanza.triggers import (
-    TriggerLink,
-    TriggerMode,
-    hardware_in_trigger,
-    hardware_out_trigger,
-    software_trigger,
-    timed_trigger,
-)
+from stanza.triggers import TriggerLink
 
 # --- Fixtures ---
 

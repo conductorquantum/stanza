@@ -5,6 +5,8 @@ from enum import Enum
 from functools import cached_property
 from typing import overload
 
+import numpy as np
+
 from stanza.base.channels import (
     ChannelConfig,
     ControlChannel,
@@ -297,6 +299,87 @@ class QDAC2(GeneralInstrument):
             currents_str = self.driver.query(f"read? {channels_suffix}")
             currents = [float(current.strip()) for current in currents_str.split(",")]
             return currents
+
+    # --- Voltage List / External Trigger Support ---
+
+    _VALID_TRIGGER_PORTS = frozenset({"ext1", "ext2", "ext3", "ext4"})
+    _MIN_DWELL_S = 2e-6
+    _MAX_VOLTAGE_LIST_LEN = 65536
+
+    def load_voltage_list(
+        self,
+        channel_name: str,
+        voltages: list[float] | np.ndarray,
+        trigger_port: str,
+        dwell_s: float = 2e-6,
+        slew_rate: float = 1e3,
+    ) -> None:
+        """Pre-load a voltage list and arm the channel to step on external trigger.
+
+        Args:
+            channel_name: Logical channel name (e.g., "gate1").
+            voltages: Voltage values to step through.
+            trigger_port: External trigger port ("ext1" .. "ext4").
+            dwell_s: Dwell time per step in seconds (min 2µs per QDAC spec).
+            slew_rate: Voltage slew rate in V/s.
+        """
+        if trigger_port not in self._VALID_TRIGGER_PORTS:
+            raise ValueError(
+                f"trigger_port must be one of {sorted(self._VALID_TRIGGER_PORTS)}, "
+                f"got '{trigger_port}'"
+            )
+        if dwell_s < self._MIN_DWELL_S:
+            raise ValueError(f"dwell_s must be >= {self._MIN_DWELL_S} s, got {dwell_s}")
+
+        voltages_arr = np.asarray(voltages, dtype=float)
+        if len(voltages_arr) > self._MAX_VOLTAGE_LIST_LEN:
+            raise ValueError(
+                f"Voltage list length {len(voltages_arr)} exceeds maximum "
+                f"of {self._MAX_VOLTAGE_LIST_LEN}"
+            )
+
+        # Validate voltages within channel range
+        config = self.channel_configs.get(channel_name)
+        if config is not None and config.voltage_range is not None:
+            v_min, v_max = config.voltage_range
+            if np.any(voltages_arr < v_min) or np.any(voltages_arr > v_max):
+                raise ValueError(
+                    f"Voltages must be within range [{v_min}, {v_max}] "
+                    f"for channel '{channel_name}'"
+                )
+
+        # Resolve hardware channel id
+        ctrl_ch = self.get_channel(f"control_{channel_name}")
+        ch = ctrl_ch.channel_id
+
+        # SCPI sequence per QDAC-II programming model
+        self.driver.write_binary_values(f"sour{ch}:dc:list:volt", voltages_arr.tolist())
+        self.driver.write(f"sour{ch}:dc:init:cont off")
+        self.driver.write(f"sour{ch}:dc:list:dwell {dwell_s}")
+        self.driver.write(f"sour{ch}:volt:slew {slew_rate}")
+        self.driver.write(f"sour{ch}:dc:list:tmode stepped")
+        self.driver.write(f"sour{ch}:dc:trig:sour {trigger_port}")
+        self.driver.write(f"sour{ch}:dc:init:cont on")
+        self.driver.write(f"sour{ch}:dc:mode list")
+
+    def reset_voltage_list(self, channel_name: str) -> None:
+        """Return channel to fixed-voltage (DC) mode."""
+        ctrl_ch = self.get_channel(f"control_{channel_name}")
+        ch = ctrl_ch.channel_id
+        self.driver.write(f"sour{ch}:dc:init:cont off")
+        self.driver.write(f"sour{ch}:dc:mode fixed")
+
+    def get_trigger_port(self, channel_name: str) -> str | None:
+        """Query current trigger source for a channel.
+
+        Returns None if channel is in FIXED mode.
+        """
+        ctrl_ch = self.get_channel(f"control_{channel_name}")
+        ch = ctrl_ch.channel_id
+        mode = self.driver.query(f"sour{ch}:dc:mode?").strip().upper()
+        if mode == "FIXED":
+            return None
+        return self.driver.query(f"sour{ch}:dc:trig:sour?").strip()
 
     def close(self) -> None:
         """Close the QDAC2 driver."""
