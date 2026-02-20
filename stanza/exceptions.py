@@ -55,3 +55,17 @@ class WriterError(LoggingError):
         super().__init__(message, error_code)
         self.writer_type = writer_type
         self.file_path = file_path
+
+
+class WaveformError(ValueError):
+    """Raised when waveform generation or validation fails."""
+
+    def __init__(self, message: str):
+        super().__init__(message)
+
+
+class PulseError(ValueError):
+    """Raised when pulse definition or registration fails."""
+
+    def __init__(self, message: str):
+        super().__init__(message)

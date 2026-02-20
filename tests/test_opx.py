@@ -38,14 +38,20 @@ def opx_mocks():
     patches = [
         ("stanza.drivers.opx.HAS_QM", True),
         ("stanza.drivers.opx.QuantumMachinesManager", mock_qmm),
-        ("stanza.drivers.opx.get_config_resource", "{}"),
-        ("stanza.drivers.opx.substitute_parameters", "{}"),
         ("stanza.drivers.opx.FullQuaConfig", Mock()),
     ]
     with ExitStack() as stack:
         for target, value in patches:
             stack.enter_context(patch(target, return_value=value))
         stack.enter_context(patch.object(OPXInstrument, "_initialize_channels"))
+        # Patch qua_config to return a mock so open_qm doesn't need real config
+        stack.enter_context(
+            patch.object(
+                OPXInstrument,
+                "qua_config",
+                new_callable=lambda: property(lambda self: Mock()),
+            )
+        )
         yield mock_driver
 
 
@@ -239,14 +245,6 @@ class TestOPXInstrument:
         mock_qmm.open_qm.return_value = mock_driver
         patches = [
             patch("stanza.drivers.opx.QuantumMachinesManager", return_value=mock_qmm),
-            patch(
-                "stanza.drivers.opx.get_config_resource",
-                return_value='{"elements": {}}',
-            ),
-            patch(
-                "stanza.drivers.opx.substitute_parameters",
-                return_value='{"elements": {}}',
-            ),
             patch("stanza.drivers.opx.FullQuaConfig", return_value=Mock()),
         ]
 
@@ -283,14 +281,6 @@ class TestOPXInstrument:
         mock_qmm.open_qm.return_value = mock_driver
         patches = [
             patch("stanza.drivers.opx.QuantumMachinesManager", return_value=mock_qmm),
-            patch(
-                "stanza.drivers.opx.get_config_resource",
-                return_value='{"elements": {}}',
-            ),
-            patch(
-                "stanza.drivers.opx.substitute_parameters",
-                return_value='{"elements": {}}',
-            ),
             patch("stanza.drivers.opx.FullQuaConfig", return_value=Mock()),
         ]
 
@@ -302,7 +292,8 @@ class TestOPXInstrument:
             assert "measure_ch1" not in instrument.channels
 
     @patch("stanza.drivers.opx.HAS_QM", True)
-    def test_qua_config_property(self, instrument_config, opx_mocks):
+    def test_qua_config_property(self, instrument_config):
+        """qua_config should use OPXConfigBuilder and return a FullQuaConfig."""
         channel_configs = {
             "test_ch": ChannelConfig(
                 "test_ch",
@@ -313,22 +304,22 @@ class TestOPXInstrument:
             )
         }
 
-        with (
-            patch("stanza.drivers.opx.get_config_resource") as mock_get_config,
-            patch("stanza.drivers.opx.substitute_parameters") as mock_substitute,
-            patch("stanza.drivers.opx.FullQuaConfig") as mock_qua_config,
-        ):
-            mock_get_config.return_value = '{"elements": {}}'
-            mock_substitute.return_value = '{"elements": {}}'
-            mock_qua_config_instance = Mock()
-            mock_qua_config.return_value = mock_qua_config_instance
+        mock_qmm = Mock()
+        mock_driver = Mock()
+        mock_qmm.open_qm.return_value = mock_driver
 
+        with (
+            patch("stanza.drivers.opx.QuantumMachinesManager", return_value=mock_qmm),
+            patch("stanza.drivers.opx.FullQuaConfig") as mock_fqc,
+            patch.object(OPXInstrument, "_initialize_channels"),
+        ):
+            mock_fqc.return_value = Mock()
             instrument = OPXInstrument(instrument_config, channel_configs)
             config = instrument.qua_config
 
-            assert config == mock_qua_config_instance
-            mock_get_config.assert_called_once_with("templates/qua_config.json")
-            mock_substitute.assert_called_once()
+            # Verify FullQuaConfig was called (by the builder)
+            assert mock_fqc.called
+            assert config is not None
 
     @patch("stanza.drivers.opx.HAS_QM", True)
     def test_qua_program_property(self, instrument_config, opx_mocks):
@@ -337,14 +328,6 @@ class TestOPXInstrument:
         mock_qmm.open_qm.return_value = mock_driver
         patches = [
             patch("stanza.drivers.opx.QuantumMachinesManager", return_value=mock_qmm),
-            patch(
-                "stanza.drivers.opx.get_config_resource",
-                return_value='{"elements": {}}',
-            ),
-            patch(
-                "stanza.drivers.opx.substitute_parameters",
-                return_value='{"elements": {}}',
-            ),
             patch("stanza.drivers.opx.FullQuaConfig", return_value=Mock()),
         ]
 

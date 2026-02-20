@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 from importlib.resources import files
 from pathlib import Path
 from typing import Any
@@ -11,26 +10,6 @@ from stanza.base.channels import ChannelConfig
 from stanza.base.registry import load_driver_class, validate_driver_protocols
 from stanza.device import Device
 from stanza.models import DeviceConfig, InstrumentType, PadType
-
-
-def substitute_parameters(template: str, substitutions: dict[str, Any]) -> str:
-    """Substitute parameters in a template string.
-
-    Args:
-        template: The template string to substitute parameters in.
-        substitutions: A dictionary of substitutions to make.
-
-    Returns:
-        The substituted string.
-    """
-
-    content = template
-    for placeholder, value in substitutions.items():
-        # Match <PLACEHOLDER> patterns and substitute with value
-        pattern = f"<{re.escape(placeholder)}>"
-        content = re.sub(pattern, str(value), content)
-
-    return content
 
 
 def get_config_resource(config_path: str | Path, encoding: str = "utf-8") -> str:
