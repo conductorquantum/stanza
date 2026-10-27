@@ -80,9 +80,10 @@ class QDAC2MeasurementChannel(MeasurementChannel):
         super()._setup_parameters()
 
         current_param = self.get_parameter("current")
-        current_param.getter = lambda: self.get_parameter_value(
-            "conversion_factor"
-        ) * float(self.driver.query(f"read? (@{self.channel_id})"))
+        current_param.getter = lambda: (
+            self.get_parameter_value("conversion_factor")
+            * float(self.driver.query(f"read? (@{self.channel_id})"))
+        )
         current_param.setter = None
 
         current_range_param = Parameter(
