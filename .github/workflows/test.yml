@@ -115,7 +115,7 @@ jobs:
         run: uv pip install coverage[toml]
 
       - name: Get coverage files
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@87c55149d96e628cc2ef7e6fc2aab372015aec85  # v4.1.3
         with:
           pattern: coverage-*
           path: coverage

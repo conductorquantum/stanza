@@ -130,7 +130,7 @@ def many_window_barrier_sweep(  # pylint: disable=too-many-locals,too-many-state
     aggregated_currents = np.array([], dtype=np.float32)
     fitted_peaks = []
     last_classification = False
-    last_peak_indices = []
+    last_peak_indices: list[int] = []
 
     max_v_float = float(max_v)
     for idx, sp_start_voltage in enumerate(sensor_plunger_start_voltages):
@@ -175,16 +175,25 @@ def many_window_barrier_sweep(  # pylint: disable=too-many-locals,too-many-state
             ).output
         except Exception as e:
             raise RoutineError(f"ML model execution failed: {e}") from e
-        classification = bool(coulomb_result["classification"])
-        score = float(coulomb_result["score"])
+        classification_value = coulomb_result["classification"]
+        score_value = coulomb_result["score"]
+        if classification_value is None or score_value is None:
+            raise RoutineError("Coulomb classifier returned no classification/score")
+        classification = bool(classification_value)
+        score = float(score_value)
 
+        num_peaks = 0
         if classification:
+            aggregated_peak_indices: list[int] | None
             try:
                 aggregated_peak_indices = client.models.execute(
                     model=PEAK_DETECTOR_MODEL, data=aggregated_currents
                 ).output["peak_indices"]
             except Exception as e:
                 raise RoutineError(f"ML model execution failed: {e}") from e
+            if aggregated_peak_indices is None:
+                raise RoutineError("Peak detector returned no peak_indices")
+            num_peaks = len(aggregated_peak_indices)
 
             fitted_peaks = analyze_find_first_peak_voltages(
                 aggregated_currents,
@@ -205,7 +214,7 @@ def many_window_barrier_sweep(  # pylint: disable=too-many-locals,too-many-state
                     "sensor_plunger_end_voltage": sp_end_voltage,
                     "classification": classification,
                     "score": score,
-                    "num_peaks": len(aggregated_peak_indices) if classification else 0,
+                    "num_peaks": num_peaks,
                 },
             )
 
