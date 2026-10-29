@@ -1,0 +1,201 @@
+{
+  "schema_version": 1,
+  "default_context": "PUBLISH",
+  "path_contexts": [],
+  "required_scan_paths": [
+    "uv.lock"
+  ],
+  "ignore_sources": [
+    "requirements-test.txt",
+    "requirements.txt"
+  ],
+  "first_party_packages": [],
+  "dev_groups": [
+    "dev",
+    "docs",
+    "lint",
+    "mypy",
+    "qa",
+    "test",
+    "tests",
+    "typing"
+  ],
+  "rollout": {
+    "unknown": "warn"
+  },
+  "license_rules": {
+    "allow": [
+      "0BSD",
+      "Apache-2.0",
+      "Artistic-2.0",
+      "BSD-2-Clause",
+      "BSD-3-Clause",
+      "BSL-1.0",
+      "BlueOak-1.0.0",
+      "CC0-1.0",
+      "ISC",
+      "MIT",
+      "MIT-0",
+      "NCSA",
+      "PSF-2.0",
+      "Python-2.0",
+      "Unlicense",
+      "Zlib"
+    ],
+    "conditional": {
+      "MPL-2.0": {
+        "SERVE": {
+          "status": "allow",
+          "code": "MPL_SERVE",
+          "detail": "allowed for hosted use"
+        },
+        "SHIP": {
+          "status": "warn",
+          "code": "MPL_SHIP_REVIEW",
+          "detail": "confirm modifications remain compliant and source obligations ship"
+        },
+        "PUBLISH": {
+          "status": "warn",
+          "code": "MPL_PUBLISH_REVIEW",
+          "detail": "confirm MPL-covered files remain separate and obligations are met"
+        }
+      },
+      "EPL-2.0": {
+        "SERVE": {
+          "status": "allow",
+          "code": "EPL_SERVE",
+          "detail": "allowed for hosted use"
+        },
+        "SHIP": {
+          "status": "warn",
+          "code": "EPL_SHIP_REVIEW",
+          "detail": "confirm the dependency is unmodified and distribution obligations are met"
+        },
+        "PUBLISH": {
+          "status": "warn",
+          "code": "EPL_PUBLISH_REVIEW",
+          "detail": "review weak-copyleft obligations before publishing"
+        }
+      },
+      "CDDL-1.0": {
+        "SERVE": {
+          "status": "allow",
+          "code": "CDDL_SERVE",
+          "detail": "allowed for hosted use"
+        },
+        "SHIP": {
+          "status": "warn",
+          "code": "CDDL_SHIP_REVIEW",
+          "detail": "confirm the dependency is unmodified and distribution obligations are met"
+        },
+        "PUBLISH": {
+          "status": "warn",
+          "code": "CDDL_PUBLISH_REVIEW",
+          "detail": "review weak-copyleft obligations before publishing"
+        }
+      },
+      "LGPL-2.1*": {
+        "SERVE": {
+          "status": "allow",
+          "code": "LGPL_SERVE",
+          "detail": "allowed for hosted use pending counsel confirmation"
+        },
+        "SHIP": {
+          "status": "warn",
+          "code": "LGPL_LINKING_REVIEW",
+          "detail": "confirm dynamic linking, relinking, notices, and source obligations"
+        },
+        "PUBLISH": {
+          "status": "deny",
+          "code": "LGPL_PUBLISH_DENY",
+          "detail": "LGPL is outside the default publish policy"
+        }
+      },
+      "LGPL-3.0*": {
+        "SERVE": {
+          "status": "allow",
+          "code": "LGPL_SERVE",
+          "detail": "allowed for hosted use pending counsel confirmation"
+        },
+        "SHIP": {
+          "status": "warn",
+          "code": "LGPL_LINKING_REVIEW",
+          "detail": "confirm dynamic linking, relinking, notices, and source obligations"
+        },
+        "PUBLISH": {
+          "status": "deny",
+          "code": "LGPL_PUBLISH_DENY",
+          "detail": "LGPL is outside the default publish policy"
+        }
+      },
+      "CC-BY-4.0": {
+        "SERVE": {
+          "status": "allow",
+          "code": "CC_BY_SERVE",
+          "detail": "allowed for hosted use"
+        },
+        "SHIP": {
+          "status": "warn",
+          "code": "CC_BY_ATTRIBUTION",
+          "detail": "required attribution must ship"
+        },
+        "PUBLISH": {
+          "status": "warn",
+          "code": "CC_BY_PUBLISH_REVIEW",
+          "detail": "confirm attribution and suitability for software distribution"
+        }
+      },
+      "GPL-2.0*": {
+        "SERVE": {
+          "status": "warn",
+          "code": "GPL_SERVE_COUNSEL_REVIEW",
+          "detail": "hosted-use boundary requires counsel confirmation"
+        },
+        "SHIP": {
+          "status": "deny",
+          "code": "GPL_SHIP_DENY",
+          "detail": "GPL is denied for shipped artifacts by default"
+        },
+        "PUBLISH": {
+          "status": "deny",
+          "code": "GPL_PUBLISH_DENY",
+          "detail": "GPL is denied for published packages by default"
+        }
+      },
+      "GPL-3.0*": {
+        "SERVE": {
+          "status": "warn",
+          "code": "GPL_SERVE_COUNSEL_REVIEW",
+          "detail": "hosted-use boundary requires counsel confirmation"
+        },
+        "SHIP": {
+          "status": "deny",
+          "code": "GPL_SHIP_DENY",
+          "detail": "GPL is denied for shipped artifacts by default"
+        },
+        "PUBLISH": {
+          "status": "deny",
+          "code": "GPL_PUBLISH_DENY",
+          "detail": "GPL is denied for published packages by default"
+        }
+      }
+    },
+    "deny": [
+      "AGPL-1.0*",
+      "AGPL-3.0*",
+      "BUSL-1.1",
+      "CC-BY-NC-*",
+      "Commons-Clause*",
+      "Elastic-2.0",
+      "LicenseRef-*",
+      "SSPL-1.0"
+    ],
+    "unknown": [
+      "",
+      "NONE",
+      "NOASSERTION",
+      "UNKNOWN",
+      "non-standard"
+    ]
+  }
+}

@@ -1,0 +1,85 @@
+name: Dependency licence policy
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  dependency-licences:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the target ref
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Prepare report directory
+        run: mkdir -p .license-scan
+
+      - name: Inventory version-specific dependency licences
+        id: inventory
+        continue-on-error: true
+        uses: docker://ghcr.io/google/osv-scanner@sha256:5116601dedc01c1c580eb92371883ec052fc4c13c3fbc109d621a63ac416d475
+        with:
+          args: >-
+            scan source
+            --recursive
+            --all-packages
+            --licenses
+            --format=json
+            --output-file=/github/workspace/.license-scan/osv.json
+            /github/workspace
+
+      - name: Apply deployment-context policy
+        id: policy
+        continue-on-error: true
+        run: python3 scripts/license_policy.py
+
+      - name: Add report to the job summary
+        if: always() && hashFiles('.license-scan/report.md') != ''
+        run: cat .license-scan/report.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the complete classification
+        if: always() && hashFiles('.license-scan/results.json') != ''
+        uses: actions/upload-artifact@v7
+        with:
+          name: dependency-licence-classification
+          path: .license-scan/
+          include-hidden-files: true
+          retention-days: 30
+
+      - name: Comment the pull request diff
+        if: always() && github.event_name == 'pull_request' && hashFiles('.license-scan/report.md') != ''
+        continue-on-error: true
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const fs = require('fs');
+            const marker = '<!-- conductor-dependency-licence-policy -->';
+            const body = `${marker}\n${fs.readFileSync('.license-scan/report.md', 'utf8')}`;
+            const { owner, repo } = context.repo;
+            const issue_number = context.issue.number;
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner, repo, issue_number, per_page: 100
+            });
+            const previous = comments.find(
+              comment => comment.user?.type === 'Bot' && comment.body?.includes(marker)
+            );
+            if (previous) {
+              await github.rest.issues.updateComment({
+                owner, repo, comment_id: previous.id, body
+              });
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number, body });
+            }
+
+      - name: Enforce the result
+        if: steps.policy.outcome == 'failure'
+        run: exit 1
